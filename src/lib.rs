@@ -20,6 +20,107 @@ use render::markdown::document_to_markdown;
 
 use std::path::Path;
 
+/// Reusable document converter.
+///
+/// The default converter has the same behavior as the crate-level conversion
+/// functions. Build a configured converter with [`Converter::builder`] when a
+/// conversion capability needs reusable initialization.
+///
+/// Marked non-exhaustive so optional features can add fields without
+/// breaking construction in downstream crates.
+#[non_exhaustive]
+pub struct Converter;
+
+impl Converter {
+    /// Create a converter with the default capabilities.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Start building a configured converter.
+    pub fn builder() -> ConverterBuilder {
+        ConverterBuilder::new()
+    }
+
+    /// Convert a document file to Markdown. The format is detected from the
+    /// file content ([`Format::from_bytes`]); the extension is the fallback for
+    /// signature-less formats (CSV) and unrecognizable containers.
+    pub fn to_markdown(&self, path: impl AsRef<Path>) -> Result<String, ConvertError> {
+        let path = path.as_ref();
+        let bytes = std::fs::read(path)?;
+        let Some(format) = Format::from_bytes(&bytes).or_else(|| Format::from_path(path)) else {
+            return Err(ConvertError::Unsupported(format!(
+                "unrecognized file content and extension: {}",
+                path.display()
+            )));
+        };
+        self.to_markdown_bytes(&bytes, format)
+    }
+
+    /// Convert an in-memory document to Markdown. Pass a [`Format`] to select
+    /// the parser, or `None` to detect it from the content
+    /// ([`Format::from_bytes`]), which signature-less formats (CSV) have to
+    /// name explicitly.
+    pub fn to_markdown_bytes(
+        &self,
+        bytes: &[u8],
+        format: impl Into<Option<Format>>,
+    ) -> Result<String, ConvertError> {
+        let format = resolve_format(bytes, format.into())?;
+        // PDFs convert to Markdown directly (pdf-inspector) without passing
+        // through the document model.
+        if format == Format::Pdf {
+            return formats::pdf::to_markdown(bytes);
+        }
+        Ok(document_to_markdown(&self.to_document(bytes, format)?))
+    }
+
+    /// Parse an in-memory document into the document model. Pass a [`Format`]
+    /// to select the parser, or `None` to detect it from the content.
+    ///
+    /// Unsupported for [`Format::Pdf`]: PDF conversion produces Markdown
+    /// directly and has no document-model form; use
+    /// [`Converter::to_markdown_bytes`].
+    pub fn to_document(
+        &self,
+        bytes: &[u8],
+        format: impl Into<Option<Format>>,
+    ) -> Result<model::Document, ConvertError> {
+        formats::parse(bytes, resolve_format(bytes, format.into())?)
+    }
+}
+
+impl Default for Converter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Builder for a reusable [`Converter`].
+///
+/// Marked non-exhaustive so optional features can add fields without
+/// breaking construction in downstream crates.
+#[non_exhaustive]
+pub struct ConverterBuilder;
+
+impl ConverterBuilder {
+    /// Create a converter builder with the default capabilities.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Build the converter.
+    pub fn build(self) -> Converter {
+        Converter::new()
+    }
+}
+
+impl Default for ConverterBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Input format. Selects the parser; container variants that share a parser
 /// (docm, xlsm, ...) map onto these via [`Format::from_bytes`] or
 /// [`Format::from_extension`].
@@ -98,15 +199,7 @@ impl Format {
 /// file content ([`Format::from_bytes`]); the extension is the fallback for
 /// signature-less formats (CSV) and unrecognizable containers.
 pub fn to_markdown(path: impl AsRef<Path>) -> Result<String, ConvertError> {
-    let path = path.as_ref();
-    let bytes = std::fs::read(path)?;
-    let Some(format) = Format::from_bytes(&bytes).or_else(|| Format::from_path(path)) else {
-        return Err(ConvertError::Unsupported(format!(
-            "unrecognized file content and extension: {}",
-            path.display()
-        )));
-    };
-    to_markdown_bytes(&bytes, format)
+    Converter::new().to_markdown(path)
 }
 
 /// Convert an in-memory document to Markdown. Pass a [`Format`] to select the
@@ -116,13 +209,7 @@ pub fn to_markdown_bytes(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
 ) -> Result<String, ConvertError> {
-    let format = resolve_format(bytes, format.into())?;
-    // PDFs convert to Markdown directly (pdf-inspector) without passing
-    // through the document model.
-    if format == Format::Pdf {
-        return formats::pdf::to_markdown(bytes);
-    }
-    Ok(document_to_markdown(&to_document(bytes, format)?))
+    Converter::new().to_markdown_bytes(bytes, format)
 }
 
 /// Parse an in-memory document into the document model. Pass a [`Format`] to
@@ -134,11 +221,32 @@ pub fn to_document(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
 ) -> Result<model::Document, ConvertError> {
-    formats::parse(bytes, resolve_format(bytes, format.into())?)
+    Converter::new().to_document(bytes, format)
 }
 
 fn resolve_format(bytes: &[u8], format: Option<Format>) -> Result<Format, ConvertError> {
     format.or_else(|| Format::from_bytes(bytes)).ok_or_else(|| {
         ConvertError::Unsupported("unrecognized file content: name the format explicitly".into())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Converter, Format};
+
+    #[test]
+    fn converter_matches_the_free_functions() {
+        let input = br"{\rtf1 reusable converter}";
+        let from_function = super::to_markdown_bytes(input, Format::Rtf).unwrap();
+        let from_converter = Converter::new().to_markdown_bytes(input, Format::Rtf).unwrap();
+        assert_eq!(from_converter, from_function);
+    }
+
+    #[test]
+    fn builder_creates_the_default_converter() {
+        let input = br"{\rtf1 converter builder}";
+        let converter = Converter::builder().build();
+        let markdown = converter.to_markdown_bytes(input, Format::Rtf).unwrap();
+        assert!(markdown.contains("converter builder"));
+    }
 }
