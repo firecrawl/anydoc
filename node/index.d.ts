@@ -196,6 +196,12 @@ export interface ListItem {
   markerLabel?: string
 }
 
+/** Options that customize Markdown rendering. */
+export interface MarkdownOptions {
+  /** Resolved URLs keyed by the string form of `Asset.id`. */
+  assetUrls?: Record<string, string>
+}
+
 /** The marker family a list uses in the source document. */
 export declare const enum MarkerKind {
   bullet = 'bullet',
@@ -263,6 +269,8 @@ export declare function toMarkdown(path: string): Promise<string>
 /**
  * Convert an in-memory document to Markdown. Without a format, it is
  * detected from the content, which signature-less formats (CSV) have to name
- * explicitly.
+ * explicitly. Pass resolved URLs in `options.assetUrls`, keyed by `Asset.id`,
+ * to render embedded images at their original document positions. Missing
+ * mappings keep the default alt-text rendering.
  */
-export declare function toMarkdownBytes(bytes: Uint8Array, format?: Format | undefined | null): Promise<string>
+export declare function toMarkdownBytes(bytes: Uint8Array, format?: Format | undefined | null, options?: MarkdownOptions | undefined | null): Promise<string>

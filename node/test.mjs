@@ -41,6 +41,25 @@ test('toMarkdownBytes detects the format when none is named', async () => {
   assert.match(await toMarkdownBytes(await readFile(CSV), 'csv'), /\| --- \|/)
 })
 
+test('toMarkdownBytes resolves embedded asset URLs in place', async () => {
+  const bytes = await readFile(RICH)
+  const document = await toDocument(bytes, 'docx')
+  const image = document.assets.find((asset) => asset.mediaType === 'image/png')
+  assert.ok(image)
+
+  const legacy = await toMarkdownBytes(bytes, 'docx')
+  assert.equal(await toMarkdownBytes(bytes, 'docx', {}), legacy)
+  assert.match(legacy, /\ntiny dot image\n/)
+
+  const url = 'https://cdn.example/tiny dot.png'
+  const resolved = await toMarkdownBytes(bytes, null, {
+    assetUrls: { [image.id]: url },
+  })
+  assert.match(resolved, /\n!\[tiny dot image\]\(<https:\/\/cdn\.example\/tiny dot\.png>\)\n/)
+  assert.ok(resolved.indexOf('- Ship') < resolved.indexOf('![tiny dot image]'))
+  assert.ok(resolved.indexOf('![tiny dot image]') < resolved.indexOf('Embedded object:'))
+})
+
 test('toDocument exposes the document model', async () => {
   const document = await toDocument(await readFile(OUTLINE), 'docx')
   const heading = document.blocks.find((block) => block.kind === 'heading')

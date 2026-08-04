@@ -8,7 +8,10 @@ mod table;
 #[cfg(test)]
 mod tests;
 
-use crate::model::{Block, Document, Inline, List, MarkerKind, Note, TableKind, inlines_are_empty};
+use crate::MarkdownOptions;
+use crate::model::{
+    AssetId, Block, Document, Inline, List, MarkerKind, Note, TableKind, inlines_are_empty,
+};
 use anchors::{AnchorMap, resolve_anchors};
 use escape::{EscapeOpts, InlineContext, backtick_fence, escape_text};
 use inline::render_inlines;
@@ -35,10 +38,19 @@ type NoteNumbers = HashMap<String, usize>;
 pub(crate) struct Ctx {
     nums: NoteNumbers,
     anchors: AnchorMap,
+    asset_urls: HashMap<AssetId, String>,
 }
 
 pub fn document_to_markdown(doc: &Document) -> String {
-    let rc = Ctx { nums: number_notes(doc), anchors: resolve_anchors(doc) };
+    document_to_markdown_with_options(doc, &MarkdownOptions::default())
+}
+
+pub fn document_to_markdown_with_options(doc: &Document, options: &MarkdownOptions) -> String {
+    let rc = Ctx {
+        nums: number_notes(doc),
+        anchors: resolve_anchors(doc),
+        asset_urls: options.asset_urls.clone(),
+    };
     let mut parts: Vec<String> = doc.blocks.iter().filter_map(|b| render_block(b, &rc)).collect();
     let mut rendered_defs: HashSet<usize> = HashSet::new();
     let mut ordered: Vec<(&Note, usize)> =

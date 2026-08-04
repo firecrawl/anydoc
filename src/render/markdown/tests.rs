@@ -1,7 +1,8 @@
-use super::document_to_markdown;
+use super::{document_to_markdown, document_to_markdown_with_options};
+use crate::MarkdownOptions;
 use crate::model::{
-    AnchorId, Block, Cell, Document, GridBuilder, ImageSource, Inline, LinkTarget, List, ListItem,
-    MarkerKind, Note, NoteKind, Style, Table, TableKind,
+    AnchorId, AssetId, Block, Cell, Document, GridBuilder, ImageSource, Inline, LinkTarget, List,
+    ListItem, MarkerKind, Note, NoteKind, Style, Table, TableKind,
 };
 
 fn doc(blocks: Vec<Block>) -> String {
@@ -469,6 +470,44 @@ fn image_alt_brackets_and_backslash_escaped() {
         source: ImageSource::External("https://e.com/i.png".into()),
     }])]);
     assert_eq!(md, "![a\\[b\\]c\\\\](https://e.com/i.png)\n");
+}
+
+#[test]
+fn embedded_image_without_url_keeps_alt_text() {
+    let document = Document {
+        blocks: vec![Block::Paragraph(vec![Inline::Image {
+            alt: "diagram".into(),
+            source: ImageSource::Asset(AssetId(0)),
+        }])],
+        notes: Vec::new(),
+        assets: Vec::new(),
+    };
+
+    assert_eq!(document_to_markdown(&document), "diagram\n");
+    assert_eq!(
+        document_to_markdown_with_options(&document, &MarkdownOptions::default()),
+        "diagram\n"
+    );
+}
+
+#[test]
+fn embedded_image_with_url_renders_in_place() {
+    let document = Document {
+        blocks: vec![Block::Paragraph(vec![
+            Inline::plain("before "),
+            Inline::Image { alt: "a[b]".into(), source: ImageSource::Asset(AssetId(7)) },
+            Inline::plain(" after"),
+        ])],
+        notes: Vec::new(),
+        assets: Vec::new(),
+    };
+    let mut options = MarkdownOptions::default();
+    options.asset_urls.insert(AssetId(7), "https://cdn.example/a b.png".into());
+
+    assert_eq!(
+        document_to_markdown_with_options(&document, &options),
+        "before ![a\\[b\\]](<https://cdn.example/a b.png>) after\n"
+    );
 }
 
 #[test]
