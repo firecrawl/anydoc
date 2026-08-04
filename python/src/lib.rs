@@ -196,6 +196,7 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<document::Cell>()?;
     m.add_class::<document::CellSlot>()?;
     m.add_class::<document::Document>()?;
+    m.add_class::<document::DocumentMeta>()?;
     m.add_class::<document::ImageSource>()?;
     m.add_class::<document::Inline>()?;
     m.add_class::<document::LinkTarget>()?;

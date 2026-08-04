@@ -2,7 +2,10 @@
 source: tests/snapshots.rs
 expression: output
 ---
-# Cascade Book
+---
+title: "Cascade Book"
+language: "en"
+---
 
 # Sheet A Chapter
 

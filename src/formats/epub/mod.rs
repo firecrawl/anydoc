@@ -2,7 +2,7 @@
 //! chapter-scoped anchors so intra-book navigation survives.
 
 use crate::error::ConvertError;
-use crate::model::{AnchorId, Block, Document, ImageSource, Inline, LinkTarget};
+use crate::model::{AnchorId, Block, Document, DocumentMeta, ImageSource, Inline, LinkTarget};
 use crate::package::xml::Element;
 use crate::package::{Package, path};
 use crate::shared::assets::{AssetSink, media_type_for};
@@ -25,11 +25,11 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let opf = pkg.borrow_mut().required_xml_part(&opf_path)?;
 
     let mut doc = Document::default();
-    if let Some(title) = opf.descendants_any("title").next().map(|t| t.text()) {
-        let title = title.trim().to_string();
-        if !title.is_empty() {
-            doc.blocks.push(Block::heading(1, vec![Inline::plain(title)]));
-        }
+    // Dublin Core metadata becomes document-level metadata (rendered as
+    // front matter), not a body heading: most books already carry their own
+    // title page in the content.
+    if let Some(metadata) = opf.descendants_any("metadata").next() {
+        doc.meta = parse_metadata(metadata);
     }
 
     let mut manifest: HashMap<String, (String, String)> = HashMap::new();
@@ -98,6 +98,49 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
 
     doc.assets = std::mem::take(&mut assets.borrow_mut().assets);
     Ok(doc)
+}
+
+/// Dublin Core metadata from the OPF `<metadata>` element. Reads descendants,
+/// not just children, so EPUB2's `<metadata><dc-metadata><dc:title>…` nesting
+/// is covered; namespaces vary across producers, so matching is by local name.
+fn parse_metadata(metadata: &Element) -> DocumentMeta {
+    let text_of = |e: &Element| {
+        let t = e.text();
+        let t = t.trim();
+        if t.is_empty() { None } else { Some(t.to_string()) }
+    };
+    let first = |local: &str| metadata.descendants_any(local).find_map(&text_of);
+
+    // Titles keyed by id, plus the first in document order as the fallback.
+    let mut titles_by_id: HashMap<&str, String> = HashMap::new();
+    let mut first_title = None;
+    for t in metadata.descendants_any("title") {
+        let Some(text) = text_of(t) else { continue };
+        if let Some(id) = t.attr_any("id") {
+            titles_by_id.insert(id, text.clone());
+        }
+        first_title.get_or_insert(text);
+    }
+    // EPUB3 marks the main title through a refinement pointing at its id:
+    // `<meta property="title-type" refines="#id">main</meta>`.
+    let main_title = metadata.descendants_any("meta").find_map(|m| {
+        if m.attr_any("property") != Some("title-type") || m.text().trim() != "main" {
+            return None;
+        }
+        let refines = m.attr_any("refines")?;
+        titles_by_id.get(refines.strip_prefix('#').unwrap_or(refines)).cloned()
+    });
+
+    DocumentMeta {
+        title: main_title.or(first_title),
+        // `dc:creator` may repeat; keep them all in document order.
+        authors: metadata.descendants_any("creator").filter_map(&text_of).collect(),
+        // `dc:date` may repeat in EPUB2 (opf:event variants); take the first.
+        language: first("language"),
+        date: first("date"),
+        publisher: first("publisher"),
+        description: first("description"),
+    }
 }
 
 /// A chapter's CSS cascade: its linked stylesheets and inline `<style>`

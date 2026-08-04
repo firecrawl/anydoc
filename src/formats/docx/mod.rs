@@ -8,7 +8,7 @@ mod numbering;
 mod styles;
 
 use crate::error::ConvertError;
-use crate::model::{Document, Note, NoteKind};
+use crate::model::{Document, DocumentMeta, Note, NoteKind};
 use crate::package::Package;
 use crate::package::relationships::{Relationships, read_rels, rel_type, rels_part_for};
 use crate::package::xml::ns;
@@ -103,7 +103,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     }
 
     let assets = std::mem::take(&mut assets.borrow_mut().assets);
-    Ok(Document { blocks, notes, assets })
+    Ok(Document { meta: DocumentMeta::default(), blocks, notes, assets })
 }
 
 /// Path of a typed related part, resolved against the main part; falls back

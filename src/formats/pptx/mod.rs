@@ -7,8 +7,8 @@ mod cascade;
 
 use crate::error::ConvertError;
 use crate::model::{
-    Block, Cell, Document, GridBuilder, ImageSource, Inline, LinkTarget, Style, TableKind,
-    inlines_are_empty,
+    Block, Cell, Document, DocumentMeta, GridBuilder, ImageSource, Inline, LinkTarget, Style,
+    TableKind, inlines_are_empty,
 };
 use crate::package::relationships::{
     RelTarget, Relationships, TargetMode, read_rels, rel_target_bytes, rel_type, rels_part_for,
@@ -212,7 +212,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     }
 
     let assets = std::mem::take(&mut assets.borrow_mut().assets);
-    Ok(Document { blocks, notes: Vec::new(), assets })
+    Ok(Document { meta: DocumentMeta::default(), blocks, notes: Vec::new(), assets })
 }
 
 fn rel_target_of_type(rels: &Relationships, base: &str, rel_type: &str) -> Option<String> {

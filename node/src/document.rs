@@ -7,11 +7,24 @@ use anydoc::model;
 
 #[napi(object)]
 pub struct Document {
+    /// Document-level metadata; every field is absent when the source names none.
+    pub meta: DocumentMeta,
     pub blocks: Vec<Block>,
     /// Footnote and endnote bodies, referenced from text by a `noteRef`
     /// inline.
     pub notes: Vec<Note>,
     pub assets: Vec<Asset>,
+}
+
+#[napi(object)]
+pub struct DocumentMeta {
+    pub title: Option<String>,
+    /// Authors, in source order.
+    pub authors: Vec<String>,
+    pub language: Option<String>,
+    pub date: Option<String>,
+    pub publisher: Option<String>,
+    pub description: Option<String>,
 }
 
 #[napi(string_enum)]
@@ -454,9 +467,23 @@ impl From<model::Asset> for Asset {
 impl From<model::Document> for Document {
     fn from(document: model::Document) -> Self {
         Document {
+            meta: document.meta.into(),
             blocks: blocks(document.blocks),
             notes: document.notes.into_iter().map(Note::from).collect(),
             assets: document.assets.into_iter().map(Asset::from).collect(),
+        }
+    }
+}
+
+impl From<model::DocumentMeta> for DocumentMeta {
+    fn from(meta: model::DocumentMeta) -> Self {
+        DocumentMeta {
+            title: meta.title,
+            authors: meta.authors,
+            language: meta.language,
+            date: meta.date,
+            publisher: meta.publisher,
+            description: meta.description,
         }
     }
 }

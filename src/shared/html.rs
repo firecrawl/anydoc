@@ -431,6 +431,7 @@ impl Builder<'_> {
                 self.flush_paragraph();
                 self.blocks.push(Block::Rule);
             }
+            "figure" => self.walk_figure(elem, delta)?,
             name if is_container_tag(name) => {
                 self.push_anchor(elem);
                 if has_block_children(elem) {
@@ -444,6 +445,59 @@ impl Builder<'_> {
             "script" | "style" | "head" | "template" | "noscript" => {}
             _ => self.walk_inline(elem, delta)?,
         }
+        Ok(())
+    }
+
+    /// A `<figure>`, block-level. Its `<figcaption>` is dropped when it merely
+    /// repeats a contained image's `alt` text (a common export shape that would
+    /// otherwise print the caption twice — once as the image's alt text, once
+    /// as the caption); a caption that adds information is kept as its own
+    /// paragraph, with its inline formatting, in source order.
+    fn walk_figure(&mut self, elem: &Element, delta: StyleDelta) -> Result<(), ConvertError> {
+        self.flush_paragraph();
+        self.push_anchor(elem);
+        // Alts of every image the figure contains (descendants, so wrapped
+        // `<a><img></a>` counts), excluding any inside the caption itself.
+        let mut alts: Vec<String> = Vec::new();
+        for child in elem.child_elems() {
+            if child.local != "figcaption" {
+                collect_image_alts(child, &mut alts);
+            }
+        }
+        for node in &elem.children {
+            match node {
+                Node::Elem(e) if e.local == "figcaption" => {
+                    // Honor the caption's own props the way `walk_elem` would:
+                    // `display:none` hides it, and its CSS style applies to the
+                    // kept content.
+                    let props = self.element_props(e);
+                    if props.hidden == Some(true) {
+                        continue;
+                    }
+                    let caption = self.inline_children(e, delta.merge(props.delta))?;
+                    let key = normalize_caption_key(&inlines_to_plain_text(&caption));
+                    let duplicates_image = !key.is_empty() && alts.contains(&key);
+                    if duplicates_image {
+                        continue;
+                    }
+                    // The caption's own `id` stays an anchor target.
+                    let mut para = Vec::new();
+                    if let Some(id) = e.attr_any("id").filter(|i| !i.is_empty()) {
+                        para.push(Inline::Anchor(self.ctx.anchor_id(id)));
+                    }
+                    para.extend(caption);
+                    if keeps_paragraph(&para) {
+                        // Flush the image (an inline run) into its own block
+                        // first, so the kept caption lands after it.
+                        self.flush_paragraph();
+                        self.blocks.push(Block::Paragraph(para));
+                    }
+                }
+                Node::Elem(e) => self.walk_elem(e, delta)?,
+                Node::Text(t) => self.push_text(t, delta),
+            }
+        }
+        self.flush_paragraph();
         Ok(())
     }
 
@@ -721,7 +775,32 @@ fn block_text(block: &Block) -> String {
     }
 }
 
+/// Collect the non-empty `alt` text of every image in the subtree, normalized
+/// for caption comparison.
+fn collect_image_alts(elem: &Element, out: &mut Vec<String>) {
+    if matches!(elem.local.as_str(), "img" | "image")
+        && let Some(alt) = elem.attr_any("alt")
+    {
+        let key = normalize_caption_key(alt);
+        if !key.is_empty() {
+            out.push(key);
+        }
+    }
+    for child in elem.child_elems() {
+        collect_image_alts(child, out);
+    }
+}
+
+/// Normalize text for figure-caption/alt equality: clean, collapse whitespace,
+/// trim, case-fold. The model alt is `clean_text` but not trimmed, and the
+/// renderer trims, so both sides must be normalized the same way here.
+fn normalize_caption_key(text: &str) -> String {
+    collapse_ws(&clean_text(text)).trim().to_ascii_lowercase()
+}
+
 /// Elements that only group other content, walked through transparently.
+/// `figure` is handled by its own arm (see `walk_figure`) and is deliberately
+/// absent here.
 fn is_container_tag(name: &str) -> bool {
     matches!(
         name,
@@ -733,7 +812,6 @@ fn is_container_tag(name: &str) -> bool {
             | "nav"
             | "header"
             | "footer"
-            | "figure"
             | "figcaption"
             | "center"
             | "details"
@@ -750,7 +828,9 @@ fn is_block_tag(name: &str) -> bool {
     is_container_tag(name)
         || matches!(
             name,
-            "p" | "ul"
+            "figure"
+                | "p"
+                | "ul"
                 | "ol"
                 | "table"
                 | "blockquote"
@@ -911,5 +991,70 @@ mod tests {
         assert!(matches!(&t.grid[0][0], CellSlot::Origin(c) if c.row_span == 2));
         assert!(matches!(t.grid[1][0], CellSlot::Covered { origin_row: 0, origin_col: 0 }));
         assert!(matches!(&t.grid[2][0], CellSlot::Origin(_)), "next group must not be covered");
+    }
+
+    #[test]
+    fn figcaption_repeating_the_image_alt_is_dropped() {
+        // C: a lone image exported as figure+figcaption prints its text twice
+        // otherwise (alt text + caption). Case/space-insensitive match.
+        let out = blocks(
+            r#"<body><figure><img alt="Tiny Dot" src="d.png"/><figcaption>tiny dot</figcaption></figure></body>"#,
+        );
+        assert_eq!(out.len(), 1, "caption must collapse into the image block: {out:?}");
+        assert_eq!(para_text(&out[0]), "Tiny Dot");
+    }
+
+    #[test]
+    fn distinct_figcaption_is_kept_as_its_own_paragraph() {
+        let out = blocks(
+            r#"<body><figure><img alt="tiny dot" src="d.png"/><figcaption>Figure 1: a dot</figcaption></figure></body>"#,
+        );
+        assert_eq!(out.len(), 2, "distinct caption survives after the image: {out:?}");
+        assert_eq!(para_text(&out[0]), "tiny dot");
+        assert_eq!(para_text(&out[1]), "Figure 1: a dot");
+    }
+
+    #[test]
+    fn figcaption_with_empty_alt_is_never_dropped() {
+        // An empty alt is not in the comparison set, so the caption is the
+        // only text and must be kept.
+        let out = blocks(
+            r#"<body><figure><img alt="" src="d.png"/><figcaption>the caption</figcaption></figure></body>"#,
+        );
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(para_text(&out[0]), "the caption");
+    }
+
+    #[test]
+    fn hidden_figcaption_renders_nothing() {
+        // `display:none` on the caption hides it even when it differs from the
+        // image alt (so it would otherwise be kept).
+        let out = blocks(
+            r#"<body><figure><img alt="x" src="d.png"/><figcaption style="display:none">hidden cap</figcaption></figure></body>"#,
+        );
+        assert_eq!(out.len(), 1, "hidden caption must not render: {out:?}");
+        assert_eq!(para_text(&out[0]), "x");
+    }
+
+    #[test]
+    fn kept_figcaption_keeps_its_own_styling() {
+        // A distinct caption's own CSS applies to its content.
+        let out = blocks(
+            r#"<body><figure><img alt="x" src="d.png"/><figcaption style="font-weight:bold">Bold cap</figcaption></figure></body>"#,
+        );
+        assert_eq!(out.len(), 2, "{out:?}");
+        let Block::Paragraph(inlines) = &out[1] else { panic!("{out:?}") };
+        assert!(first_text_style(inlines).bold, "caption CSS bold must apply");
+    }
+
+    #[test]
+    fn wrapped_image_alt_still_dedupes_the_caption() {
+        // The image is nested in a link, so its alt is a figure descendant,
+        // not a direct child.
+        let out = blocks(
+            r#"<body><figure><a href="u"><img alt="a dot" src="d.png"/></a><figcaption>A DOT</figcaption></figure></body>"#,
+        );
+        assert_eq!(out.len(), 1, "caption matching a wrapped image's alt must drop: {out:?}");
+        assert_eq!(para_text(&out[0]), "a dot");
     }
 }

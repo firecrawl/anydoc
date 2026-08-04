@@ -82,6 +82,8 @@ export declare const enum CellSlotKind {
 }
 
 export interface Document {
+  /** Document-level metadata; every field is absent when the source names none. */
+  meta: DocumentMeta
   blocks: Array<Block>
   /**
    * Footnote and endnote bodies, referenced from text by a `noteRef`
@@ -89,6 +91,16 @@ export interface Document {
    */
   notes: Array<Note>
   assets: Array<Asset>
+}
+
+export interface DocumentMeta {
+  title?: string
+  /** Authors, in source order. */
+  authors: Array<string>
+  language?: string
+  date?: string
+  publisher?: string
+  description?: string
 }
 
 /**

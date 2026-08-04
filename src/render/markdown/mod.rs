@@ -8,7 +8,9 @@ mod table;
 #[cfg(test)]
 mod tests;
 
-use crate::model::{Block, Document, Inline, List, MarkerKind, Note, TableKind, inlines_are_empty};
+use crate::model::{
+    Block, Document, DocumentMeta, Inline, List, MarkerKind, Note, TableKind, inlines_are_empty,
+};
 use anchors::{AnchorMap, resolve_anchors};
 use escape::{EscapeOpts, InlineContext, backtick_fence, escape_text};
 use inline::render_inlines;
@@ -70,6 +72,66 @@ pub fn document_to_markdown(doc: &Document) -> String {
     if !out.is_empty() {
         out.push('\n');
     }
+    match render_front_matter(&doc.meta) {
+        Some(fm) if out.is_empty() => format!("{fm}\n"),
+        Some(fm) => format!("{fm}\n\n{out}"),
+        None => out,
+    }
+}
+
+/// A YAML front-matter block for the document's metadata, or `None` when it
+/// carries none. The block is `---`-fenced; every value is quoted and escaped
+/// so titles with colons, quotes, or leading dashes stay valid YAML.
+fn render_front_matter(meta: &DocumentMeta) -> Option<String> {
+    if meta.is_empty() {
+        return None;
+    }
+    fn field(fm: &mut String, key: &str, value: &str) {
+        fm.push_str(&format!("{key}: {}\n", yaml_quote(value)));
+    }
+    let mut fm = String::from("---\n");
+    if let Some(title) = &meta.title {
+        field(&mut fm, "title", title);
+    }
+    match meta.authors.as_slice() {
+        [] => {}
+        [one] => field(&mut fm, "author", one),
+        many => {
+            fm.push_str("author:\n");
+            for author in many {
+                fm.push_str(&format!("  - {}\n", yaml_quote(author)));
+            }
+        }
+    }
+    if let Some(language) = &meta.language {
+        field(&mut fm, "language", language);
+    }
+    if let Some(date) = &meta.date {
+        field(&mut fm, "date", date);
+    }
+    if let Some(publisher) = &meta.publisher {
+        field(&mut fm, "publisher", publisher);
+    }
+    if let Some(description) = &meta.description {
+        field(&mut fm, "description", description);
+    }
+    fm.push_str("---");
+    Some(fm)
+}
+
+/// Quote a metadata value as a YAML double-quoted scalar: collapse to a single
+/// line, then escape `\` and `"`.
+fn yaml_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for c in value.split_whitespace().collect::<Vec<_>>().join(" ").chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
     out
 }
 

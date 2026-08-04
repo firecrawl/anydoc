@@ -5,7 +5,7 @@ mod table;
 mod text;
 
 use crate::error::ConvertError;
-use crate::model::{Block, Document, Inline, inlines_are_empty};
+use crate::model::{Block, Document, DocumentMeta, Inline, inlines_are_empty};
 use crate::package::Package;
 use crate::package::xml::{Element, ns};
 use crate::shared::assets::AssetSink;
@@ -53,7 +53,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
 
     let notes = ctx.notes.into_inner();
     let assets = std::mem::take(&mut assets.borrow_mut().assets);
-    Ok(Document { blocks, notes, assets })
+    Ok(Document { meta: DocumentMeta::default(), blocks, notes, assets })
 }
 
 /// Encrypted ODF packages carry `manifest:encryption-data` elements on file

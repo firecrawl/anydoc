@@ -9,7 +9,7 @@
 mod styletext;
 
 use crate::error::ConvertError;
-use crate::model::{Block, Document, Inline, Style, inlines_are_empty};
+use crate::model::{Block, Document, DocumentMeta, Inline, Style, inlines_are_empty};
 use crate::package::limits;
 use crate::shared::binary::{get_u32, read_ole_stream};
 use crate::shared::delta::{StyleDelta, rebase_emphasis};
@@ -48,7 +48,12 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         return Err(ConvertError::Encrypted);
     }
     let assets = collect_pictures(&mut ole)?;
-    Ok(Document { blocks: ex.into_blocks(), notes: Vec::new(), assets })
+    Ok(Document {
+        meta: DocumentMeta::default(),
+        blocks: ex.into_blocks(),
+        notes: Vec::new(),
+        assets,
+    })
 }
 
 /// Retain the deck's embedded pictures from the `Pictures` stream (OfficeArt

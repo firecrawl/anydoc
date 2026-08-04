@@ -867,6 +867,81 @@ or <a href="notes.txt">a relative resource</a>.</p>
 
 
 # ---------------------------------------------------------------------------
+# Handmade EPUB: Dublin Core metadata -> front matter (A). Exercises EPUB3
+# main-title refinement, repeated dc:creator, and a repeated dc:date.
+
+def metadata_epub():
+    ch1 = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Front</title></head><body>
+<h1>The Real Title</h1>
+<p>The book carries its own title page, which stays in the body.</p>
+</body></html>"""
+    opf = """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:identifier id="uid">urn:uuid:00000000-0000-0000-0000-00000000e1a7</dc:identifier>
+<dc:title id="sub">A Subtitle That Must Not Win</dc:title>
+<dc:title id="main">The Main Title</dc:title>
+<meta refines="#main" property="title-type">main</meta>
+<dc:creator>Ada Lovelace</dc:creator>
+<dc:creator>Grace Hopper</dc:creator>
+<dc:language>en</dc:language>
+<dc:date opf:event="creation" xmlns:opf="http://www.idpf.org/2007/opf">2019-01-01</dc:date>
+<dc:date opf:event="publication" xmlns:opf="http://www.idpf.org/2007/opf">2020-02-02</dc:date>
+<dc:publisher>Analytical Press</dc:publisher>
+</metadata>
+<manifest>
+<item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+</manifest>
+<spine><itemref idref="c1"/></spine>
+</package>"""
+    container = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"""
+    write_zip(OUT / "epub" / "handmade-metadata.epub", [
+        ("META-INF/container.xml", container),
+        ("OEBPS/content.opf", opf),
+        ("OEBPS/ch1.xhtml", ch1),
+    ], mimetype_first="application/epub+zip")
+
+
+# ---------------------------------------------------------------------------
+# Handmade EPUB: figure/figcaption caption dedupe (C)
+
+def figure_epub():
+    ch1 = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Figures</title></head><body>
+<h1>Figure Chapter</h1>
+<figure><img src="dot.png" alt="a tiny dot"/><figcaption>A Tiny Dot</figcaption></figure>
+<figure><img src="dot.png" alt="a tiny dot"/><figcaption>Figure 2: the dot up close</figcaption></figure>
+<figure><a href="dot.png"><img src="dot.png" alt="wrapped dot"/></a><figcaption>wrapped dot</figcaption></figure>
+</body></html>"""
+    opf = """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:identifier id="uid">urn:uuid:00000000-0000-0000-0000-0000000f19u7</dc:identifier>
+<dc:title>Figure Book</dc:title><dc:language>en</dc:language>
+</metadata>
+<manifest>
+<item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+<item id="dot" href="dot.png" media-type="image/png"/>
+</manifest>
+<spine><itemref idref="c1"/></spine>
+</package>"""
+    container = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"""
+    write_zip(OUT / "epub" / "handmade-figure.epub", [
+        ("META-INF/container.xml", container),
+        ("OEBPS/content.opf", opf),
+        ("OEBPS/ch1.xhtml", ch1),
+        ("OEBPS/dot.png", DOT_PNG),
+    ], mimetype_first="application/epub+zip")
+
+
+# ---------------------------------------------------------------------------
 # R17a: merged ranges in spreadsheets become spanning grid cells
 
 def merged_xlsx():
@@ -1749,6 +1824,8 @@ def main():
     defaults_odf()
     merged_xlsx()
     features_epub()
+    figure_epub()
+    metadata_epub()
     bin_rtf()
     csvs()
     malformed()

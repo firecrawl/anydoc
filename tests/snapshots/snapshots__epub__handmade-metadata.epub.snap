@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+---
+title: "The Main Title"
+author:
+  - "Ada Lovelace"
+  - "Grace Hopper"
+language: "en"
+date: "2019-01-01"
+publisher: "Analytical Press"
+---
+
+# The Real Title
+
+The book carries its own title page, which stays in the body.
