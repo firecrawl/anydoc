@@ -22,7 +22,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         .delimiter(delimiter)
         .from_reader(text.as_bytes());
 
-    let mut rows: Vec<Vec<Cell>> = Vec::new();
+    let mut records: Vec<Vec<String>> = Vec::new();
     for record in reader.records() {
         let record = match record {
             Ok(r) => r,
@@ -31,17 +31,58 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
                 continue;
             }
         };
-        let cells: Vec<Cell> =
-            record.iter().map(|f| Cell::from_inlines(vec![Inline::plain(clean_text(f))])).collect();
-        rows.push(cells);
+        records.push(record.iter().map(clean_text).collect());
     }
 
+    let header_rows = if first_row_is_header(&records) { 1 } else { 0 };
+    let rows: Vec<Vec<Cell>> = records
+        .into_iter()
+        .map(|r| r.into_iter().map(|f| Cell::from_inlines(vec![Inline::plain(f)])).collect())
+        .collect();
+
     let mut doc = Document::default();
-    let table = Table::from_rows(rows, 0, TableKind::Data);
+    let table = Table::from_rows(rows, header_rows, TableKind::Data);
     if !table.grid.is_empty() {
         doc.blocks.push(Block::Table(table));
     }
     Ok(doc)
+}
+
+/// Whether the first record reads as a header row. CSV carries no header
+/// semantics, so this is a heuristic — but an asymmetric one: promoting a
+/// data row only restyles it (the row still renders, in the header
+/// position), while not promoting a real header leaves a blank header row
+/// with the column names down in the table body. So the test asks only that
+/// the first row *look like* labels: at least two columns, as wide as any
+/// record, and every field non-empty, non-numeric, and distinct. Files that
+/// plainly have no header — numeric first rows, ragged or repeated fields,
+/// a single record — keep today's headerless output.
+fn first_row_is_header(records: &[Vec<String>]) -> bool {
+    let [first, rest @ ..] = records else { return false };
+    if rest.is_empty() || first.len() < 2 {
+        return false;
+    }
+    if rest.iter().any(|r| r.len() > first.len()) {
+        return false; // a header names every column
+    }
+    let mut seen = std::collections::HashSet::new();
+    first.iter().all(|f| {
+        let t = f.trim();
+        !t.is_empty() && !is_numeric_like(t) && seen.insert(t.to_lowercase())
+    })
+}
+
+/// Numbers as data files spell them: plain floats plus a single
+/// decimal-comma variant (`1,5`).
+fn is_numeric_like(field: &str) -> bool {
+    if field.parse::<f64>().is_ok() {
+        return true;
+    }
+    let mut commas = field.split(',');
+    match (commas.next(), commas.next(), commas.next()) {
+        (Some(a), Some(b), None) => format!("{a}.{b}").parse::<f64>().is_ok(),
+        _ => false,
+    }
 }
 
 fn decode(bytes: &[u8]) -> Cow<'_, str> {
@@ -145,5 +186,52 @@ mod tests {
         }
         let doc = parse(&bytes).unwrap();
         assert!(!doc.blocks.is_empty());
+    }
+
+    fn header_rows_of(doc: &Document) -> usize {
+        let Block::Table(t) = &doc.blocks[0] else { panic!() };
+        t.header_rows
+    }
+
+    #[test]
+    fn label_like_first_row_is_promoted_to_header() {
+        // The issue's repro: all-text data, so header detection cannot rely
+        // on the body containing numbers.
+        let doc =
+            parse(b"name,role,team\nAlice,Engineer,Platform\nBob,Designer,Product\n").unwrap();
+        assert_eq!(header_rows_of(&doc), 1);
+        // Promotion restyles the first row; nothing is dropped.
+        let Block::Table(t) = &doc.blocks[0] else { panic!() };
+        assert_eq!(t.grid.len(), 3);
+    }
+
+    #[test]
+    fn numeric_first_row_stays_headerless() {
+        let doc = parse(b"1,2,3\n4,5,6\n").unwrap();
+        assert_eq!(header_rows_of(&doc), 0);
+        // Decimal commas inside quoted fields are numbers too.
+        let doc = parse(b"\"1,5\";\"2,5\";x\n\"3,0\";y;z\n").unwrap();
+        assert_eq!(header_rows_of(&doc), 0);
+    }
+
+    #[test]
+    fn repeated_empty_or_short_first_rows_stay_headerless() {
+        // Duplicate labels.
+        let doc = parse(b"a,b,a\n1,2,3\n").unwrap();
+        assert_eq!(header_rows_of(&doc), 0);
+        // An empty field in the first row.
+        let doc = parse(b"a,,c\n1,2,3\n").unwrap();
+        assert_eq!(header_rows_of(&doc), 0);
+        // A first row narrower than the body names no header for column 3.
+        let doc = parse(b"a,b\n1,2,3\n").unwrap();
+        assert_eq!(header_rows_of(&doc), 0);
+    }
+
+    #[test]
+    fn single_record_or_single_column_stays_headerless() {
+        let doc = parse(b"name,role,team\n").unwrap();
+        assert_eq!(header_rows_of(&doc), 0);
+        let doc = parse(b"name\nAlice\nBob\n").unwrap();
+        assert_eq!(header_rows_of(&doc), 0);
     }
 }

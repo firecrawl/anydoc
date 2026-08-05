@@ -2,9 +2,8 @@
 source: tests/snapshots.rs
 expression: output
 ---
-|  |  |  |
-| --- | --- | --- |
 | Kind | Value | Note |
+| --- | --- | --- |
 | Percent | 15.5% | fifteen and a half |
 | Currency | 1234.5 | dollars |
 | Thousands | 9876543 | grouped |
