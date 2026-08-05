@@ -1,13 +1,32 @@
-//! TypeScript definitions for the serialized document model.
+//! TypeScript definitions wasm-bindgen cannot generate on its own.
 //!
-//! `toDocument` returns plain JS objects built with serde, which wasm-bindgen
-//! cannot type on its own; these declarations mirror the shapes produced by
-//! `document.rs` and must be kept in step with it.
+//! `toDocument` returns plain JS objects built with serde, so the declarations
+//! here mirror the shapes produced by `document.rs` and must be kept in step
+//! with it. The `code` on a thrown error is out of wasm-bindgen's reach the
+//! same way; it mirrors `ConvertError::code` in the crate.
 
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPESCRIPT: &str = r#"
+/**
+ * `code` on the `Error` a failed conversion throws. Conversion fails only
+ * when no meaningful Markdown could be produced; producer quirks are
+ * recovered or skipped instead. The crate's `io` code has no wasm
+ * counterpart: there is no filesystem to read from.
+ */
+export type ConvertErrorCode =
+  /** Unknown format, or one that cannot be converted (an image-only PDF). */
+  | 'unsupported'
+  /** Structurally unusable: no meaningful content could be extracted. */
+  | 'malformed'
+  /** Encrypted or password-protected. */
+  | 'encrypted'
+  /** Crossed a fixed safety limit (decompression, nesting, node count). */
+  | 'resourceLimit'
+  /** A part required for any meaningful output is absent. */
+  | 'missingPart'
+
 export interface Document {
   blocks: Array<Block>
   /**

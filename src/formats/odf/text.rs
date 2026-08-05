@@ -10,7 +10,7 @@ use crate::model::{
 use crate::package::Package;
 use crate::package::xml::{Element, Node, ns};
 use crate::shared::assets::{AssetSink, media_type_for};
-use crate::shared::delta::StyleDelta;
+use crate::shared::delta::{StyleDelta, rebase_emphasis};
 use crate::shared::text::{clean_text, collapse_ws};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -71,6 +71,7 @@ fn parse_block_elem(
                 let (inlines, boxes) = parse_inline_content(elem, ctx)?;
                 if !inlines_are_empty(&inlines) {
                     let mut content = inlines;
+                    rebase_emphasis(&mut content, paragraph_base(elem, ctx)?.resolve());
                     // ODF outline links target headings by their text; carry
                     // it as the heading's anchor id (without the number).
                     let anchor = Some(crate::model::inlines_to_plain_text(&content));
@@ -270,12 +271,17 @@ fn parse_inline_content(
     elem: &Element,
     ctx: &Ctx,
 ) -> Result<(Vec<Inline>, Vec<Block>), ConvertError> {
-    // An unstyled paragraph still sits on the family's default style.
-    let base = ctx.styles.delta("paragraph", elem.attr(ns::TEXT, "style-name").unwrap_or(""))?;
+    let base = paragraph_base(elem, ctx)?;
     let mut out = Vec::new();
     let mut boxes = Vec::new();
     walk_inlines(elem, ctx, base, &mut out, &mut boxes)?;
     Ok((out, boxes))
+}
+
+/// The style a paragraph's runs cascade from. An unstyled paragraph still sits
+/// on the family's default style.
+fn paragraph_base(elem: &Element, ctx: &Ctx) -> Result<StyleDelta, ConvertError> {
+    ctx.styles.delta("paragraph", elem.attr(ns::TEXT, "style-name").unwrap_or(""))
 }
 
 fn walk_inlines(

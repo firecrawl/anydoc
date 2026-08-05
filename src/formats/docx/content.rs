@@ -9,7 +9,9 @@ use crate::model::{
 use crate::package::Package;
 use crate::package::relationships::{RelTarget, Relationships, TargetMode, rel_target_bytes};
 use crate::package::xml::{Element, ns};
+use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
+use crate::shared::header::resolve_header_rows;
 use crate::shared::list::{ListEntry, ListKey, flush_list};
 use crate::shared::text::{clean_text, is_xml_space};
 use std::cell::RefCell;
@@ -87,6 +89,8 @@ pub(super) enum ParaKind {
         /// separator), prepended to the content: headings have no native
         /// numbering in the output.
         label: Option<String>,
+        /// The heading style's own emphasis, subtracted from its runs.
+        base: Style,
     },
     ListItem {
         ilvl: usize,
@@ -164,10 +168,11 @@ fn emit_paragraph(
             item.extend(item_blocks);
             list_run.push(ListEntry { level: ilvl, key, number, label, blocks: item });
         }
-        ParaKind::Heading { level, label } => {
+        ParaKind::Heading { level, label, base } => {
             flush_list(blocks, list_run);
             let (mut content, after) = split_pieces(pieces);
             if !inlines_are_empty(&content) {
+                rebase_emphasis(&mut content, base);
                 if let Some(label) = label {
                     content.insert(0, Inline::Text { text: label, style: Style::PLAIN });
                 }
@@ -209,6 +214,14 @@ fn parse_paragraph(p: &Element, ctx: &Ctx) -> Result<(ParaKind, Vec<Piece>), Con
     // heading advances its sequence and keeps its number visible.
     let numbering = resolve_numbering(ppr, pstyle_id, ctx)?;
 
+    // Toggle properties: the paragraph style chain's true-parity flips the
+    // docDefaults base. Headings use the same resolution as body text.
+    let parity = match pstyle_id {
+        Some(id) => ctx.styles.run_toggles(id)?,
+        None => Default::default(),
+    };
+    let paragraph_level = parity.apply_over(ctx.styles.doc_defaults);
+
     let kind = match heading {
         Some(level) => {
             let label = match &numbering {
@@ -217,21 +230,13 @@ fn parse_paragraph(p: &Element, ctx: &Ctx) -> Result<(ParaKind, Vec<Piece>), Con
                 }
                 _ => None,
             };
-            ParaKind::Heading { level, label }
+            ParaKind::Heading { level, label, base: paragraph_level }
         }
         None => match numbering {
             Some((ilvl, key, number, label)) => ParaKind::ListItem { ilvl, key, number, label },
             None => ParaKind::Plain,
         },
     };
-
-    // Toggle properties: the paragraph style chain's true-parity flips the
-    // docDefaults base. Headings use the same resolution as body text.
-    let parity = match pstyle_id {
-        Some(id) => ctx.styles.run_toggles(id)?,
-        None => Default::default(),
-    };
-    let paragraph_level = parity.apply_over(ctx.styles.doc_defaults);
 
     let mut walker = InlineWalker::new(ctx, paragraph_level);
     walker.walk(p)?;
@@ -451,11 +456,11 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
                     }
                 }
                 "tab" | "ptab" => self.push(Inline::Text { text: " ".into(), style: Style::PLAIN }),
-                "br" => {
-                    if child.attr(ns::W, "type") != Some("page") {
-                        self.push(Inline::LineBreak);
-                    }
-                }
+                // Markdown has no pages or columns, but every w:br still
+                // separates the runs around it: dropping a page break
+                // outright would join the words on either side. One left at
+                // the end of a paragraph is trimmed when the block renders.
+                "br" => self.push(Inline::LineBreak),
                 "cr" => self.push(Inline::LineBreak),
                 "footnoteReference" => {
                     if let Some(id) = child.attr(ns::W, "id") {
@@ -766,7 +771,7 @@ pub(super) fn parse_table(tbl: &Element, ctx: &Ctx) -> Result<Vec<Block>, Conver
     if table.grid.is_empty() {
         return Ok(Vec::new());
     }
-    table.header_rows = header_rows;
+    table.header_rows = resolve_header_rows(&table, header_rows);
     Ok(vec![Block::Table(table)])
 }
 

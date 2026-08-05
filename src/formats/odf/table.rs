@@ -13,7 +13,7 @@ use crate::formats::odf::text::{Ctx, parse_container};
 use crate::model::{Block, Cell, GridBuilder, Inline, TableKind};
 use crate::package::limits;
 use crate::package::xml::{Element, ns};
-use crate::shared::header::detect_header_rows;
+use crate::shared::header::resolve_header_rows;
 
 pub fn parse_table(elem: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError> {
     let mut state = TableState {
@@ -29,7 +29,7 @@ pub fn parse_table(elem: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError
     if table.grid.is_empty() {
         return Ok(Vec::new());
     }
-    table.header_rows = state.header_rows.min(table.grid.len());
+    table.header_rows = resolve_header_rows(&table, state.header_rows);
     Ok(vec![Block::Table(table)])
 }
 
@@ -403,16 +403,9 @@ pub fn parse_spreadsheet(sheet: &Element, ctx: &Ctx) -> Result<Vec<Block>, Conve
     let mut blocks = Vec::new();
     for table in tables {
         let name = table.attr(ns::TABLE, "name").unwrap_or("");
-        let mut content = parse_table(table, ctx)?;
+        let content = parse_table(table, ctx)?;
         if content.is_empty() {
             continue;
-        }
-        // A declared header row wins; a sheet without one falls back to
-        // detection, like any other spreadsheet.
-        if let Some(Block::Table(t)) = content.first_mut()
-            && t.header_rows == 0
-        {
-            t.header_rows = detect_header_rows(t);
         }
         if multi_sheet {
             blocks.push(Block::heading(2, vec![Inline::plain(name)]));

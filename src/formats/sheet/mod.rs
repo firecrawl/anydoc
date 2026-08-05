@@ -2,7 +2,7 @@
 
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, TableKind};
-use crate::shared::header::detect_header_rows;
+use crate::shared::header::resolve_header_rows;
 use crate::shared::meta;
 use crate::shared::text::clean_text;
 use calamine::{Data, Dimensions, Reader, Sheets, open_workbook_auto_from_rs};
@@ -106,7 +106,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         if table.grid.is_empty() {
             continue;
         }
-        table.header_rows = detect_header_rows(&table);
+        table.header_rows = resolve_header_rows(&table, 0);
         doc.blocks.push(Block::heading(2, vec![Inline::plain(name.clone())]));
         doc.blocks.push(Block::Table(table));
     }

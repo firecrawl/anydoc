@@ -78,6 +78,20 @@ impl From<std::io::Error> for ConvertError {
 }
 
 impl ConvertError {
+    /// Stable, machine-readable name for the variant: what a caller branches
+    /// on, where the `Display` message carries the detail. The Node and wasm
+    /// bindings publish it as `error.code`.
+    pub fn code(&self) -> &'static str {
+        match self {
+            ConvertError::Unsupported(_) => "unsupported",
+            ConvertError::Malformed { .. } => "malformed",
+            ConvertError::Encrypted => "encrypted",
+            ConvertError::ResourceLimit { .. } => "resourceLimit",
+            ConvertError::MissingPart { .. } => "missingPart",
+            ConvertError::Io(_) => "io",
+        }
+    }
+
     pub(crate) fn malformed(detail: impl Into<String>) -> Self {
         ConvertError::Malformed { part: None, detail: detail.into() }
     }
@@ -90,5 +104,24 @@ impl ConvertError {
     /// hard-fail in every context, including optional parts.
     pub(crate) fn is_fatal(&self) -> bool {
         matches!(self, ConvertError::ResourceLimit { .. })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bindings publish these verbatim as `error.code`, so changing one
+    /// breaks every caller that branches on it.
+    #[test]
+    fn codes_name_every_variant() {
+        assert_eq!(ConvertError::Unsupported(String::new()).code(), "unsupported");
+        assert_eq!(ConvertError::malformed("").code(), "malformed");
+        assert_eq!(ConvertError::malformed_part("word/document.xml", "").code(), "malformed");
+        assert_eq!(ConvertError::Encrypted.code(), "encrypted");
+        let limit = ConvertError::ResourceLimit { limit: "max_entry_bytes", detail: String::new() };
+        assert_eq!(limit.code(), "resourceLimit");
+        assert_eq!(ConvertError::MissingPart { part: String::new() }.code(), "missingPart");
+        assert_eq!(ConvertError::Io(std::io::ErrorKind::NotFound.into()).code(), "io");
     }
 }

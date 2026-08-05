@@ -10,6 +10,7 @@ mod tables;
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Note, NoteKind, Style, inlines_are_empty};
 use crate::shared::binary::codepage_encoding;
+use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::field_result;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::text::clean_text;
@@ -134,6 +135,8 @@ struct CharState {
     ls: Option<i32>,
     legacy_list: Option<MarkerKind>,
     outline: Option<u8>,
+    /// Emphasis the paragraph style itself carries, subtracted from headings.
+    style_base: Style,
     suppress: bool,
     capture: Capture,
     note: Option<NoteKind>,
@@ -151,6 +154,7 @@ impl Default for CharState {
             ls: None,
             legacy_list: None,
             outline: None,
+            style_base: Style::PLAIN,
             suppress: false,
             capture: Capture::None,
             note: None,
@@ -623,6 +627,7 @@ impl<'a> Parser<'a> {
                     self.flush_pending();
                     self.state.outline = def.outline;
                     self.state.style = def.delta.apply(self.state.style);
+                    self.state.style_base = self.state.style;
                 }
             }
             "par" | "sect" => {
@@ -641,8 +646,12 @@ impl<'a> Parser<'a> {
                 self.state.ls = None;
                 self.state.legacy_list = None;
                 self.state.outline = None;
+                self.state.style_base = Style::PLAIN;
             }
-            "line" | "lbr" => {
+            // \page and \column break the flow without ending the
+            // paragraph; the page they start is unrepresentable, the word
+            // boundary they carry is not.
+            "line" | "lbr" | "page" | "column" => {
                 self.flush_pending();
                 if !self.state.suppress {
                     self.inlines.push(Inline::LineBreak);
@@ -955,6 +964,7 @@ impl<'a> Parser<'a> {
         if let Some(level) = self.state.outline {
             self.flush_list();
             let mut content = inlines;
+            rebase_emphasis(&mut content, self.state.style_base);
             if let Some((key, _, number, label)) = &entry
                 && key.marker.ordered()
             {
@@ -1092,6 +1102,16 @@ mod tests {
         let Block::List(list) = &doc.blocks[0] else { panic!("{:?}", doc.blocks) };
         assert_eq!(list.items[0].marker_label.as_deref(), Some("1."));
         assert_eq!(list.items[1].marker_label.as_deref(), Some("2."));
+    }
+
+    #[test]
+    fn mid_paragraph_page_and_column_breaks_keep_the_word_boundary() {
+        // \page and \column carry no paragraph mark: without a break of
+        // their own the text on either side would run together.
+        for src in [r"{\rtf1 Alfa\page Beta\par}", r"{\rtf1 Alfa\column Beta\par}"] {
+            let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+            assert_eq!(markdown, "Alfa\\\nBeta\n", "source: {src}");
+        }
     }
 
     #[test]

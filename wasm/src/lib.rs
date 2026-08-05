@@ -96,8 +96,10 @@ pub fn format_from_path(path: &str) -> Option<Format> {
 /// Convert an in-memory document to Markdown. Without a format, it is
 /// detected from the content, which signature-less formats (CSV) have to name
 /// explicitly.
+///
+/// Throws an `Error` carrying a `ConvertErrorCode` on `code`.
 #[wasm_bindgen(js_name = toMarkdownBytes)]
-pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String, JsError> {
+pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String, JsValue> {
     anydoc::to_markdown_bytes(bytes, format.map(anydoc::Format::from)).map_err(convert_error)
 }
 
@@ -106,14 +108,22 @@ pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String,
 ///
 /// Unsupported for `pdf`: PDF conversion produces Markdown directly and has
 /// no document-model form; use `toMarkdownBytes`.
+///
+/// Throws an `Error` carrying a `ConvertErrorCode` on `code`.
 #[wasm_bindgen(js_name = toDocument, unchecked_return_type = "Document")]
-pub fn to_document(bytes: &[u8], format: Option<Format>) -> Result<JsValue, JsError> {
+pub fn to_document(bytes: &[u8], format: Option<Format>) -> Result<JsValue, JsValue> {
     let document =
         anydoc::to_document(bytes, format.map(anydoc::Format::from)).map_err(convert_error)?;
     serde_wasm_bindgen::to_value(&Document::from(document))
-        .map_err(|error| JsError::new(&error.to_string()))
+        .map_err(|error| js_sys::Error::new(&error.to_string()).into())
 }
 
-fn convert_error(error: anydoc::ConvertError) -> JsError {
-    JsError::new(&error.to_string())
+/// The thrown value: a JS `Error` carrying the crate's message, with the
+/// variant name on `code` for callers to branch on.
+fn convert_error(error: anydoc::ConvertError) -> JsValue {
+    let thrown = js_sys::Error::new(&error.to_string());
+    // Only fails on a non-object target, which `thrown` is not.
+    let _ =
+        js_sys::Reflect::set(&thrown, &JsValue::from_str("code"), &JsValue::from_str(error.code()));
+    thrown.into()
 }

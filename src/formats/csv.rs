@@ -10,7 +10,7 @@
 
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, Inline, Table, TableKind};
-use crate::shared::header::detect_header_rows;
+use crate::shared::header::resolve_header_rows;
 use crate::shared::text::clean_text;
 use csv::ReaderBuilder;
 use std::borrow::Cow;
@@ -41,7 +41,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
 
     let mut doc = Document::default();
     let mut table = Table::from_rows(rows, 0, TableKind::Data);
-    table.header_rows = detect_header_rows(&table);
+    table.header_rows = resolve_header_rows(&table, 0);
     if !table.grid.is_empty() {
         doc.blocks.push(Block::Table(table));
     }

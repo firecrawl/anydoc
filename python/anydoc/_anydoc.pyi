@@ -8,9 +8,37 @@ Format = Literal[
 ]
 
 class ConvertError(Exception):
-    """Meaningful conversion was impossible: the input was unreadable or
-    structurally unusable, encrypted, or crossed a fixed safety limit.
-    Unreadable files raise `OSError` instead."""
+    """Meaningful conversion was impossible. Catch this to handle every kind
+    of failure, or one of the subclasses below to single one out. An
+    unreadable file raises `OSError` instead."""
+
+class UnsupportedError(ConvertError):
+    """The format is unknown, or cannot be converted at all: a scanned or
+    image-only PDF needs OCR, which anydoc does not do."""
+
+class MalformedError(ConvertError):
+    """The document is structurally unusable: no meaningful content could be
+    extracted."""
+
+    part: str | None
+    """The package part or stream at fault, or `None` when no single part
+    is."""
+
+class EncryptedError(ConvertError):
+    """The document is encrypted or password-protected."""
+
+class ResourceLimitError(ConvertError):
+    """A fixed safety limit was crossed: decompression, nesting depth, node
+    count, repeat expansion, or retained asset bytes."""
+
+    limit: str
+    """The limit that was crossed, e.g. `max_entry_bytes`."""
+
+class MissingPartError(ConvertError):
+    """A part required for any meaningful output is absent."""
+
+    part: str
+    """The part or stream that is missing."""
 
 def format_from_bytes(data: bytes | bytearray) -> Format | None:
     """Detect the format from the content itself: the signature and identity

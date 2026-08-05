@@ -155,37 +155,37 @@ anydoc is measured against six other converters on 100 real-world documents span
 
 | tool         | formats   | median ms | docs judged | score  | completeness | structure | formatting | cleanliness |
 | ------------ | --------- | --------- | ----------- | ------ | ------------ | --------- | ---------- | ----------- |
-| anydoc       | **14/14** | **4.7**   | 94          | **80** | **88**       | **78**    | **77**     | **79**      |
-| libreoffice  | 12/14     | 1129.5    | 87          | 40     | 59           | 43        | 43         | 24          |
-| unstructured | 8/14      | 572.9     | 58          | 65     | 76           | 62        | 52         | 67          |
-| markitdown   | 6/14      | 134.8     | 33          | 65     | 80           | 67        | 61         | 53          |
-| pandoc       | 5/14      | 102.1     | 34          | 57     | 75           | 57        | 58         | 39          |
-| docling      | 4/14      | 513.6     | 21          | 57     | 63           | 59        | 57         | 52          |
-| mammoth      | 1/14      | 52.5      | 8           | 70     | 85           | 68        | 74         | 55          |
+| anydoc       | **14/14** | **4.4**   | 94          | **81** | **87**       | **79**    | **78**     | **81**      |
+| libreoffice  | 12/14     | 1129.5    | 87          | 39     | 59           | 41        | 40         | 24          |
+| unstructured | 8/14      | 572.9     | 58          | 62     | 76           | 59        | 50         | 63          |
+| markitdown   | 6/14      | 134.8     | 33          | 64     | 78           | 66        | 60         | 52          |
+| pandoc       | 5/14      | 102.1     | 34          | 56     | 73           | 57        | 56         | 38          |
+| docling      | 4/14      | 513.6     | 21          | 57     | 60           | 59        | 57         | 51          |
+| mammoth      | 1/14      | 52.5      | 8           | 69     | 80           | 72        | 74         | 51          |
 
 Per format, like for like:
 
 | format | anydoc | libreoffice | unstructured | markitdown | pandoc | docling | mammoth |
 | ------ | ------ | ----------- | ------------ | ---------- | ------ | ------- | ------- |
-| doc    | **88** | 58          | 68           | -          | -      | -       | -       |
-| docm   | **82** | 49          | -            | -          | -      | -       | -       |
-| docx   | **86** | 53          | 56           | 72         | 68     | 68      | 70      |
-| epub   | 74     | -           | 74           | **77**     | 53     | -       | -       |
-| odp    | **87** | 22          | -            | -          | -      | -       | -       |
-| ods    | **82** | 42          | -            | -          | -      | -       | -       |
-| odt    | **80** | 52          | 70           | -          | 61     | -       | -       |
-| ppt    | **80** | 25          | -            | -          | -      | -       | -       |
-| pptx   | **76** | 22          | -            | 59         | -      | 50      | -       |
-| rtf    | **89** | 58          | 48           | -          | 46     | -       | -       |
-| xls    | **77** | 40          | 68           | 64         | -      | -       | -       |
-| xlsm   | **70** | 30          | -            | -          | -      | -       | -       |
-| xlsx   | **70** | 31          | 69           | 55         | -      | 51      | -       |
+| doc    | **87** | 57          | 67           | -          | -      | -       | -       |
+| docm   | **85** | 45          | -            | -          | -      | -       | -       |
+| docx   | **86** | 54          | 53           | 73         | 67     | 71      | 69      |
+| epub   | **77** | -           | 72           | 72         | 52     | -       | -       |
+| odp    | **86** | 23          | -            | -          | -      | -       | -       |
+| ods    | **82** | 38          | -            | -          | -      | -       | -       |
+| odt    | **80** | 52          | 68           | -          | 60     | -       | -       |
+| ppt    | **80** | 26          | -            | -          | -      | -       | -       |
+| pptx   | **75** | 24          | -            | 61         | -      | 52      | -       |
+| rtf    | **88** | 54          | 45           | -          | 44     | -       | -       |
+| xls    | **80** | 38          | 66           | 62         | -      | -       | -       |
+| xlsm   | **76** | 32          | -            | -          | -      | -       | -       |
+| xlsx   | **72** | 30          | 66           | 55         | -      | 47      | -       |
 
-**How quality was scored:** an LLM judge (Claude Sonnet 5) compares two tools' outputs blind against ground truth: the document's first six pages, rendered to images by LibreOffice. Each output is scored on completeness, structure, formatting, and cleanliness. Every pair is judged twice with the outputs swapped to cancel position bias, for 479 verdicts in total. Each tool's `score` averages its per-format scores over the formats it supports, so a corpus heavy in one format can't skew it. It also means each row averages a different set of formats (mammoth's 70 is docx alone, while anydoc's 80 spans all fourteen), so the per-format table is the fair comparison.
+**How quality was scored:** an LLM judge (Claude Sonnet 5) compares two tools' outputs blind against ground truth: the document's first six pages, rendered to images by LibreOffice. Each output is scored on completeness, structure, formatting, and cleanliness. Every pair is judged twice with the outputs swapped to cancel position bias, for 481 verdicts in total. Each tool's `score` averages its per-format scores over the formats it supports, so a corpus heavy in one format can't skew it. It also means each row averages a different set of formats (mammoth's 69 is docx alone, while anydoc's 81 spans all fourteen), so the per-format table is the fair comparison.
 
 Speed is one warm conversion per document on a Ryzen 9 9950X3D (Windows 11, 64 GB DDR5-6400). anydoc and the Python libraries are timed with process spawn excluded; the CLI tools include it, since that is how they are used. The harness lives in [`bench/`](bench/README.md); the corpus is not redistributable and is not in the repo.
 
-**Best fit:** pipelines that receive a mixed bag of office documents and need one consistent, structured Markdown output. In this comparison, anydoc was the only tool to cover all fourteen formats, scored highest on every judged format except EPUB, and converted documents an order of magnitude faster than the next-fastest tool.
+**Best fit:** pipelines that receive a mixed bag of office documents and need one consistent, structured Markdown output. In this comparison, anydoc was the only tool to cover all fourteen formats, scored highest on every judged format, and converted documents an order of magnitude faster than the next-fastest tool.
 
 ## Format detection
 
@@ -198,6 +198,33 @@ Format::from_path(Path::new("report.odt")); // Some(Format::Odt)
 ```
 
 The same three functions exist in Node (`formatFromBytes`, ...) and Python (`anydoc.format_from_bytes`, ...).
+
+## Errors
+
+A conversion returns `Err` only when no meaningful Markdown could come out of the file. `ConvertError` names what went wrong:
+
+```rust
+match anydoc::to_markdown(path) {
+    Ok(markdown) => Some(markdown),
+    // No document comes out of these, so record the file and take the next one.
+    Err(error @ (ConvertError::Encrypted | ConvertError::Unsupported(_))) => {
+        unconverted.push((path, error));
+        None
+    }
+    Err(error) => return Err(error),
+}
+```
+
+| Variant         | Meaning                                                             |
+| --------------- | ------------------------------------------------------------------- |
+| `Unsupported`   | Unknown format, or one that cannot be converted (an image-only PDF) |
+| `Malformed`     | Structurally unusable: no meaningful content could be extracted     |
+| `Encrypted`     | Encrypted or password-protected                                     |
+| `ResourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |
+| `MissingPart`   | A part required for any meaningful output is absent                 |
+| `Io`            | The file could not be read, from `to_markdown` only                 |
+
+Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per variant, or `OSError` when the file cannot be read.
 
 ## How it works
 

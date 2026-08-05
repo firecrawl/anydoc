@@ -54,6 +54,34 @@ const fromCsv = await toMarkdownBytes(bytes, 'csv');
 const document = await toDocument(bytes);
 ```
 
+## Errors
+
+A conversion rejects only when no meaningful Markdown could come out of the file. The rejection is an `Error` whose `code` names what went wrong:
+
+```js
+try {
+  return await toMarkdown(path);
+} catch (error) {
+  // No document comes out of these, so record the file and take the next one.
+  if (error.code === 'encrypted' || error.code === 'unsupported') {
+    unconverted.push({ path, reason: error.code });
+    return null;
+  }
+  throw error;
+}
+```
+
+| `code`          | Meaning                                                             |
+| --------------- | ------------------------------------------------------------------- |
+| `unsupported`   | Unknown format, or one that cannot be converted (an image-only PDF) |
+| `malformed`     | Structurally unusable: no meaningful content could be extracted     |
+| `encrypted`     | Encrypted or password-protected                                     |
+| `resourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |
+| `missingPart`   | A part required for any meaningful output is absent                 |
+| `io`            | The file could not be read, from `toMarkdown` only                  |
+
+`error.message` carries the detail, naming the package part at fault where the format identifies one. TypeScript gets the union as `ConvertErrorCode`.
+
 ## Format detection
 
 The format is read from the file content, using the marker its specification designates: the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types. CSV has no such marker, so detection returns `null` for it and the extension, or an explicit format, names it instead.

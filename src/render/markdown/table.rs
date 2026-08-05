@@ -45,6 +45,8 @@ pub(crate) fn render_table(table: &Table, rc: &Ctx) -> Option<String> {
     }
 
     let mut out = String::new();
+    // GFM tables always carry a delimiter row, so a table with no header row
+    // of its own renders an empty one above the data.
     let header: Vec<String> = if table.header_rows >= 1 && !rendered.is_empty() {
         rendered.remove(0)
     } else {

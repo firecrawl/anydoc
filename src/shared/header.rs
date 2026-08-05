@@ -1,7 +1,10 @@
-//! Header-row detection for grids whose format carries no header semantics
-//! (CSV, spreadsheets). The first row is a header when the columns below it
-//! are consistently typed and the row itself is not: a label sits above a
-//! column of numbers, dates or booleans without being one of them.
+//! Header-row detection for grids whose format designates no header row. CSV
+//! and spreadsheets have no notion of one; Word, RTF, and DrawingML carry only
+//! pagination and table-style flags (`w:tblHeader`, `\trhdr`,
+//! `a:tblPr/@firstRow`), none of which means "this row labels the columns".
+//! The first row is a header when the columns below it are consistently typed
+//! and the row itself is not: a label sits above a column of numbers, dates or
+//! booleans without being one of them.
 
 use crate::model::{Block, CellSlot, Table, inlines_to_plain_text};
 use std::collections::{HashMap, HashSet};
@@ -30,11 +33,13 @@ enum Kind {
     Text,
 }
 
-/// Decide whether a grid's first row labels the columns. The result is a
-/// [`Table::header_rows`] value: 1 for a header row, 0 for none. Only the
-/// first row is ever considered, since that is the one place these formats
-/// put labels.
-pub fn detect_header_rows(table: &Table) -> usize {
+/// A grid's [`Table::header_rows`]: what the format `declared`, or - when it
+/// declared none - 1 if the first row labels the columns and 0 otherwise. Only
+/// the first row is ever considered, since that is where labels go.
+pub fn resolve_header_rows(table: &Table, declared: usize) -> usize {
+    if declared > 0 {
+        return declared.min(table.grid.len());
+    }
     let grid = &table.grid;
     if grid.len() < 2 {
         return 0;
@@ -234,7 +239,7 @@ mod tests {
             .iter()
             .map(|r| r.iter().map(|t| Cell::from_inlines(vec![Inline::plain(*t)])).collect())
             .collect();
-        detect_header_rows(&Table::from_rows(rows, 0, TableKind::Data))
+        resolve_header_rows(&Table::from_rows(rows, 0, TableKind::Data), 0)
     }
 
     #[test]

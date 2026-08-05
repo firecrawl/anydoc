@@ -34,6 +34,33 @@ The package is built with `wasm-pack --target web`: it loads with a plain `<scri
 
 Calls are synchronous: wasm runs single-threaded on the calling thread, so convert on a worker if the main thread must stay responsive.
 
+## Errors
+
+A conversion throws only when no meaningful Markdown could come out of the bytes. The thrown value is an `Error` whose `code` names what went wrong:
+
+```js
+try {
+  return toMarkdownBytes(bytes);
+} catch (error) {
+  // No document comes out of these, so record the file and take the next one.
+  if (error.code === 'encrypted' || error.code === 'unsupported') {
+    unconverted.push({ name, reason: error.code });
+    return null;
+  }
+  throw error;
+}
+```
+
+| `code`          | Meaning                                                             |
+| --------------- | ------------------------------------------------------------------- |
+| `unsupported`   | Unknown format, or one that cannot be converted (an image-only PDF) |
+| `malformed`     | Structurally unusable: no meaningful content could be extracted     |
+| `encrypted`     | Encrypted or password-protected                                     |
+| `resourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |
+| `missingPart`   | A part required for any meaningful output is absent                 |
+
+`error.message` carries the detail, naming the package part at fault where the format identifies one. TypeScript gets the union as `ConvertErrorCode`. The crate's `io` code has no counterpart here: there is no filesystem to read from.
+
 ## Building
 
 ```bash

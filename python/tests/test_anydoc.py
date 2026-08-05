@@ -1,7 +1,9 @@
 """Smoke test: the bindings load and every entry point round-trips a fixture."""
 
 import ast
+import io
 import unittest
+import zipfile
 from pathlib import Path
 
 import anydoc
@@ -10,6 +12,8 @@ FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
 OUTLINE = FIXTURES / "docx" / "handmade-outline.docx"
 RICH = FIXTURES / "docx" / "handmade-rich.docx"
 CSV = FIXTURES / "csv" / "sheet.csv"
+ENCRYPTED = FIXTURES / "malformed" / "encrypted--errors.odt"
+ZIPBOMB = FIXTURES / "abuse" / "zipbomb--errors.docx"
 
 
 class AnydocTest(unittest.TestCase):
@@ -57,13 +61,37 @@ class AnydocTest(unittest.TestCase):
         self.assertEqual(anydoc.format_from_path("report.odt"), "odt")
         self.assertIsNone(anydoc.format_from_path("report.unknown"))
 
-    def test_conversion_errors_raise_with_the_crate_error_message(self):
-        with self.assertRaisesRegex(anydoc.ConvertError, "malformed|unsupported"):
+    def test_conversion_errors_raise_the_subclass_that_names_the_failure(self):
+        with self.assertRaises(anydoc.MalformedError) as caught:
             anydoc.to_markdown_bytes(b"not a document", "docx")
-        with self.assertRaisesRegex(ValueError, "unknown format"):
-            anydoc.to_markdown_bytes(b"", "wat")
+        # The base class still catches every one of them.
+        self.assertIsInstance(caught.exception, anydoc.ConvertError)
+        # Nothing about these bytes is a package part.
+        self.assertIsNone(caught.exception.part)
+
+        with self.assertRaises(anydoc.UnsupportedError):
+            anydoc.to_markdown_bytes(CSV.read_bytes())
+
+        with self.assertRaises(anydoc.EncryptedError):
+            anydoc.to_markdown_bytes(ENCRYPTED.read_bytes(), "odt")
+
+        with self.assertRaises(anydoc.ResourceLimitError) as caught:
+            anydoc.to_markdown_bytes(ZIPBOMB.read_bytes(), "docx")
+        self.assertEqual(caught.exception.limit, "max_entry_bytes")
+
+        # A readable package carrying none of the parts a docx is made of.
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types/>")
+        with self.assertRaises(anydoc.MissingPartError) as caught:
+            anydoc.to_markdown_bytes(package.getvalue(), "docx")
+        self.assertEqual(caught.exception.part, "word/document.xml")
+
+    def test_unreadable_files_and_bad_arguments_raise_the_python_exception(self):
         with self.assertRaises(FileNotFoundError):
             anydoc.to_markdown("no-such-file.docx")
+        with self.assertRaisesRegex(ValueError, "unknown format"):
+            anydoc.to_markdown_bytes(b"", "wat")
 
     def test_the_stubs_cover_the_module(self):
         stub = Path(anydoc.__file__).with_name("_anydoc.pyi")

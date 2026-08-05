@@ -12,7 +12,8 @@ use crate::model::{
     MarkerKind, TableKind, inlines_are_empty, inlines_to_plain_text,
 };
 use crate::package::xml::{Element, Node};
-use crate::shared::delta::StyleDelta;
+use crate::shared::delta::{StyleDelta, rebase_emphasis};
+use crate::shared::header::resolve_header_rows;
 use crate::shared::text::{clean_text, collapse_ws};
 use std::collections::HashMap;
 
@@ -366,7 +367,10 @@ impl Builder<'_> {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.flush_paragraph();
                 let level = elem.local[1..].parse::<u8>().unwrap_or(1);
-                let content = self.inline_children(elem, delta)?;
+                let mut content = self.inline_children(elem, delta)?;
+                // The heading element's own styling is how it looks, not
+                // markup applied to the words; a `<b>` inside it still is.
+                rebase_emphasis(&mut content, delta.resolve());
                 let anchor = elem.attr_any("id").map(|id| self.ctx.anchor_id(id));
                 if !inlines_are_empty(&content) {
                     self.blocks.push(Block::Heading { level, anchor, content });
@@ -673,7 +677,7 @@ impl Builder<'_> {
         if table.grid.is_empty() {
             return Ok(None);
         }
-        table.header_rows = header_rows.min(table.grid.len());
+        table.header_rows = resolve_header_rows(&table, header_rows);
         Ok(Some(Block::Table(table)))
     }
 }
@@ -861,20 +865,23 @@ mod tests {
     }
 
     #[test]
-    fn heading_children_keep_resolved_styling() {
-        // M7/M10: heading CSS is not discarded — explicit bold and italic
-        // both carry into the heading's content.
+    fn heading_styling_stays_out_of_its_content() {
+        // A heading's own CSS is how the heading looks, so it does not reach
+        // the runs; emphasis a child adds beyond it still does.
         let css = "h2 { font-style: italic; font-weight: bold }";
         let out = blocks_with_css("<body><h2>title <b>b</b></h2></body>", css);
         let Block::Heading { content, .. } = &out[0] else { panic!("{out:?}") };
-        let first = first_text_style(content);
-        assert!(first.italic && first.bold);
+        assert_eq!(first_text_style(content), Style::PLAIN);
+
+        let out = blocks_with_css("<body><h2>title <b>b</b></h2></body>", "");
+        let Block::Heading { content, .. } = &out[0] else { panic!("{out:?}") };
+        assert_eq!(first_text_style(content), Style::PLAIN);
         let Some(Inline::Text { style, .. }) =
             content.iter().rfind(|i| matches!(i, Inline::Text { .. }))
         else {
             panic!()
         };
-        assert!(style.bold && style.italic);
+        assert!(style.bold);
     }
 
     #[test]

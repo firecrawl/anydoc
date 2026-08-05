@@ -22,6 +22,7 @@ const OUTLINE = await readFile(fixture('docx/handmade-outline.docx'))
 const RICH = await readFile(fixture('docx/handmade-rich.docx'))
 const CSV = await readFile(fixture('csv/sheet.csv'))
 const PDF = await readFile(fixture('pdf/text.pdf'))
+const ENCRYPTED = await readFile(fixture('malformed/encrypted--errors.odt'))
 
 test('toMarkdownBytes converts in memory', () => {
   const markdown = toMarkdownBytes(RICH, 'docx')
@@ -67,6 +68,18 @@ test('format detection reads content, extension, and path', () => {
   assert.equal(formatFromPath('/tmp/report.unknown'), undefined)
 })
 
-test('conversion errors throw with the crate error message', () => {
-  assert.throws(() => toMarkdownBytes(new TextEncoder().encode('not a document'), 'docx'), /malformed|unsupported/)
+// `code` is what callers branch on, so every kind of failure is pinned here.
+test('conversion errors throw a coded Error', () => {
+  const throws = (call, code, message) =>
+    assert.throws(call, (error) => {
+      assert.ok(error instanceof Error)
+      assert.equal(error.code, code)
+      assert.match(error.message, message)
+      return true
+    })
+
+  throws(() => toMarkdownBytes(new TextEncoder().encode('not a document'), 'docx'), 'malformed', /malformed/)
+  throws(() => toMarkdownBytes(CSV), 'unsupported', /unrecognized file content/)
+  throws(() => toMarkdownBytes(ENCRYPTED, 'odt'), 'encrypted', /encrypted/)
+  throws(() => toDocument(ENCRYPTED, 'odt'), 'encrypted', /encrypted/)
 })

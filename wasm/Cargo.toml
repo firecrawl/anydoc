@@ -4,7 +4,7 @@
 # only keeps it off crates.io.
 [package]
 name = "anydoc-wasm"
-version = "0.1.4"
+version = "0.1.6"
 edition = "2024"
 description = "WebAssembly bindings for anydoc: convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown in the browser"
 license = "MIT"
@@ -21,6 +21,7 @@ wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
 
 [dependencies]
 anydoc = { path = ".." }
+js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 serde-wasm-bindgen = "0.6"
