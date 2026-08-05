@@ -17,6 +17,10 @@ keywords = ["markdown", "docx", "pdf", "converter", "document"]
 categories = ["parser-implementations", "text-processing"]
 include = ["/src", "/examples/convert.rs", "/README.md", "/LICENSE"]
 
+[features]
+default = []
+ocr = ["dep:ocrs", "dep:rten"]
+
 [dev-dependencies]
 insta = "1"
 sha2 = "0.11"
@@ -28,8 +32,10 @@ csv = "1.4.0"
 flate2 = "1"
 encoding_rs = "0.8.35"
 log = "0.4"
+ocrs = { version = "0.12.2", optional = true }
 pdf-inspector = "0.1.8"
 quick-xml = "0.41.0"
+rten = { version = "0.24.0", default-features = false, features = ["rten_format"], optional = true }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [profile.release]
