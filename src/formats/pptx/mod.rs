@@ -18,6 +18,7 @@ use crate::package::{Package, archive::probe_ole, path};
 use crate::shared::assets::AssetSink;
 use crate::shared::fields::classify_rel_target;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
+use crate::shared::meta;
 use crate::shared::text::clean_text;
 use cascade::{Bullet, LevelStyle, Placeholder, TextProps, TitleClass};
 use std::cell::{Cell as StdCell, RefCell};
@@ -57,6 +58,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     // OPC part discovery: the presentation part comes from the package-level
     // officeDocument relationship, with the conventional path as fallback.
     let root_rels = read_rels(&mut pkg.borrow_mut(), "_rels/.rels")?;
+    let document_title = meta::opc_title(&pkg, &root_rels)?;
     let pres_part = root_rels
         .first_of_type(rel_type::OFFICE_DOCUMENT)
         .and_then(|rel| path::resolve("", &rel.target).ok())
@@ -102,6 +104,48 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let mut all_rels: Vec<Relationships> = Vec::with_capacity(slide_paths.len());
     for p in &slide_paths {
         all_rels.push(read_rels(&mut pkg.borrow_mut(), &rels_part_for(p))?);
+    }
+    // Load the layout/master cascade before evaluating the deck-wide guard.
+    // A title placeholder with an omitted slide-level type is still a real
+    // title after the layout-by-idx resolution from A1.
+    for (slide_path, slide_rels) in slide_paths.iter().zip(&all_rels) {
+        let layout_path = rel_target_of_type(slide_rels, slide_path, LAYOUT_REL);
+        if let Some(lp) = &layout_path
+            && !layouts.contains_key(lp)
+        {
+            let info = load_layout(&pkg, lp)?;
+            if let Some(mp) = info.master_path.clone()
+                && !masters.contains_key(&mp)
+            {
+                let master = load_master(&pkg, &mp)?;
+                masters.insert(mp, master);
+            }
+            layouts.insert(lp.clone(), info);
+        }
+    }
+    let mut has_real_title_placeholder = false;
+    for (slide_path, slide_rels) in slide_paths.iter().zip(&all_rels) {
+        let Some(tree) = pkg.borrow_mut().optional_xml_part(slide_path)? else {
+            continue;
+        };
+        let Some(sp_tree) = tree
+            .find(ns::P, "sld")
+            .and_then(|s| s.find(ns::P, "cSld"))
+            .and_then(|c| c.find(ns::P, "spTree"))
+        else {
+            continue;
+        };
+        let layout_path = rel_target_of_type(slide_rels, slide_path, LAYOUT_REL);
+        let layout = layout_path.as_ref().and_then(|lp| layouts.get(lp));
+        if sp_tree.descendant_elems().filter(|sp| matches!(sp.local.as_str(), "sp" | "cxnSp")).any(
+            |sp| {
+                resolve_ph_type(sp, layout)
+                    .is_some_and(|ph_type| cascade::title_class(&ph_type) == TitleClass::Title)
+            },
+        ) {
+            has_real_title_placeholder = true;
+            break;
+        }
     }
     let targeted: std::collections::HashSet<String> = slide_paths
         .iter()
@@ -161,12 +205,21 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             instance_counter: &instance_counter,
             slide_anchors: &slide_anchors,
         };
+        let slide_block_start = blocks.len();
         if targeted.contains(slide_path)
             && let Some(anchor) = slide_anchors.get(slide_path)
         {
             blocks.push(Block::Paragraph(vec![Inline::Anchor(anchor.clone())]));
         }
         parse_shapes(sp_tree, &ctx, &mut blocks)?;
+        let slide_has_heading =
+            blocks[slide_block_start..].iter().any(|block| matches!(block, Block::Heading { .. }));
+        if !has_real_title_placeholder
+            && !slide_has_heading
+            && let Some(title) = heuristic_title_text(sp_tree)
+        {
+            promote_heuristic_heading(&mut blocks[slide_block_start..], &title);
+        }
 
         // Speaker notes, set off as a quote (fixed policy: included). The
         // tree is loaded before the `if let` so the package borrow is not
@@ -210,7 +263,9 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     }
 
     let assets = std::mem::take(&mut assets.borrow_mut().assets);
-    Ok(Document { blocks, notes: Vec::new(), assets })
+    let mut document = Document { blocks, notes: Vec::new(), assets };
+    meta::prepend_title(&mut document, document_title.as_deref());
+    Ok(document)
 }
 
 fn rel_target_of_type(rels: &Relationships, base: &str, rel_type: &str) -> Option<String> {
@@ -288,7 +343,7 @@ impl SlideCtx<'_, '_> {
         if let Some(master) = self.master {
             let class_style = match ph.map(|p| cascade::title_class(&p.ph_type)) {
                 Some(TitleClass::Title) => &master.title,
-                Some(TitleClass::Body) => &master.body,
+                Some(TitleClass::Subtitle | TitleClass::Body) => &master.body,
                 None => &master.other,
             };
             props = props.merge(class_style.level(lvl));
@@ -324,6 +379,26 @@ struct PhInfo {
 
 fn placeholder_type(sp: &Element) -> Option<&str> {
     sp.first_descendant(ns::P, "ph").map(|ph| ph.attr(ns::P, "type").unwrap_or("body"))
+}
+
+/// Resolve a slide shape's effective placeholder type.
+///
+/// PresentationML says that a slide placeholder without `@type` inherits the
+/// type of the layout placeholder with the same `@idx` (ECMA-376 19.3.1.36).
+/// A shape without a placeholder is deliberately kept distinct from the
+/// default `body` type because it is an ordinary text box, not a body
+/// placeholder.
+fn resolve_ph_type(sp: &Element, layout: Option<&LayoutInfo>) -> Option<String> {
+    let ph = sp.first_descendant(ns::P, "ph")?;
+    let ph_type = ph.attr(ns::P, "type").map(str::to_string).or_else(|| {
+        let idx = ph.attr(ns::P, "idx")?;
+        layout?
+            .placeholders
+            .iter()
+            .find(|placeholder| placeholder.idx.as_deref() == Some(idx))
+            .map(|placeholder| placeholder.ph_type.clone())
+    });
+    Some(ph_type.unwrap_or_else(|| "body".to_string()))
 }
 
 fn parse_shapes(
@@ -380,10 +455,57 @@ fn parse_shapes(
     Ok(())
 }
 
+/// Return the first text shape only when it is also the topmost text shape
+/// and carries one short paragraph. Missing geometry is not guessed.
+fn heuristic_title_text(sp_tree: &Element) -> Option<String> {
+    let text_shapes: Vec<(&Element, String, Option<i64>)> = sp_tree
+        .descendant_elems()
+        .filter(|sp| matches!(sp.local.as_str(), "sp" | "cxnSp"))
+        .filter_map(|sp| {
+            let tx = sp.find(ns::P, "txBody")?;
+            let paragraphs: Vec<&Element> = tx.find_all(ns::A, "p").collect();
+            let text = clean_text(&paragraphs.iter().map(|p| p.text()).collect::<String>());
+            if text.is_empty() {
+                return None;
+            }
+            let y = sp
+                .first_descendant(ns::A, "off")
+                .and_then(|off| off.attr(ns::A, "y"))
+                .and_then(|value| value.parse::<i64>().ok());
+            Some((sp, text, y))
+        })
+        .collect();
+    let first = text_shapes.first()?;
+    if text_shapes.iter().any(|(_, _, y)| y.is_none()) {
+        return None;
+    }
+    let min_y = text_shapes.iter().filter_map(|(_, _, y)| *y).min()?;
+    if first.2 != Some(min_y) || first.1.chars().count() >= 120 {
+        return None;
+    }
+    let tx = first.0.find(ns::P, "txBody")?;
+    (tx.find_all(ns::A, "p").count() == 1).then(|| first.1.clone())
+}
+
+fn promote_heuristic_heading(blocks: &mut [Block], title: &str) {
+    let Some(block) = blocks.iter_mut().find(|block| {
+        matches!(block, Block::Paragraph(content) if crate::model::inlines_to_plain_text(content) == title)
+    }) else {
+        return;
+    };
+    let Block::Paragraph(content) = std::mem::replace(block, Block::Paragraph(Vec::new())) else {
+        return;
+    };
+    *block = Block::Heading { level: 2, anchor: Some(title.to_string()), content };
+}
+
 fn parse_shape(sp: &Element, ctx: &SlideCtx, blocks: &mut Vec<Block>) -> Result<(), ConvertError> {
-    let ph = sp.first_descendant(ns::P, "ph").map(|p| PhInfo {
-        ph_type: p.attr(ns::P, "type").unwrap_or("body").to_string(),
-        idx: p.attr(ns::P, "idx").map(str::to_string),
+    let ph = resolve_ph_type(sp, ctx.layout).map(|ph_type| PhInfo {
+        ph_type,
+        idx: sp
+            .first_descendant(ns::P, "ph")
+            .and_then(|p| p.attr(ns::P, "idx"))
+            .map(str::to_string),
     });
     if let Some(ph) = &ph
         && matches!(ph.ph_type.as_str(), "sldNum" | "dt" | "ftr")
@@ -393,11 +515,12 @@ fn parse_shape(sp: &Element, ctx: &SlideCtx, blocks: &mut Vec<Block>) -> Result<
     let Some(tx) = sp.find(ns::P, "txBody") else {
         return Ok(());
     };
-    // Titles get heading semantics but keep their shape-order position.
-    if ph.as_ref().is_some_and(|p| cascade::title_class(&p.ph_type) == TitleClass::Title) {
-        push_title_heading(tx, ctx, ph.as_ref(), blocks)?;
-    } else {
-        parse_text_body(tx, ctx, ph.as_ref(), blocks)?;
+    // Titles and subtitles get heading semantics but keep their shape-order
+    // position. Subtitles use the body cascade, preserving their styling.
+    match ph.as_ref().map(|p| cascade::title_class(&p.ph_type)) {
+        Some(TitleClass::Title) => push_title_heading(tx, ctx, ph.as_ref(), blocks, 2)?,
+        Some(TitleClass::Subtitle) => push_title_heading(tx, ctx, ph.as_ref(), blocks, 3)?,
+        _ => parse_text_body(tx, ctx, ph.as_ref(), blocks)?,
     }
     Ok(())
 }
@@ -409,6 +532,7 @@ fn push_title_heading(
     ctx: &SlideCtx,
     ph: Option<&PhInfo>,
     blocks: &mut Vec<Block>,
+    level: u8,
 ) -> Result<(), ConvertError> {
     let shape_styles = cascade::parse_level_styles(tx.find(ns::A, "lstStyle"));
     let mut inlines: Vec<Inline> = Vec::new();
@@ -431,7 +555,7 @@ fn push_title_heading(
     }
     if !inlines_are_empty(&inlines) {
         let anchor = Some(crate::model::inlines_to_plain_text(&inlines));
-        blocks.push(Block::Heading { level: 2, anchor, content: inlines });
+        blocks.push(Block::Heading { level, anchor, content: inlines });
     }
     Ok(())
 }
@@ -631,4 +755,116 @@ fn parse_table(tbl: &Element, ctx: &SlideCtx, blocks: &mut Vec<Block>) -> Result
     table.header_rows = header_rows;
     blocks.push(Block::Table(table));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::package::xml::parse_xml;
+
+    fn element(xml: &str) -> Element {
+        parse_xml(xml.as_bytes()).expect("valid test XML")
+    }
+
+    fn heuristic_tree(shapes: &str) -> Element {
+        element(&format!(
+            r#"<p:spTree xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">{shapes}</p:spTree>"#
+        ))
+    }
+
+    fn heuristic_shape(id: &str, y: &str, paragraphs: &str) -> String {
+        format!(
+            r#"<p:sp><p:spPr><a:xfrm><a:off x="0" y="{y}"/></a:xfrm></p:spPr>
+                <p:txBody><a:p>{paragraphs}</a:p></p:txBody></p:sp><!-- {id} -->"#
+        )
+    }
+
+    fn layout(xml: &str) -> LayoutInfo {
+        let tree = element(xml);
+        LayoutInfo { placeholders: cascade::collect_placeholders(&tree), master_path: None }
+    }
+
+    #[test]
+    fn placeholder_type_explicit_value_wins_over_layout() {
+        let shape = element(
+            r#"<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+                <p:nvPr><p:ph type="body" idx="0"/></p:nvPr>
+            </p:sp>"#,
+        );
+        let layout = layout(
+            r#"<p:spTree xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+                <p:sp><p:nvPr><p:ph type="title" idx="0"/></p:nvPr></p:sp>
+            </p:spTree>"#,
+        );
+        assert_eq!(resolve_ph_type(&shape, Some(&layout)).as_deref(), Some("body"));
+    }
+
+    #[test]
+    fn placeholder_type_inherits_layout_type_by_idx() {
+        let shape = element(
+            r#"<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+                <p:nvPr><p:ph idx="0"/></p:nvPr>
+            </p:sp>"#,
+        );
+        let layout = layout(
+            r#"<p:spTree xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+                <p:sp><p:nvPr><p:ph type="title" idx="0"/></p:nvPr></p:sp>
+            </p:spTree>"#,
+        );
+        assert_eq!(resolve_ph_type(&shape, Some(&layout)).as_deref(), Some("title"));
+    }
+
+    #[test]
+    fn placeholder_type_falls_back_to_body_for_unknown_idx() {
+        let shape = element(
+            r#"<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+                <p:nvPr><p:ph idx="9"/></p:nvPr>
+            </p:sp>"#,
+        );
+        let layout = layout(
+            r#"<p:spTree xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+                <p:sp><p:nvPr><p:ph type="title" idx="0"/></p:nvPr></p:sp>
+            </p:spTree>"#,
+        );
+        assert_eq!(resolve_ph_type(&shape, Some(&layout)).as_deref(), Some("body"));
+    }
+
+    #[test]
+    fn shape_without_placeholder_stays_unclassified() {
+        let shape = element(
+            r#"<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+                <p:nvPr/>
+            </p:sp>"#,
+        );
+        assert_eq!(resolve_ph_type(&shape, None), None);
+    }
+
+    #[test]
+    fn heuristic_title_requires_first_shape_to_be_topmost_and_single_short_paragraph() {
+        let title = heuristic_shape("title", "100", "<a:r><a:t>Deck title</a:t></a:r>");
+        let body = heuristic_shape("body", "500", "<a:r><a:t>Body</a:t></a:r>");
+        assert_eq!(
+            heuristic_title_text(&heuristic_tree(&format!("{title}{body}"))),
+            Some("Deck title".into())
+        );
+
+        let lower_first = heuristic_shape("lower", "500", "<a:r><a:t>Deck title</a:t></a:r>");
+        let upper_second = heuristic_shape("upper", "100", "<a:r><a:t>Topmost</a:t></a:r>");
+        assert_eq!(
+            heuristic_title_text(&heuristic_tree(&format!("{lower_first}{upper_second}"))),
+            None
+        );
+
+        let two_paragraphs = heuristic_shape(
+            "two",
+            "100",
+            "<a:r><a:t>First</a:t></a:r></a:p><a:p><a:r><a:t>Second</a:t></a:r>",
+        );
+        assert_eq!(heuristic_title_text(&heuristic_tree(&two_paragraphs)), None);
+
+        let long =
+            heuristic_shape("long", "100", &format!("<a:r><a:t>{}</a:t></a:r>", "X".repeat(120)));
+        assert_eq!(heuristic_title_text(&heuristic_tree(&long)), None);
+    }
 }

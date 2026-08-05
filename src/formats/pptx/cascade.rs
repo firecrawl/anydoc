@@ -189,12 +189,14 @@ pub fn match_placeholder<'p>(
 #[derive(PartialEq, Clone, Copy)]
 pub enum TitleClass {
     Title,
+    Subtitle,
     Body,
 }
 
 pub fn title_class(ph_type: &str) -> TitleClass {
     match ph_type {
         "title" | "ctrTitle" => TitleClass::Title,
+        "subTitle" => TitleClass::Subtitle,
         _ => TitleClass::Body,
     }
 }

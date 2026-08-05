@@ -103,12 +103,13 @@ struct PendingShape {
     tx_type: u8,
     text: String,
     styles: Option<StyleRuns>,
+    y: Option<i32>,
 }
 
 #[derive(Default)]
 struct Extractor {
-    /// Finished segments: (blocks, pairing id, is_notes).
-    segments: Vec<(Vec<Block>, Option<u32>, bool)>,
+    /// Finished segments: (blocks, pairing id, is_notes, heuristic candidate).
+    segments: Vec<(Vec<Block>, Option<u32>, bool, bool)>,
     current: Vec<Block>,
     current_is_notes: bool,
     list_run: Vec<ListEntry>,
@@ -123,6 +124,13 @@ struct Extractor {
     recovering: bool,
     /// Records visited across the whole extraction, capped.
     records: u64,
+    /// Per-slide state for the guarded no-placeholder title recovery.
+    slide_text_shapes: usize,
+    slide_first_y: Option<i32>,
+    slide_candidate: bool,
+    slide_has_heading: bool,
+    next_shape_y: Option<i32>,
+    has_real_title: bool,
 }
 
 /// The persist-resolved layout of the presentation: slide/notes lists from
@@ -272,6 +280,7 @@ impl Extractor {
                         self.finish_slide(pending.take(), persist, data, container_type, is_notes)?;
                     self.end_segment(id);
                     self.current_is_notes = is_notes;
+                    self.reset_slide_heuristic();
                     pending = get_u32(body, 0).map(|p| (p, get_u32(body, 12).unwrap_or(0)));
                     if !is_notes {
                         self.select_master(pending.map(|(p, _)| p), persist, data);
@@ -321,15 +330,27 @@ impl Extractor {
         flush_list(&mut self.current, &mut self.list_run);
         if !self.current.is_empty() {
             let blocks = std::mem::take(&mut self.current);
-            self.segments.push((blocks, id, self.current_is_notes));
+            self.segments.push((blocks, id, self.current_is_notes, self.slide_candidate));
         }
+    }
+
+    fn reset_slide_heuristic(&mut self) {
+        self.slide_text_shapes = 0;
+        self.slide_first_y = None;
+        self.slide_candidate = false;
+        self.slide_has_heading = false;
+        self.next_shape_y = None;
     }
 
     fn into_blocks(mut self) -> Vec<Block> {
         self.end_segment(None);
         let mut slides: Vec<(Option<u32>, Vec<Block>)> = Vec::new();
         let mut notes: Vec<(Option<u32>, Vec<Block>)> = Vec::new();
-        for (blocks, id, is_notes) in self.segments {
+        let use_heuristic = !self.has_real_title;
+        for (mut blocks, id, is_notes, candidate) in self.segments {
+            if use_heuristic && candidate && !is_notes {
+                promote_heuristic_heading(&mut blocks);
+            }
             if is_notes {
                 notes.push((id, blocks));
             } else {
@@ -464,7 +485,15 @@ impl Extractor {
                     tx_type: body.first().copied().unwrap_or(1),
                     text: String::new(),
                     styles: None,
+                    y: self.next_shape_y.take(),
                 });
+            }
+            // OfficeArt client anchor: x, y, width, height as four 16-bit
+            // values. It precedes the client textbox for the same shape.
+            0xF010 => {
+                self.next_shape_y = body
+                    .get(2..4)
+                    .and_then(|v| Some(i32::from(u16::from_le_bytes(v.try_into().ok()?))));
             }
             // TextCharsAtom: UTF-16LE.
             0x0FA0 => {
@@ -498,7 +527,7 @@ impl Extractor {
         match &mut self.pending {
             Some(pending) => pending.text.push_str(&text),
             None => {
-                self.pending = Some(PendingShape { tx_type: 1, text, styles: None });
+                self.pending = Some(PendingShape { tx_type: 1, text, styles: None, y: None });
             }
         }
     }
@@ -515,6 +544,19 @@ impl Extractor {
         self.shape_counter += 1;
         let shape_id = self.shape_counter;
         let is_title = matches!(shape.tx_type, 0 | 6);
+        if is_title {
+            self.has_real_title = true;
+            self.slide_has_heading = true;
+        }
+        let first_text_shape = self.slide_text_shapes == 0;
+        self.slide_text_shapes += 1;
+        if first_text_shape {
+            self.slide_first_y = shape.y;
+        } else if let (Some(first_y), Some(y)) = (self.slide_first_y, shape.y)
+            && y < first_y
+        {
+            self.slide_candidate = false;
+        }
         let styles = shape.styles.unwrap_or_default();
         // The active master's per-level defaults for this text type; local
         // exceptions are tri-state and resolve over these.
@@ -603,6 +645,17 @@ impl Extractor {
             paragraphs.push((inlines, depth, bullet));
         }
 
+        if first_text_shape
+            && !is_title
+            && !self.slide_has_heading
+            && shape.y.is_some()
+            && shape.text.chars().count() < 120
+            && paragraphs.len() == 1
+            && paragraphs[0].2 != Some(true)
+        {
+            self.slide_candidate = true;
+        }
+
         for (inlines, depth, bullet) in paragraphs {
             if inlines_are_empty(&inlines) {
                 flush_list(&mut self.current, &mut self.list_run);
@@ -629,4 +682,15 @@ impl Extractor {
             }
         }
     }
+}
+
+fn promote_heuristic_heading(blocks: &mut [Block]) {
+    let Some(block) = blocks.iter_mut().find(|block| matches!(block, Block::Paragraph(_))) else {
+        return;
+    };
+    let Block::Paragraph(content) = std::mem::replace(block, Block::Paragraph(Vec::new())) else {
+        return;
+    };
+    let anchor = Some(crate::model::inlines_to_plain_text(&content));
+    *block = Block::Heading { level: 2, anchor, content };
 }

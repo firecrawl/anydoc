@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# NCX Only
+
+# NCX Top
+
+## NCX Sub

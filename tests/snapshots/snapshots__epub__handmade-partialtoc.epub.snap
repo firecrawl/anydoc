@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Partial Contents
+
+# Front
+
+## Covered
+
+# Uncovered
+
+### Empty
+
+No authored heading.

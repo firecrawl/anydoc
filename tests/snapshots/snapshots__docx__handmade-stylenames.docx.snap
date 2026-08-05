@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+assertion_line: 69
+expression: output
+---
+## Subtitle heading
+
+## Style ID heading
+
+Custom box stays a paragraph

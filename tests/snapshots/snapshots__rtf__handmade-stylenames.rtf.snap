@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+## Named level two
+
+Not a heading
+
+# Explicit level one

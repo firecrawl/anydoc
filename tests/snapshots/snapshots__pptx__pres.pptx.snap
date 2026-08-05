@@ -2,7 +2,7 @@
 source: tests/snapshots.rs
 expression: output
 ---
-Deck Title Slide
+## Deck Title Slide
 
 - Top level point
 
@@ -12,7 +12,7 @@ Deck Title Slide
 
 > Speaker note for the intro slide.
 
-Numbers Slide
+## Numbers Slide
 
 |  |  |
 | --- | --- |

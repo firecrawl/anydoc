@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+assertion_line: 69
+expression: output
+---
+## Inherited Layout Title
+
+Plain text box stays a paragraph

@@ -2,7 +2,7 @@
 source: tests/snapshots.rs
 expression: output
 ---
-## ***Inherited heading***
+## Inherited heading
 
 Plain paragraph between tables.
 

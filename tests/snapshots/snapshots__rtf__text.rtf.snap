@@ -2,13 +2,13 @@
 source: tests/snapshots.rs
 expression: output
 ---
-# **Fixture Document**
+# Fixture Document
 
 Plain paragraph with **bold**, *italic*, and ~~struck~~ runs.
 
 **Style-bold paragraph with a** NotBold-styled span **inside.**
 
-## **Lists**
+## Lists
 
 1. First numbered
 
@@ -35,7 +35,7 @@ Interrupting paragraph between lists.
 
   - Nested bullet
 
-## **Table**
+## Table
 
 |  |  |  |
 | --- | --- | --- |
@@ -43,7 +43,7 @@ Interrupting paragraph between lists.
 | Tall | B2 | C2 |
 |  | B3 | C3 |
 
-## **Notes and special text**
+## Notes and special text
 
 Music clef 𝄞 appears before this footnote[^1] reference.
 
@@ -53,7 +53,7 @@ Persian with ZWNJ: می‌خواهم. Family emoji: 👨‍👩‍👧.
 
 Markdown specials: \*stars* \_under_ \[bracket] \`tick` #hash 1. dotted | pipe.
 
-## **Links and anchors**
+## Links and anchors
 
 External link to [example](https://example.com/page).
 
@@ -63,7 +63,7 @@ Relative link to [a sibling file](file:///anydoc/tests/fixture-src/sibling.odt).
 
 Jump to [the bookmarked paragraph](#plainmark).
 
-## **Objects**
+## Objects
 
 Inline image:  done.
 
@@ -71,7 +71,7 @@ Text box: Inside the text box.
 
 after the box.
 
-## **Quote and code**
+## Quote and code
 
 Value below one millionth: 0.0000004 should survive.
 

@@ -3,6 +3,7 @@
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, TableKind};
 use crate::shared::header::detect_header_rows;
+use crate::shared::meta;
 use crate::shared::text::clean_text;
 use calamine::{Data, Dimensions, Reader, Sheets, open_workbook_auto_from_rs};
 use std::collections::{HashMap, HashSet};
@@ -21,11 +22,12 @@ fn contained<T>(op: &str, f: impl FnOnce() -> T) -> Result<T, ConvertError> {
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
+    let document_title =
+        if bytes.starts_with(b"PK") { meta::opc_title_from_bytes(bytes)? } else { None };
     let mut workbook =
         contained("workbook open", || open_workbook_auto_from_rs(Cursor::new(bytes)))?
             .map_err(map_open_error)?;
     let sheet_names = contained("sheet listing", || workbook.sheet_names().to_owned())?;
-    let multi_sheet = sheet_names.len() > 1;
     let merged = merged_regions(&mut workbook, &sheet_names)?;
 
     let mut doc = Document::default();
@@ -105,14 +107,13 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             continue;
         }
         table.header_rows = detect_header_rows(&table);
-        if multi_sheet {
-            doc.blocks.push(Block::heading(2, vec![Inline::plain(name.clone())]));
-        }
+        doc.blocks.push(Block::heading(2, vec![Inline::plain(name.clone())]));
         doc.blocks.push(Block::Table(table));
     }
     if !sheet_names.is_empty() && failed == sheet_names.len() {
         return Err(ConvertError::malformed("no sheet in the workbook could be read"));
     }
+    meta::prepend_title(&mut doc, document_title.as_deref());
     Ok(doc)
 }
 
@@ -245,8 +246,10 @@ mod tests {
     }
 
     fn covered_count(doc: &Document) -> usize {
-        let Some(Block::Table(t)) = doc.blocks.first() else {
-            panic!("expected a table, got {:?}", doc.blocks.first());
+        let Some(Block::Table(t)) =
+            doc.blocks.iter().find(|block| matches!(block, Block::Table(_)))
+        else {
+            panic!("expected a table, got {:?}", doc.blocks);
         };
         t.grid
             .iter()

@@ -15,9 +15,10 @@ mod sheet;
 use crate::Format;
 use crate::error::ConvertError;
 use crate::model::Document;
+use crate::shared::{binary, meta};
 
 pub fn parse(bytes: &[u8], format: Format) -> Result<Document, ConvertError> {
-    match format {
+    let mut result = match format {
         Format::Excel => sheet::parse(bytes),
         Format::Csv => csv::parse(bytes),
         Format::Docx => docx::parse(bytes),
@@ -34,5 +35,17 @@ pub fn parse(bytes: &[u8], format: Format) -> Result<Document, ConvertError> {
         Format::Pdf => Err(ConvertError::Unsupported(
             "PDF converts directly to Markdown; use to_markdown or to_markdown_bytes".to_string(),
         )),
+    };
+    if let Ok(document) = &mut result {
+        document.normalize_heading_styles();
+        let title = match format {
+            Format::Ppt | Format::Excel => binary::ole_summary_title(bytes),
+            Format::Rtf => rtf::document_title(bytes),
+            Format::Doc if bytes.starts_with(b"{\\rtf") => rtf::document_title(bytes),
+            Format::Doc => binary::ole_summary_title(bytes),
+            _ => None,
+        };
+        meta::prepend_title(document, title.as_deref());
     }
+    result
 }

@@ -3,6 +3,7 @@
 
 use crate::formats::rtf::lexer::{Lexer, Token, destination_groups};
 use crate::shared::delta::StyleDelta;
+use crate::shared::heading::level_from_name;
 use crate::shared::list::MarkerKind;
 use crate::shared::numbering::{NumberPattern, NumberText};
 use std::collections::HashMap;
@@ -61,10 +62,11 @@ pub struct ListDef {
     pub levels: [ListLevelDef; LIST_LEVELS],
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct StyleDef {
     pub outline: Option<u8>,
     pub delta: StyleDelta,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -200,6 +202,11 @@ fn parse_stylesheet(group: &[u8], styles: &mut HashMap<i32, StyleDef>) {
                 }
                 _ => {}
             },
+            Token::Byte(byte) if depth == 1 => {
+                if let Some((_, def, _)) = current.as_mut() {
+                    def.name.get_or_insert_with(String::new).push(byte as char);
+                }
+            }
             _ => {}
         }
     }
@@ -223,6 +230,15 @@ fn parse_stylesheet(group: &[u8], styles: &mut HashMap<i32, StyleDef>) {
         for def in chain.iter().rev() {
             resolved.delta = resolved.delta.merge(def.delta);
             resolved.outline = def.outline.or(resolved.outline);
+            if def.name.is_some() {
+                resolved.name = def.name.clone();
+            }
+        }
+        if resolved.outline.is_none() {
+            resolved.outline = resolved
+                .name
+                .as_deref()
+                .and_then(|name| level_from_name(name.trim_end_matches(';')));
         }
         styles.insert(id, resolved);
     }
@@ -453,24 +469,5 @@ fn charset_encoding(
         222 => encoding_rs::WINDOWS_874,
         238 => encoding_rs::WINDOWS_1250,
         _ => default_encoding,
-    }
-}
-
-pub fn codepage_encoding(cp: u32) -> &'static encoding_rs::Encoding {
-    match cp {
-        932 => encoding_rs::SHIFT_JIS,
-        936 => encoding_rs::GBK,
-        949 => encoding_rs::EUC_KR,
-        950 => encoding_rs::BIG5,
-        1250 => encoding_rs::WINDOWS_1250,
-        1251 => encoding_rs::WINDOWS_1251,
-        1253 => encoding_rs::WINDOWS_1253,
-        1254 => encoding_rs::WINDOWS_1254,
-        1255 => encoding_rs::WINDOWS_1255,
-        1256 => encoding_rs::WINDOWS_1256,
-        1257 => encoding_rs::WINDOWS_1257,
-        1258 => encoding_rs::WINDOWS_1258,
-        874 => encoding_rs::WINDOWS_874,
-        _ => encoding_rs::WINDOWS_1252,
     }
 }

@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Nested Contents
+
+# Top
+
+### Sub
+
+##### Deep

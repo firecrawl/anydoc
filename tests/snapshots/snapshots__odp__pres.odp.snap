@@ -1,7 +1,10 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 69
 expression: output
 ---
+## Intro
+
 Deck Title Slide
 
 - Top level point
@@ -10,6 +13,8 @@ Deck Title Slide
 - Second point with emphasis
 
 > Speaker note for the intro slide.
+
+## Data
 
 Numbers Slide
 
