@@ -143,6 +143,31 @@ fn docx_ole_payload_wins_over_its_preview_image() {
     assert_eq!(ole.bytes, b"DOCX-OLE-PAYLOAD".repeat(4));
 }
 
+/// A merge anchored in a sheet's only populated cell and extending past the
+/// populated range must be retained in the document model with its full
+/// span (issue #8).
+#[test]
+fn xlsx_merge_overhang_is_retained() {
+    let path = fixture_root().join("xlsx").join("handmade-merge-overhang.xlsx");
+    let bytes = std::fs::read(&path).unwrap();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Excel).unwrap();
+    let table = doc
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            anydoc::model::Block::Table(t) => Some(t),
+            _ => None,
+        })
+        .expect("sheet converts to a table");
+    assert_eq!(table.grid.len(), 6, "grid covers the six used rows");
+    assert_eq!(table.grid[0].len(), 10, "grid covers the merge's ten columns");
+    let cell = match &table.grid[0][0] {
+        anydoc::model::CellSlot::Origin(cell) => cell,
+        anydoc::model::CellSlot::Covered { .. } => panic!("expected an origin at (0,0)"),
+    };
+    assert_eq!((cell.row_span, cell.col_span), (3, 10));
+}
+
 /// Repeated references to one part must neither re-decompress against the
 /// archive budget nor duplicate the retained asset (S12).
 #[test]
