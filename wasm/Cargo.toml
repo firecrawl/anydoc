@@ -19,6 +19,12 @@ crate-type = ["cdylib", "rlib"]
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
 
+[features]
+default = []
+# Local OCR in the browser. Off by default: it multiplies the module size,
+# and the models are a separate download the caller supplies.
+ocr = ["anydoc/ocr"]
+
 [dependencies]
 anydoc = { path = ".." }
 js-sys = "0.3"
