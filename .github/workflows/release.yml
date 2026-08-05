@@ -24,7 +24,7 @@ jobs:
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - name: All four version locations agree (and match the tag)
+      - name: All six version locations agree (and match the tag)
         id: check
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
@@ -389,11 +389,126 @@ jobs:
           # Tolerate re-running a release where PyPI already got some files.
           skip-existing: true
 
+  build-go:
+    name: Build Go static lib (${{ matrix.target }})
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+            lib_dir: darwin_amd64
+            lib_name: libanydoc_go.a
+          - target: aarch64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+            lib_dir: darwin_arm64
+            lib_name: libanydoc_go.a
+          - target: x86_64-pc-windows-msvc
+            host: blacksmith-8vcpu-windows-2025
+            lib_dir: windows_amd64
+            lib_name: anydoc_go.lib
+          # napi-cross is Node-specific; the Rust staticlib links glibc on the
+          # build host. manylinux2014 compatibility comes from building on
+          # ubuntu-2404 with the toolchain's default glibc target.
+          - target: x86_64-unknown-linux-gnu
+            host: blacksmith-8vcpu-ubuntu-2404
+            lib_dir: linux_amd64_gnu
+            lib_name: libanydoc_go.a
+          - target: aarch64-unknown-linux-gnu
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            lib_dir: linux_arm64_gnu
+            lib_name: libanydoc_go.a
+          # musl targets cross-compile with the Zig toolchain, mirroring the
+          # Node build. The asset name carries the full triple so gnu and musl
+          # never collide on the release page.
+          - target: x86_64-unknown-linux-musl
+            host: blacksmith-8vcpu-ubuntu-2404
+            zig: true
+            lib_dir: linux_amd64_musl
+            lib_name: libanydoc_go.a
+          - target: aarch64-unknown-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            zig: true
+            lib_dir: linux_arm64_musl
+            lib_name: libanydoc_go.a
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: go-${{ matrix.target }}
+      - uses: mlugg/setup-zig@v2
+        if: matrix.zig == true
+        with:
+          version: 0.14.1
+      - name: Build staticlib
+        run: cargo build -p anydoc-go --release --target ${{ matrix.target }}
+      - name: Verify packaged archive
+        shell: bash
+        run: |
+          built=target/${{ matrix.target }}/release/${{ matrix.lib_name }}
+          packaged=go/lib/${{ matrix.lib_dir }}/${{ matrix.lib_name }}
+          test -f "$packaged"
+          cmp "$built" "$packaged"
+
+  test-go:
+    name: Test Go bindings (${{ matrix.target }})
+    needs: build-go
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+          # Apple Silicon runs x64 Go through Rosetta, which loads the x64 lib.
+          - target: x86_64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+            go_arch: amd64
+          - target: x86_64-pc-windows-msvc
+            host: blacksmith-4vcpu-windows-2025
+          # The Linux flavors test through `docker run` rather than container:
+          # jobs — JavaScript actions cannot run inside Alpine containers on
+          # arm64 runners.
+          - target: x86_64-unknown-linux-gnu
+            host: blacksmith-4vcpu-ubuntu-2404
+            image: golang:1.22-slim
+          - target: aarch64-unknown-linux-gnu
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            image: golang:1.22-slim
+          - target: x86_64-unknown-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404
+            image: golang:1.22-alpine
+          - target: aarch64-unknown-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            image: golang:1.22-alpine
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        if: ${{ !matrix.image }}
+        with:
+          go-version: '1.22'
+          architecture: ${{ matrix.go_arch || '' }}
+      - name: go test
+        if: ${{ !matrix.image }}
+        run: go test ./...
+        working-directory: go
+      - name: go test in container
+        if: ${{ matrix.image }}
+        run: >
+          docker run --rm -v ${{ github.workspace }}:/build -w /build/go
+          ${{ matrix.image }} sh -c
+          'go test ${{ contains(matrix.target, 'musl') && '-tags musl' || '' }} ./...'
+
   # The release page appears last: only once every registry publish has
-  # succeeded, carrying the Node addons, the wheels, and the sdist.
+  # succeeded, carrying the Node addons, wheels, and sdist.
   github-release:
     name: GitHub release
-    needs: [publish-npm, publish-crates, publish-pypi]
+    needs: [publish-npm, publish-crates, publish-pypi, test-go]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
