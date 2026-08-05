@@ -10,11 +10,15 @@ pub mod model;
 
 mod error;
 mod formats;
+#[cfg(feature = "ocr")]
+mod ocr;
 mod package;
 mod render;
 mod shared;
 
 pub use error::ConvertError;
+#[cfg(feature = "ocr")]
+pub use ocr::OcrInitError;
 
 use render::markdown::document_to_markdown;
 
@@ -29,17 +33,35 @@ use std::path::Path;
 /// Marked non-exhaustive so optional features can add fields without
 /// breaking construction in downstream crates.
 #[non_exhaustive]
-pub struct Converter;
+pub struct Converter {
+    #[cfg(feature = "ocr")]
+    ocr: Option<ocr::Engine>,
+}
 
 impl Converter {
     /// Create a converter with the default capabilities.
     pub fn new() -> Self {
-        Self
+        Self {
+            #[cfg(feature = "ocr")]
+            ocr: None,
+        }
     }
 
     /// Start building a configured converter.
     pub fn builder() -> ConverterBuilder {
         ConverterBuilder::new()
+    }
+
+    /// Whether this converter has local OCR configured.
+    pub fn has_ocr(&self) -> bool {
+        #[cfg(feature = "ocr")]
+        {
+            self.ocr.is_some()
+        }
+        #[cfg(not(feature = "ocr"))]
+        {
+            false
+        }
     }
 
     /// Convert a document file to Markdown. The format is detected from the
@@ -101,17 +123,43 @@ impl Default for Converter {
 /// Marked non-exhaustive so optional features can add fields without
 /// breaking construction in downstream crates.
 #[non_exhaustive]
-pub struct ConverterBuilder;
+pub struct ConverterBuilder {
+    #[cfg(feature = "ocr")]
+    ocr: Option<ocr::Engine>,
+}
 
 impl ConverterBuilder {
     /// Create a converter builder with the default capabilities.
     pub fn new() -> Self {
-        Self
+        Self {
+            #[cfg(feature = "ocr")]
+            ocr: None,
+        }
+    }
+
+    /// Load the RTen detection and recognition models used for local OCR.
+    ///
+    /// Model bytes are parsed immediately and retained by the converter built
+    /// from this builder. The library performs no download or filesystem
+    /// access. This method is available with the `ocr` Cargo feature. The
+    /// size limit is checked after the bytes are owned, so an oversized
+    /// borrowed slice is still copied once before rejection.
+    #[cfg(feature = "ocr")]
+    pub fn with_ocr_models(
+        mut self,
+        detection_model: impl Into<Vec<u8>>,
+        recognition_model: impl Into<Vec<u8>>,
+    ) -> Result<Self, OcrInitError> {
+        self.ocr = Some(ocr::Engine::from_bytes(detection_model.into(), recognition_model.into())?);
+        Ok(self)
     }
 
     /// Build the converter.
     pub fn build(self) -> Converter {
-        Converter::new()
+        Converter {
+            #[cfg(feature = "ocr")]
+            ocr: self.ocr,
+        }
     }
 }
 
@@ -248,5 +296,13 @@ mod tests {
         let converter = Converter::builder().build();
         let markdown = converter.to_markdown_bytes(input, Format::Rtf).unwrap();
         assert!(markdown.contains("converter builder"));
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn builder_rejects_invalid_ocr_models() {
+        let result = Converter::builder().with_ocr_models(vec![0, 1], vec![2, 3]);
+        let Err(error) = result else { panic!("invalid models were accepted") };
+        assert!(error.to_string().contains("detection model"));
     }
 }
