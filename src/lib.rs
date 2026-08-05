@@ -92,9 +92,19 @@ impl Converter {
         // PDFs convert to Markdown directly (pdf-inspector) without passing
         // through the document model.
         if format == Format::Pdf {
-            return formats::pdf::to_markdown(bytes);
+            return self.pdf_to_markdown(bytes);
         }
         Ok(document_to_markdown(&self.to_document(bytes, format)?))
+    }
+
+    /// Route the PDF through local OCR when this converter has an engine; the
+    /// unconfigured path is the crate's default behavior.
+    fn pdf_to_markdown(&self, bytes: &[u8]) -> Result<String, ConvertError> {
+        #[cfg(feature = "ocr")]
+        if let Some(engine) = self.ocr.as_ref() {
+            return formats::pdf::to_markdown_with_ocr(bytes, engine);
+        }
+        formats::pdf::to_markdown(bytes)
     }
 
     /// Parse an in-memory document into the document model. Pass a [`Format`]
