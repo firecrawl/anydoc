@@ -89,10 +89,13 @@ impl Converter {
         format: impl Into<Option<Format>>,
     ) -> Result<String, ConvertError> {
         let format = resolve_format(bytes, format.into())?;
-        // PDFs convert to Markdown directly (pdf-inspector) without passing
-        // through the document model.
+        // PDFs and images convert to Markdown directly (pdf-inspector and
+        // local OCR) without passing through the document model.
         if format == Format::Pdf {
             return self.pdf_to_markdown(bytes);
+        }
+        if format == Format::Image {
+            return self.image_to_markdown(bytes);
         }
         Ok(document_to_markdown(&self.to_document(bytes, format)?))
     }
@@ -105,6 +108,19 @@ impl Converter {
             return formats::pdf::to_markdown_with_ocr(bytes, engine);
         }
         formats::pdf::to_markdown(bytes)
+    }
+
+    /// Recognize an image document when this converter has an engine. An
+    /// image has no text layer to fall back on, so without one there is
+    /// nothing to convert.
+    fn image_to_markdown(&self, bytes: &[u8]) -> Result<String, ConvertError> {
+        #[cfg(feature = "ocr")]
+        if let Some(engine) = self.ocr.as_ref() {
+            return formats::image::to_markdown_with_ocr(bytes, engine);
+        }
+        #[cfg(not(feature = "ocr"))]
+        let _ = bytes;
+        Err(ConvertError::Unsupported("image has no extractable text: OCR is required".to_string()))
     }
 
     /// Parse an in-memory document into the document model. Pass a [`Format`]
@@ -214,6 +230,16 @@ pub enum Format {
     /// Delimiter-separated text (`.csv`). Carries no signature, so it has to
     /// be named rather than detected.
     Csv,
+    /// Raster image documents (PNG, JPEG, WebP, TIFF, BMP), detected by their
+    /// content signature. An image carries no text layer, so it converts with
+    /// local OCR when the converter has an engine configured and returns
+    /// [`ConvertError::Unsupported`] when it does not. [`to_document`] is
+    /// unsupported, as for [`Format::Pdf`]: recognition produces Markdown
+    /// directly.
+    ///
+    /// EXIF orientation is not applied in this version, so a photo stored
+    /// rotated is recognized in the orientation it is stored in.
+    Image,
 }
 
 impl Format {
@@ -242,6 +268,7 @@ impl Format {
             "ods" => Format::Ods,
             "odp" => Format::Odp,
             "csv" => Format::Csv,
+            "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "bmp" => Format::Image,
             _ => return None,
         })
     }
@@ -306,6 +333,37 @@ mod tests {
         let converter = Converter::builder().build();
         let markdown = converter.to_markdown_bytes(input, Format::Rtf).unwrap();
         assert!(markdown.contains("converter builder"));
+    }
+
+    /// Enough of a PNG to be detected; nothing here is ever decoded.
+    const PNG_HEADER: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+
+    #[test]
+    fn an_image_without_an_engine_is_unsupported() {
+        let error = Converter::new().to_markdown_bytes(PNG_HEADER, None).unwrap_err();
+
+        assert_eq!(error.code(), "unsupported");
+        assert!(error.to_string().contains("OCR is required"), "{error}");
+    }
+
+    /// A spreadsheet export whose first column is BMI opens with `BM`, the
+    /// bitmap signature. It carries no signature of its own, so detection has
+    /// to leave it to the extension rather than claim it as an image.
+    #[test]
+    fn a_csv_starting_with_bm_still_converts() {
+        let csv = b"BMI,weight,height\n22.5,70,1.76\n";
+
+        assert_eq!(Format::from_bytes(csv), None);
+        let markdown = Converter::new().to_markdown_bytes(csv, Format::Csv).unwrap();
+        assert!(markdown.contains("BMI"), "{markdown}");
+    }
+
+    #[test]
+    fn images_have_no_document_model() {
+        let error = Converter::new().to_document(PNG_HEADER, None).unwrap_err();
+
+        assert_eq!(error.code(), "unsupported");
+        assert!(error.to_string().contains("directly to Markdown"), "{error}");
     }
 
     #[cfg(feature = "ocr")]

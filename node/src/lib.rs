@@ -29,6 +29,10 @@ pub enum Format {
     ods,
     odp,
     csv,
+    /// Raster image documents (PNG, JPEG, WebP, TIFF, BMP). Recognized with
+    /// local OCR where it is configured, and unsupported otherwise;
+    /// `toDocument` is unsupported for images the same way it is for PDFs.
+    image,
 }
 
 impl From<Format> for anydoc::Format {
@@ -46,6 +50,7 @@ impl From<Format> for anydoc::Format {
             Format::ods => anydoc::Format::Ods,
             Format::odp => anydoc::Format::Odp,
             Format::csv => anydoc::Format::Csv,
+            Format::image => anydoc::Format::Image,
         }
     }
 }
@@ -65,6 +70,7 @@ impl From<anydoc::Format> for Format {
             anydoc::Format::Ods => Format::ods,
             anydoc::Format::Odp => Format::odp,
             anydoc::Format::Csv => Format::csv,
+            anydoc::Format::Image => Format::image,
         }
     }
 }

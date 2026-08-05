@@ -5,6 +5,8 @@ pub mod detect;
 mod doc;
 mod docx;
 mod epub;
+#[cfg(feature = "ocr")]
+pub mod image;
 mod odf;
 pub mod pdf;
 mod ppt;
@@ -33,6 +35,11 @@ pub fn parse(bytes: &[u8], format: Format) -> Result<Document, ConvertError> {
         // model for PDFs. `to_markdown_bytes` routes them to `pdf`.
         Format::Pdf => Err(ConvertError::Unsupported(
             "PDF converts directly to Markdown; use to_markdown or to_markdown_bytes".to_string(),
+        )),
+        // Recognized text is Markdown already; an image has no document
+        // model. `to_markdown_bytes` routes them to `image`.
+        Format::Image => Err(ConvertError::Unsupported(
+            "image converts directly to Markdown; use to_markdown or to_markdown_bytes".to_string(),
         )),
     }
 }

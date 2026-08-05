@@ -113,7 +113,13 @@ export declare const enum Format {
   xlsx = 'xlsx',
   ods = 'ods',
   odp = 'odp',
-  csv = 'csv'
+  csv = 'csv',
+  /**
+   * Raster image documents (PNG, JPEG, WebP, TIFF, BMP). Recognized with
+   * local OCR where it is configured, and unsupported otherwise;
+   * `toDocument` is unsupported for images the same way it is for PDFs.
+   */
+  image = 'image'
 }
 
 /**
