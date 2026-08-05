@@ -120,6 +120,9 @@ pub struct GridBuilder {
     /// [`limits::MAX_EXPANSION`] *before* any per-position work so a tiny
     /// document carrying a huge span cannot force unbounded insertions.
     expansion: u64,
+    /// When set, [`GridBuilder::finish`] keeps trailing rows that consist
+    /// only of covered positions instead of trimming them as filler.
+    keep_covered_extent: bool,
 }
 
 impl GridBuilder {
@@ -220,6 +223,15 @@ impl GridBuilder {
         }
     }
 
+    /// Preserve trailing rows that consist only of covered positions, rather
+    /// than trimming them as filler. Callers whose covered positions are a
+    /// source-declared extent - spreadsheet merges cover real cells even
+    /// when those cells are empty - opt in so `finish` does not collapse the
+    /// region down to its origin row.
+    pub fn keep_covered_extent(&mut self) {
+        self.keep_covered_extent = true;
+    }
+
     pub fn finish(mut self, kind: TableKind) -> Table {
         // Materialize every pending covered position in surviving rows,
         // including tails behind a gap (a short row under a span at a later
@@ -244,11 +256,12 @@ impl GridBuilder {
                 self.grid[row].push(CellSlot::Covered { origin_row, origin_col });
             }
         }
-        // Drop trailing all-empty rows.
+        // Drop trailing all-empty rows. Covered slots count as filler, unless
+        // the caller opted to preserve a source-declared covered extent.
         while self.grid.last().is_some_and(|r| {
             r.iter().all(|s| match s {
                 CellSlot::Origin(c) => c.is_empty(),
-                CellSlot::Covered { .. } => true,
+                CellSlot::Covered { .. } => !self.keep_covered_extent,
             })
         }) {
             self.grid.pop();
@@ -480,5 +493,43 @@ mod tests {
         b.place(Cell::default()).unwrap();
         let t = b.finish(TableKind::Data);
         assert_eq!(widths(&t), vec![1]);
+    }
+
+    #[test]
+    fn covered_extent_rows_survive_when_preserved() {
+        // A merge's covered rows are real structure: with the flag set they
+        // are kept, and the origin keeps its full span.
+        let mut b = GridBuilder::new();
+        b.keep_covered_extent();
+        b.next_row();
+        b.place(spanning_text("title", 2, 3)).unwrap();
+        b.next_row();
+        assert!(b.covered());
+        assert!(b.covered());
+        b.next_row();
+        assert!(b.covered());
+        assert!(b.covered());
+        let t = b.finish(TableKind::Data);
+        assert_eq!(t.grid.len(), 3);
+        assert!(matches!(&t.grid[0][0], CellSlot::Origin(c) if c.row_span == 3 && c.col_span == 2));
+        assert_spans_backed(&t);
+    }
+
+    #[test]
+    fn covered_extent_rows_trim_without_the_flag() {
+        // The default stays conservative: phantom covered rows are filler and
+        // get trimmed, clamping the span to what actually remains.
+        let mut b = GridBuilder::new();
+        b.next_row();
+        b.place(spanning_text("title", 2, 3)).unwrap();
+        b.next_row();
+        assert!(b.covered());
+        assert!(b.covered());
+        b.next_row();
+        assert!(b.covered());
+        assert!(b.covered());
+        let t = b.finish(TableKind::Data);
+        assert_eq!(t.grid.len(), 1);
+        assert!(matches!(&t.grid[0][0], CellSlot::Origin(c) if c.row_span == 1));
     }
 }
