@@ -18,6 +18,42 @@ export type ConvertErrorCode =
   | 'missingPart'
   /** The file could not be read, from `toMarkdown` only. */
   | 'io'
+  /**
+   * Local OCR was required for every page carrying content and recovered no
+   * text from any of them. Only a `Converter` conversion produces this.
+   */
+  | 'ocr'
+  /**
+   * The OCR models could not be loaded, from `Converter.create` only.
+   */
+  | 'ocrInit'
+/**
+ * A reusable converter that carries local OCR.
+ *
+ * The models are parsed once, when the converter is created, and every
+ * conversion made with it shares that engine; nothing is rebuilt per call.
+ * The module-level functions keep their own behavior, which never uses OCR.
+ */
+export declare class Converter {
+  /**
+   * Parse the OCR models and build a converter that reuses them. Parsing
+   * runs off the event loop.
+   *
+   * Rejects with an `Error` carrying a `ConvertErrorCode` on `code`:
+   * `'ocrInit'` when the models cannot be loaded.
+   */
+  static create(models: OcrModels): Promise<Converter>
+  /**
+   * Convert an in-memory document to Markdown, recognizing the pages that
+   * need OCR. Without a format, it is detected from the content, which
+   * signature-less formats (CSV) have to name explicitly. Conversion runs
+   * off the event loop.
+   *
+   * Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
+   */
+  toMarkdownBytes(bytes: Uint8Array, format?: Format | undefined | null): Promise<string>
+}
+
 /**
  * An embedded binary asset (image, object payload). Bytes are always
  * retained, so a document stays self-contained.
@@ -239,6 +275,17 @@ export interface Note {
 export declare const enum NoteKind {
   footnote = 'footnote',
   endnote = 'endnote'
+}
+
+/**
+ * The RTen models local OCR needs, as bytes the caller supplies. anydoc
+ * performs no download and no filesystem access of its own.
+ */
+export interface OcrModels {
+  /** The text-detection model. */
+  detectionModel: Uint8Array
+  /** The text-recognition model. */
+  recognitionModel: Uint8Array
 }
 
 /** Fully resolved character style. */

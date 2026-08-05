@@ -1,5 +1,7 @@
 //! Node.js bindings for anydoc.
 
+use std::sync::Arc;
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
@@ -140,6 +142,118 @@ pub fn to_document(bytes: Uint8Array, format: Option<Format>) -> AsyncTask<Docum
     })
 }
 
+/// The RTen models local OCR needs, as bytes the caller supplies. anydoc
+/// performs no download and no filesystem access of its own.
+#[napi(object)]
+pub struct OcrModels {
+    /// The text-detection model.
+    pub detection_model: Uint8Array,
+    /// The text-recognition model.
+    pub recognition_model: Uint8Array,
+}
+
+/// A reusable converter that carries local OCR.
+///
+/// The models are parsed once, when the converter is created, and every
+/// conversion made with it shares that engine; nothing is rebuilt per call.
+/// The module-level functions keep their own behavior, which never uses OCR.
+#[napi]
+pub struct Converter {
+    // anydoc's converter is Send + Sync, so concurrent calls can share one.
+    inner: Arc<anydoc::Converter>,
+}
+
+#[napi]
+impl Converter {
+    /// Parse the OCR models and build a converter that reuses them. Parsing
+    /// runs off the event loop.
+    ///
+    /// Rejects with an `Error` carrying a `ConvertErrorCode` on `code`:
+    /// `'ocrInit'` when the models cannot be loaded.
+    #[napi(ts_return_type = "Promise<Converter>")]
+    pub fn create(models: OcrModels) -> AsyncTask<ConverterTask> {
+        AsyncTask::new(ConverterTask {
+            detection_model: models.detection_model.to_vec(),
+            recognition_model: models.recognition_model.to_vec(),
+            failure: Failure::default(),
+        })
+    }
+
+    /// Convert an in-memory document to Markdown, recognizing the pages that
+    /// need OCR. Without a format, it is detected from the content, which
+    /// signature-less formats (CSV) have to name explicitly. Conversion runs
+    /// off the event loop.
+    ///
+    /// Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn to_markdown_bytes(
+        &self,
+        bytes: Uint8Array,
+        format: Option<Format>,
+    ) -> AsyncTask<ConverterMarkdownTask> {
+        AsyncTask::new(ConverterMarkdownTask {
+            converter: Arc::clone(&self.inner),
+            bytes: bytes.to_vec(),
+            format: format.map(Into::into),
+            failure: Failure::default(),
+        })
+    }
+}
+
+pub struct ConverterTask {
+    detection_model: Vec<u8>,
+    recognition_model: Vec<u8>,
+    failure: Failure,
+}
+
+impl Task for ConverterTask {
+    type Output = anydoc::Converter;
+    type JsValue = Converter;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let detection = std::mem::take(&mut self.detection_model);
+        let recognition = std::mem::take(&mut self.recognition_model);
+        let builder = anydoc::Converter::builder()
+            .with_ocr_models(detection, recognition)
+            .map_err(|e| self.failure.capture_init(e))?;
+        Ok(builder.build())
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(Converter { inner: Arc::new(output) })
+    }
+
+    fn reject(&mut self, env: Env, error: Error) -> Result<Self::JsValue> {
+        Err(self.failure.reject(env, error))
+    }
+}
+
+pub struct ConverterMarkdownTask {
+    converter: Arc<anydoc::Converter>,
+    bytes: Vec<u8>,
+    format: Option<anydoc::Format>,
+    failure: Failure,
+}
+
+impl Task for ConverterMarkdownTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        self.converter
+            .to_markdown_bytes(&self.bytes, self.format)
+            .map_err(|e| self.failure.capture(e))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+
+    fn reject(&mut self, env: Env, error: Error) -> Result<Self::JsValue> {
+        Err(self.failure.reject(env, error))
+    }
+}
+
 /// The kind of a failed conversion, held between the two threads a rejection
 /// crosses: `compute` runs on the libuv pool, where there is no `Env` to build
 /// a JS error with, and `reject` runs on the JS thread, where there is.
@@ -150,6 +264,13 @@ impl Failure {
     /// Keep the kind, and hand napi the message to reject with.
     fn capture(&mut self, error: anydoc::ConvertError) -> Error {
         self.0 = Some(error.code());
+        Error::from_reason(error.to_string())
+    }
+
+    /// Loading OCR models fails before any conversion starts, so it carries
+    /// its own code rather than one of `ConvertError`'s.
+    fn capture_init(&mut self, error: anydoc::OcrInitError) -> Error {
+        self.0 = Some("ocrInit");
         Error::from_reason(error.to_string())
     }
 

@@ -11,7 +11,8 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-anydoc = { path = ".." }
+# The published binaries ship OCR support; the models stay caller-supplied.
+anydoc = { path = "..", features = ["ocr"] }
 napi = { version = "3", default-features = false, features = ["napi4"] }
 napi-derive = "3"
 
