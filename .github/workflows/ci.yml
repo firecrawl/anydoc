@@ -22,9 +22,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # Browser bindings live in wasm/; this locked check keeps the root
+      # crate and every parser dependency buildable for that target.
+      - run: cargo check -p anydoc --target wasm32-unknown-unknown --locked
       # Root package only: the node/ and python/ binding crates are cdylib-only
       # and their test harnesses cannot link outside a Node/Python host; they
       # are covered by the node and python jobs instead.
