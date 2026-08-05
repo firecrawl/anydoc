@@ -100,7 +100,7 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
                 }
             }
             Norm::Link { content, target } => render_link(content, target, ctx, rc, &mut out),
-            Norm::Image { alt, source } => render_image(alt, source, ctx, in_label, &mut out),
+            Norm::Image { alt, source } => render_image(alt, source, ctx, in_label, rc, &mut out),
             Norm::Anchor(id) => {
                 if let Some(html_id) = rc.anchors.html_id(id) {
                     let _ = write!(out, "<a id=\"{html_id}\"></a>");
@@ -153,18 +153,22 @@ fn render_image(
     source: &ImageSource,
     ctx: InlineContext,
     in_label: bool,
+    rc: &Ctx,
     out: &mut String,
 ) {
     match source {
-        ImageSource::External(url) => {
-            let alt =
-                escape_text(alt.trim(), ctx, EscapeOpts { in_label: true, ..Default::default() });
-            let _ = write!(out, "![{}]({})", alt, format_url(url));
-        }
-        // Embedded assets render as their alt text: Markdown cannot embed
-        // bytes, and the bytes stay available in `Document::assets`. A
-        // source-less image has only its alt text to offer.
-        ImageSource::Asset(_) | ImageSource::Unavailable => {
+        ImageSource::External(url) => render_image_url(alt, url, ctx, out),
+        ImageSource::Asset(id) => match rc.asset_urls.get(id) {
+            Some(url) => render_image_url(alt, url, ctx, out),
+            None if !alt.trim().is_empty() => out.push_str(&escape_text(
+                alt.trim(),
+                ctx,
+                EscapeOpts { in_label, ..Default::default() },
+            )),
+            None => {}
+        },
+        // A source-less image has only its alt text to offer.
+        ImageSource::Unavailable => {
             if !alt.trim().is_empty() {
                 out.push_str(&escape_text(
                     alt.trim(),
@@ -174,6 +178,11 @@ fn render_image(
             }
         }
     }
+}
+
+fn render_image_url(alt: &str, url: &str, ctx: InlineContext, out: &mut String) {
+    let alt = escape_text(alt.trim(), ctx, EscapeOpts { in_label: true, ..Default::default() });
+    let _ = write!(out, "![{}]({})", alt, format_url(url));
 }
 
 /// Emit a styled run, moving edge whitespace outside the delimiters.

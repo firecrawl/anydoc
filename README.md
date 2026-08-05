@@ -54,6 +54,15 @@ const fromCsv = await toMarkdownBytes(bytes, 'csv');
 
 // Or stop at the document model, which also carries embedded assets:
 const document = await toDocument(bytes);
+
+// Upload the assets, then render their URLs at the original positions:
+const assetUrls = Object.fromEntries(await Promise.all(
+  document.assets.map(async (asset) => [
+    asset.id,
+    await upload(asset.data, asset.mediaType),
+  ])
+));
+const withImages = await toMarkdownBytes(bytes, null, { assetUrls });
 ```
 
 > Full API reference: [node/README.md](node/README.md)
@@ -129,7 +138,7 @@ let document = anydoc::to_document(&bytes, None)?;
 
 - **One output for every format.** Each format parses into a shared document model and renders through a single Markdown serializer, so escaping, tables, heading anchors, and footnotes behave identically whether the input was a `.doc` from 2003 or a `.pptx` from yesterday.
 - **Full document structure.** Headings with anchors, bold/italic/strikethrough, inline code and code blocks, links and internal cross-references, bulleted/numbered/nested/task lists with the source's own numbering, tables with merged cells and header rows, block quotes, footnotes and endnotes, and speaker notes.
-- **Embedded assets.** Images and embedded objects render as their alt text in the Markdown, and the raw bytes stay available on the document model, tagged with their media type. Images with an external URL become ordinary Markdown images.
+- **Embedded assets.** Images and embedded objects render as their alt text by default, and the raw bytes stay available on the document model, tagged with their media type. Pass resolved asset URLs when rendering to place embedded images at their original document positions.
 - **Content-based format detection.** The format is read from the bytes themselves (PDF header, RTF open group, OLE stream names, ZIP package mimetype), so mislabeled files still convert correctly.
 - **Fast.** Pure Rust, no ML models, no external services. Median conversion time is under 5ms per document.
 - **Bindings that stay out of the way.** Node.js conversion runs on the libuv thread pool and never blocks the event loop; Python releases the GIL so other threads keep running. TypeScript types and Python stubs ship with the packages.

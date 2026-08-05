@@ -52,6 +52,15 @@ const fromCsv = await toMarkdownBytes(bytes, 'csv');
 
 // Or stop at the document model, which also carries embedded assets:
 const document = await toDocument(bytes);
+
+// After uploading those assets, render their URLs at the original positions:
+const assetUrls = Object.fromEntries(await Promise.all(
+  document.assets.map(async (asset) => [
+    asset.id,
+    await upload(asset.data, asset.mediaType),
+  ])
+));
+const withImages = await toMarkdownBytes(bytes, null, { assetUrls });
 ```
 
 ## Format detection
@@ -66,7 +75,7 @@ formatFromPath('report.odt'); // 'odt'
 
 ## Images and embedded objects
 
-Markdown cannot embed bytes, so an embedded image renders as its alt text while the bytes stay on `document.assets`, tagged with a media type and the part they came from. Images that carry an external URL render as ordinary Markdown images.
+Markdown cannot embed bytes, so an embedded image renders as its alt text by default while the bytes stay on `document.assets`, tagged with a media type and the part they came from. After storing those bytes and obtaining URLs, pass `{ assetUrls: { [asset.id]: url } }` as the third argument to `toMarkdownBytes`; resolved images become ordinary Markdown images at their original document positions. Missing mappings keep the default alt-text behavior.
 
 Full behavior notes and benchmarks live in the [repository README](https://github.com/firecrawl/anydoc#readme).
 

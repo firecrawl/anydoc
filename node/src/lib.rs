@@ -2,10 +2,18 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use std::collections::HashMap;
 
 mod document;
 
 pub use document::*;
+
+/// Options that customize Markdown rendering.
+#[napi(object)]
+pub struct MarkdownOptions {
+    /// Resolved URLs keyed by the string form of `Asset.id`.
+    pub asset_urls: Option<HashMap<String, String>>,
+}
 
 /// Input format, named after the extension that identifies it. Container
 /// variants that share a parser (`.docm`, `.xlsm`, `.ppsx`, ...) map onto
@@ -100,13 +108,20 @@ pub fn to_markdown(path: String) -> AsyncTask<MarkdownFileTask> {
 
 /// Convert an in-memory document to Markdown. Without a format, it is
 /// detected from the content, which signature-less formats (CSV) have to name
-/// explicitly.
+/// explicitly. Pass resolved URLs in `options.assetUrls`, keyed by `Asset.id`,
+/// to render embedded images at their original document positions. Missing
+/// mappings keep the default alt-text rendering.
 #[napi(ts_return_type = "Promise<string>")]
 pub fn to_markdown_bytes(
     bytes: Uint8Array,
     format: Option<Format>,
+    options: Option<MarkdownOptions>,
 ) -> AsyncTask<MarkdownBytesTask> {
-    AsyncTask::new(MarkdownBytesTask { bytes: bytes.to_vec(), format: format.map(Into::into) })
+    AsyncTask::new(MarkdownBytesTask {
+        bytes: bytes.to_vec(),
+        format: format.map(Into::into),
+        asset_urls: options.and_then(|options| options.asset_urls).unwrap_or_default(),
+    })
 }
 
 /// Parse an in-memory document into the document model, which also carries
@@ -139,6 +154,7 @@ impl Task for MarkdownFileTask {
 pub struct MarkdownBytesTask {
     bytes: Vec<u8>,
     format: Option<anydoc::Format>,
+    asset_urls: HashMap<String, String>,
 }
 
 impl Task for MarkdownBytesTask {
@@ -146,7 +162,15 @@ impl Task for MarkdownBytesTask {
     type JsValue = String;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        anydoc::to_markdown_bytes(&self.bytes, self.format).map_err(to_napi_error)
+        let mut options = anydoc::MarkdownOptions::default();
+        for (id, url) in &self.asset_urls {
+            let id = id
+                .parse::<usize>()
+                .map_err(|_| Error::from_reason(format!("invalid asset id: {id}")))?;
+            options.asset_urls.insert(anydoc::model::AssetId(id), url.clone());
+        }
+        anydoc::to_markdown_bytes_with_options(&self.bytes, self.format, &options)
+            .map_err(to_napi_error)
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {

@@ -16,9 +16,23 @@ mod shared;
 
 pub use error::ConvertError;
 
-use render::markdown::document_to_markdown;
+use render::markdown::{document_to_markdown, document_to_markdown_with_options};
 
+use std::collections::HashMap;
 use std::path::Path;
+
+/// Options that customize Markdown rendering without changing the parsed
+/// document model.
+#[derive(Debug, Clone, Default)]
+pub struct MarkdownOptions {
+    /// Resolved URLs for embedded assets, keyed by their [`model::AssetId`].
+    ///
+    /// A resolved image renders as an ordinary Markdown image at its original
+    /// document position. An unresolved image keeps the default behavior and
+    /// renders as alt text, so an empty map is byte-for-byte compatible with
+    /// [`to_markdown_bytes`].
+    pub asset_urls: HashMap<model::AssetId, String>,
+}
 
 /// Input format. Selects the parser; container variants that share a parser
 /// (docm, xlsm, ...) map onto these via [`Format::from_bytes`] or
@@ -116,13 +130,34 @@ pub fn to_markdown_bytes(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
 ) -> Result<String, ConvertError> {
+    to_markdown_bytes_with_options(bytes, format, &MarkdownOptions::default())
+}
+
+/// Convert an in-memory document to Markdown with custom rendering options.
+/// Pass a [`Format`] to select the parser, or `None` to detect it from the
+/// content ([`Format::from_bytes`]).
+///
+/// Embedded images whose asset ids occur in [`MarkdownOptions::asset_urls`]
+/// render as Markdown images at their original document position. Missing
+/// mappings preserve the default alt-text rendering. Options have no effect
+/// on PDFs because their converter emits Markdown directly.
+pub fn to_markdown_bytes_with_options(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+    options: &MarkdownOptions,
+) -> Result<String, ConvertError> {
     let format = resolve_format(bytes, format.into())?;
     // PDFs convert to Markdown directly (pdf-inspector) without passing
     // through the document model.
     if format == Format::Pdf {
         return formats::pdf::to_markdown(bytes);
     }
-    Ok(document_to_markdown(&to_document(bytes, format)?))
+    let document = to_document(bytes, format)?;
+    if options.asset_urls.is_empty() {
+        Ok(document_to_markdown(&document))
+    } else {
+        Ok(document_to_markdown_with_options(&document, options))
+    }
 }
 
 /// Parse an in-memory document into the document model. Pass a [`Format`] to
