@@ -61,11 +61,42 @@ try {
 
 `error.message` carries the detail, naming the package part at fault where the format identifies one. TypeScript gets the union as `ConvertErrorCode`. The crate's `io` code has no counterpart here: there is no filesystem to read from.
 
+## Local OCR
+
+Scanned PDFs and image documents carry no text to extract, so reading them needs OCR. It ships behind the `ocr` cargo feature, which is off by default because it multiplies the module size; build with `--features ocr` to get the `Converter` class.
+
+The two RTen models are a separate download that you supply as `Uint8Array`s. They are parsed once, when the converter is constructed, and every conversion made with it reuses that engine:
+
+```js
+const [detectionModel, recognitionModel] = await Promise.all([
+  fetch('/models/text-detection.rten').then((r) => r.arrayBuffer()),
+  fetch('/models/text-recognition.rten').then((r) => r.arrayBuffer()),
+])
+
+const converter = new Converter({
+  detectionModel: new Uint8Array(detectionModel),
+  recognitionModel: new Uint8Array(recognitionModel),
+})
+
+const markdown = converter.toMarkdownBytes(new Uint8Array(pdfBytes), 'pdf')
+```
+
+A failed model load throws an `Error` with `'ocrInit'` on `code`.
+
+Run it in a Web Worker. Recognition is CPU-bound and blocks whatever thread it runs on, so doing this on the UI thread freezes the page for as long as a document takes. Load the module and build the converter inside the worker, keep the converter alive between messages so the models are parsed once, and post only the bytes and the Markdown across.
+
 ## Building
 
 ```bash
 wasm-pack build wasm --release --target web --scope firecrawl
-node --test wasm/test.mjs
+ANYDOC_WASM_OCR_BUILD=0 node --test wasm/test.mjs
+```
+
+`ANYDOC_WASM_OCR_BUILD` tells the suite which build it is looking at, so the test that guards the feature gate has an expectation of its own to check. Build and test the OCR package the same way:
+
+```bash
+wasm-pack build wasm --release --target web --scope firecrawl -- --features ocr
+ANYDOC_WASM_OCR_BUILD=1 node --test wasm/test.mjs
 ```
 
 This produces the npm package in `wasm/pkg/`: the module, the JS glue, and TypeScript definitions. Publishing runs from [`../.github/workflows/release.yml`](../.github/workflows/release.yml) on release tags.
