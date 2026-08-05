@@ -30,7 +30,30 @@ encoding_rs = "0.8.35"
 log = "0.4"
 pdf-inspector = "0.1.7"
 quick-xml = "0.41.0"
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+# `zip` is split by target so that only the wasm32 build gives anything up.
+#
+# One default codec blocks wasm32: `zstd` compiles a bundled C library through
+# cc-rs, and clang has no wasm32 target for it. Every other default codec is pure
+# Rust and builds fine. Dropping them all for every target would also remove them
+# from the native, Node, and Python builds, so this narrows the loss to wasm.
+#
+# No packaging format anydoc reads (OOXML, ODF, epub) stores entries with zstd, so
+# the wasm build loses no supported input.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+zip = "8.6.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+zip = { version = "8.6.0", default-features = false, features = [
+    "aes-crypto",
+    "bzip2",
+    "deflate",
+    "deflate64",
+    "lzma",
+    "ppmd",
+    "time",
+    "xz",
+] }
 
 [profile.release]
 lto = "thin"
