@@ -152,12 +152,19 @@ fn recognize_page<O: PageOcr>(bytes: &[u8], page: u32, ocr: &O) -> Result<Vec<St
     let lines = ocr
         .recognize_page(rendered.width, rendered.height, &rendered.pixels)
         .map_err(|error| error.to_string())?;
-    Ok(lines
+    Ok(recognized_lines(&lines))
+}
+
+/// The Markdown lines recognized text contributes, shared by every OCR
+/// frontend: line endings normalized, blank lines dropped, syntax escaped.
+#[cfg(feature = "ocr")]
+pub(super) fn recognized_lines(lines: &[String]) -> Vec<String> {
+    lines
         .iter()
         .flat_map(|line| line.split(['\r', '\n']))
         .filter(|line| !line.trim().is_empty())
         .map(escape_block_syntax)
-        .collect())
+        .collect()
 }
 
 /// Escape whatever a recognized line opens with that GFM would read as a

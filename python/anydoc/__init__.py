@@ -31,7 +31,8 @@ from anydoc._anydoc import (
 )
 
 Format = Literal[
-    "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "xlsx", "ods", "odp", "csv"
+    "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "xlsx", "ods", "odp", "csv",
+    "image"
 ]
 """Input format, named after the extension that identifies it. Container
 variants that share a parser (`.docm`, `.xlsm`, `.ppsx`, ...) map onto these

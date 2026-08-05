@@ -19,7 +19,7 @@ include = ["/src", "/examples/convert.rs", "/README.md", "/LICENSE"]
 
 [features]
 default = []
-ocr = ["dep:ocrs", "dep:rten", "pdf-inspector/render"]
+ocr = ["dep:image", "dep:ocrs", "dep:rten", "pdf-inspector/render"]
 
 [dev-dependencies]
 insta = "1"
@@ -31,6 +31,7 @@ cfb = "0.14.0"
 csv = "1.4.0"
 flate2 = "1"
 encoding_rs = "0.8.35"
+image = { version = "0.25.10", optional = true, default-features = false, features = ["bmp", "jpeg", "png", "tiff", "webp"] }
 log = "0.4"
 ocrs = { version = "0.12.2", optional = true }
 pdf-inspector = "0.1.7"
