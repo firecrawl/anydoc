@@ -2,6 +2,7 @@
 
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, TableKind};
+use crate::package::limits;
 use crate::shared::text::clean_text;
 use calamine::{Data, Dimensions, Reader, Sheets, open_workbook_auto_from_rs};
 use std::collections::{HashMap, HashSet};
@@ -44,26 +45,54 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         // Merged regions in range-relative coordinates: the top-left cell
         // becomes a spanning origin, the other positions are covered.
         let start = range.start().unwrap_or((0, 0));
-        let (height, width) = (range.height(), range.width());
+        let (start_r, start_c) = (start.0 as u64, start.1 as u64);
+        let (mut height, mut width) = (range.height() as u64, range.width() as u64);
+        let regions = merged.get(name.as_str()).map(Vec::as_slice).unwrap_or_default();
+        // A merge anchored inside the used range declares its covered cells
+        // as real extent even when those cells hold no data: grow the grid to
+        // the merge's far boundary instead of clipping the span to the
+        // populated range. Growth is capped at the expansion budget, so an
+        // oversized region keeps the clipped behavior below rather than
+        // forcing a huge grid.
+        let mut preserve_extent = false;
+        if !regions.is_empty() {
+            let mut far_rows = height;
+            let mut far_cols = width;
+            for d in regions {
+                let (ar, ac) = (d.start.0 as u64, d.start.1 as u64);
+                if ar < start_r || ac < start_c || ar >= start_r + height || ac >= start_c + width {
+                    continue;
+                }
+                far_rows = far_rows.max((d.end.0 as u64 + 1).saturating_sub(start_r));
+                far_cols = far_cols.max((d.end.1 as u64 + 1).saturating_sub(start_c));
+            }
+            if (far_rows != height || far_cols != width)
+                && far_rows.saturating_mul(far_cols) <= limits::MAX_EXPANSION
+            {
+                height = far_rows;
+                width = far_cols;
+                preserve_extent = true;
+            }
+        }
         let mut origins: HashMap<(usize, usize), (u32, u32)> = HashMap::new();
         let mut covered: HashSet<(usize, usize)> = HashSet::new();
-        for d in merged.get(name.as_str()).map(Vec::as_slice).unwrap_or_default() {
-            // Intersect the absolute merged region with the used range first:
-            // a region wholly above or left of the range must not saturate
-            // onto relative (0,0), and positions outside the range are never
+        for d in regions {
+            // Intersect the absolute merged region with the effective grid
+            // first: a region wholly above or left of it must not saturate
+            // onto relative (0,0), and positions outside the grid are never
             // materialized (a crafted region list must not force insertions
             // beyond the cells that actually exist).
             let (row0, col0) = (d.start.0.max(start.0), d.start.1.max(start.1));
-            let row_end = (d.end.0 as u64 + 1).min(start.0 as u64 + height as u64);
-            let col_end = (d.end.1 as u64 + 1).min(start.1 as u64 + width as u64);
+            let row_end = (d.end.0 as u64 + 1).min(start_r + height);
+            let col_end = (d.end.1 as u64 + 1).min(start_c + width);
             if (row0 as u64) >= row_end || (col0 as u64) >= col_end {
                 continue;
             }
             // Translate the non-empty intersection to range-relative form.
             let r0 = (row0 - start.0) as usize;
             let c0 = (col0 - start.1) as usize;
-            let r1 = (row_end - start.0 as u64) as usize;
-            let c1 = (col_end - start.1 as u64) as usize;
+            let r1 = (row_end - start_r) as usize;
+            let c1 = (col_end - start_c) as usize;
             if r1 - r0 == 1 && c1 - c0 == 1 {
                 continue;
             }
@@ -77,14 +106,22 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             }
         }
         let mut builder = GridBuilder::new();
-        for (r, row) in range.rows().enumerate() {
+        if preserve_extent {
+            builder.keep_covered_extent();
+        }
+        for r in 0..height as usize {
             builder.next_row();
-            for (c, data) in row.iter().enumerate() {
+            for c in 0..width as usize {
                 if covered.contains(&(r, c)) {
                     builder.covered();
                     continue;
                 }
-                let text = format_data(data);
+                // Absolute position; cells the grid grew into beyond the
+                // populated range read as None and become empty cells.
+                let text = match range.get_value((start.0 + r as u32, start.1 + c as u32)) {
+                    Some(data) => format_data(data),
+                    None => String::new(),
+                };
                 let cell = if text.is_empty() {
                     Cell::default()
                 } else {
@@ -211,9 +248,31 @@ mod tests {
 
     /// Minimal xlsx with a used range at D11:E12 and the given merged region.
     fn xlsx_with_merge(merge_ref: &str) -> Vec<u8> {
-        let sheet = format!(
-            r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="11"><c r="D11" t="inlineStr"><is><t>x</t></is></c><c r="E11" t="inlineStr"><is><t>y</t></is></c></row><row r="12"><c r="D12" t="inlineStr"><is><t>z</t></is></c><c r="E12" t="inlineStr"><is><t>w</t></is></c></row></sheetData><mergeCells count="1"><mergeCell ref="{merge_ref}"/></mergeCells></worksheet>"#
-        );
+        zip_xlsx(&xlsx_sheet_xml(
+            &[("11", &[("D11", "x"), ("E11", "y")]), ("12", &[("D12", "z"), ("E12", "w")])],
+            merge_ref,
+        ))
+    }
+
+    /// `rows` groups (row number, cells) as `(cell reference, value)` pairs.
+    fn xlsx_sheet_xml(rows: &[(&str, &[(&str, &str)])], merge_ref: &str) -> String {
+        let mut data = String::new();
+        for (rn, cells) in rows {
+            data.push_str(&format!(r#"<row r="{rn}">"#));
+            for (cell, value) in *cells {
+                data.push_str(&format!(
+                    r#"<c r="{cell}" t="inlineStr"><is><t>{value}</t></is></c>"#
+                ));
+            }
+            data.push_str("</row>");
+        }
+        format!(
+            r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{data}</sheetData><mergeCells count="1"><mergeCell ref="{merge_ref}"/></mergeCells></worksheet>"#
+        )
+    }
+
+    /// Package one worksheet into a single-sheet workbook.
+    fn zip_xlsx(sheet: &str) -> Vec<u8> {
         let parts: &[(&str, &str)] = &[
             (
                 "[Content_Types].xml",
@@ -266,6 +325,74 @@ mod tests {
         // old relative saturation mapped it onto (0,0) and covered D12.
         let doc = parse(&xlsx_with_merge("A1:B12")).unwrap();
         assert_eq!(covered_count(&doc), 0, "out-of-range merge must not cover cells");
+    }
+
+    fn origin(doc: &Document, row: usize, col: usize) -> crate::model::Cell {
+        let Some(Block::Table(t)) = doc.blocks.first() else {
+            panic!("expected a table, got {:?}", doc.blocks.first());
+        };
+        match &t.grid[row][col] {
+            crate::model::CellSlot::Origin(cell) => cell.clone(),
+            crate::model::CellSlot::Covered { .. } => {
+                panic!("expected an origin at ({row},{col})")
+            }
+        }
+    }
+
+    #[test]
+    fn merge_spanning_past_the_populated_range_is_preserved() {
+        // Issue #8: the only populated cell (F1) anchors a merge that extends
+        // beyond the populated range; the span must not collapse to 1x1.
+        let doc = parse(&zip_xlsx(&xlsx_sheet_xml(&[("1", &[("F1", "Merged heading")])], "F1:O3")))
+            .unwrap();
+        let Some(Block::Table(t)) = doc.blocks.first() else {
+            panic!("expected a table, got {:?}", doc.blocks.first());
+        };
+        assert_eq!(t.grid.len(), 3, "grid must cover the merge rows");
+        assert_eq!(t.grid[0].len(), 10, "grid must cover the merge columns");
+        let origin = origin(&doc, 0, 0);
+        assert_eq!(origin.row_span, 3);
+        assert_eq!(origin.col_span, 10);
+        assert_eq!(covered_count(&doc), 3 * 10 - 1);
+    }
+
+    #[test]
+    fn merge_past_the_range_keeps_content_below() {
+        // A merge anchored at F1 extends past the populated range while data
+        // continues below it; the merge keeps its span and the data survives.
+        let doc = parse(&zip_xlsx(&xlsx_sheet_xml(
+            &[("1", &[("F1", "Merged heading")]), ("4", &[("F4", "a"), ("G4", "b")])],
+            "F1:O3",
+        )))
+        .unwrap();
+        let Some(Block::Table(t)) = doc.blocks.first() else {
+            panic!("expected a table, got {:?}", doc.blocks.first());
+        };
+        assert_eq!(t.grid.len(), 4);
+        assert_eq!(t.grid[0].len(), 10);
+        let origin = origin(&doc, 0, 0);
+        assert_eq!(origin.row_span, 3);
+        assert_eq!(origin.col_span, 10);
+        assert_eq!(covered_count(&doc), 3 * 10 - 1);
+    }
+
+    #[test]
+    fn oversized_merge_falls_back_to_the_populated_range() {
+        // A merge whose materialized area would blow the expansion budget is
+        // clipped to the populated range rather than forcing a huge grid.
+        let doc = parse(&zip_xlsx(&xlsx_sheet_xml(
+            &[("1", &[("F1", "Merged heading")])],
+            "F1:XFD1048576",
+        )))
+        .unwrap();
+        let Some(Block::Table(t)) = doc.blocks.first() else {
+            panic!("expected a table, got {:?}", doc.blocks.first());
+        };
+        assert_eq!(t.grid.len(), 1);
+        assert_eq!(t.grid[0].len(), 1);
+        let origin = origin(&doc, 0, 0);
+        assert_eq!((origin.row_span, origin.col_span), (1, 1));
+        assert_eq!(covered_count(&doc), 0);
     }
 
     #[test]

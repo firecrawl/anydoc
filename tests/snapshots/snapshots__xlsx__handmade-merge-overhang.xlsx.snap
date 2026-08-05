@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+|  |  |
+| --- | --- |
+| Merged heading |  |
+|  |  |
+|  |  |
+| Metric | Value |
+| Height | 120 |
+| Weight | 34 |
