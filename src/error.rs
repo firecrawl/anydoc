@@ -38,6 +38,12 @@ pub enum ConvertError {
         /// The part or stream that was absent.
         part: String,
     },
+    /// Local OCR was required for every page carrying content and recovered
+    /// no text from any of them.
+    Ocr {
+        /// What was recognized or rendered, and why nothing usable remained.
+        reason: String,
+    },
     /// The input could not be read.
     Io(std::io::Error),
 }
@@ -57,6 +63,7 @@ impl fmt::Display for ConvertError {
                 write!(f, "resource limit exceeded ({limit}): {detail}")
             }
             ConvertError::MissingPart { part } => write!(f, "missing required part: {part}"),
+            ConvertError::Ocr { reason } => write!(f, "OCR recovered no text: {reason}"),
             ConvertError::Io(e) => write!(f, "io error: {e}"),
         }
     }
@@ -88,6 +95,7 @@ impl ConvertError {
             ConvertError::Encrypted => "encrypted",
             ConvertError::ResourceLimit { .. } => "resourceLimit",
             ConvertError::MissingPart { .. } => "missingPart",
+            ConvertError::Ocr { .. } => "ocr",
             ConvertError::Io(_) => "io",
         }
     }
@@ -122,6 +130,7 @@ mod tests {
         let limit = ConvertError::ResourceLimit { limit: "max_entry_bytes", detail: String::new() };
         assert_eq!(limit.code(), "resourceLimit");
         assert_eq!(ConvertError::MissingPart { part: String::new() }.code(), "missingPart");
+        assert_eq!(ConvertError::Ocr { reason: String::new() }.code(), "ocr");
         assert_eq!(ConvertError::Io(std::io::ErrorKind::NotFound.into()).code(), "io");
     }
 }

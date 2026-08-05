@@ -19,7 +19,7 @@ include = ["/src", "/examples/convert.rs", "/README.md", "/LICENSE"]
 
 [features]
 default = []
-ocr = ["dep:ocrs", "dep:rten"]
+ocr = ["dep:ocrs", "dep:rten", "pdf-inspector/render"]
 
 [dev-dependencies]
 insta = "1"
@@ -41,3 +41,6 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 [profile.release]
 lto = "thin"
 strip = "symbols"
+
+[patch.crates-io]
+pdf-inspector = { git = "https://github.com/massimodeluisa/pdf-inspector.git", rev = "433629e84cc880b450ac71ccf968e10df2b7299d" }
