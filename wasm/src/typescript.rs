@@ -8,6 +8,33 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPESCRIPT: &str = r#"
+/**
+ * Why a conversion failed, named after the Rust `ConvertError` variant.
+ *
+ * - `unsupported`   unknown format, or no convertible content. A scanned PDF
+ *                   with no text layer reports this.
+ * - `malformed`     structurally unusable input
+ * - `encrypted`     password-protected document
+ * - `resourceLimit` a fixed safety limit was exceeded
+ * - `missingPart`   a part required for any output is absent
+ * - `io`            the input could not be read
+ */
+export type ConvertErrorKind =
+  | 'unsupported'
+  | 'malformed'
+  | 'encrypted'
+  | 'resourceLimit'
+  | 'missingPart'
+  | 'io'
+
+/**
+ * The error `toMarkdownBytes` and `toDocument` throw. `kind` names the cause, so
+ * a caller can branch on it instead of matching the message text.
+ */
+export interface ConvertError extends Error {
+  kind: ConvertErrorKind
+}
+
 export interface Document {
   blocks: Array<Block>
   /**

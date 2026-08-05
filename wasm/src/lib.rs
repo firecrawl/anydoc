@@ -97,7 +97,7 @@ pub fn format_from_path(path: &str) -> Option<Format> {
 /// detected from the content, which signature-less formats (CSV) have to name
 /// explicitly.
 #[wasm_bindgen(js_name = toMarkdownBytes)]
-pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String, JsError> {
+pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String, JsValue> {
     anydoc::to_markdown_bytes(bytes, format.map(anydoc::Format::from)).map_err(convert_error)
 }
 
@@ -107,13 +107,44 @@ pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String,
 /// Unsupported for `pdf`: PDF conversion produces Markdown directly and has
 /// no document-model form; use `toMarkdownBytes`.
 #[wasm_bindgen(js_name = toDocument, unchecked_return_type = "Document")]
-pub fn to_document(bytes: &[u8], format: Option<Format>) -> Result<JsValue, JsError> {
+pub fn to_document(bytes: &[u8], format: Option<Format>) -> Result<JsValue, JsValue> {
     let document =
         anydoc::to_document(bytes, format.map(anydoc::Format::from)).map_err(convert_error)?;
     serde_wasm_bindgen::to_value(&Document::from(document))
-        .map_err(|error| JsError::new(&error.to_string()))
+        .map_err(|error| js_sys::Error::new(&error.to_string()).into())
 }
 
-fn convert_error(error: anydoc::ConvertError) -> JsError {
-    JsError::new(&error.to_string())
+/// Stable, machine-readable name for a `ConvertError` variant.
+///
+/// `ConvertError` is `#[non_exhaustive]`, so the catch-all keeps this compiling
+/// when a new variant lands.
+fn error_kind(error: &anydoc::ConvertError) -> &'static str {
+    use anydoc::ConvertError;
+    match error {
+        ConvertError::Unsupported(_) => "unsupported",
+        ConvertError::Malformed { .. } => "malformed",
+        ConvertError::Encrypted => "encrypted",
+        ConvertError::ResourceLimit { .. } => "resourceLimit",
+        ConvertError::MissingPart { .. } => "missingPart",
+        ConvertError::Io(_) => "io",
+        _ => "unsupported",
+    }
+}
+
+/// Build the thrown error, carrying the `ConvertError` variant as `kind`.
+///
+/// The message alone forces a caller to match on English prose to tell an
+/// encrypted document from an unreadable one. `kind` names the variant instead,
+/// so a caller can branch on the cause and keep the message for humans.
+fn convert_error(error: anydoc::ConvertError) -> JsValue {
+    let js_error = js_sys::Error::new(&error.to_string());
+    js_error.set_name("ConvertError");
+    // Setting a plain property on a fresh object cannot fail, so drop the result
+    // rather than panic inside an error path.
+    let _ = js_sys::Reflect::set(
+        &js_error,
+        &JsValue::from_str("kind"),
+        &JsValue::from_str(error_kind(&error)),
+    );
+    js_error.into()
 }

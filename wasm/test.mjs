@@ -70,3 +70,29 @@ test('format detection reads content, extension, and path', () => {
 test('conversion errors throw with the crate error message', () => {
   assert.throws(() => toMarkdownBytes(new TextEncoder().encode('not a document'), 'docx'), /malformed|unsupported/)
 })
+
+const caught = (run) => {
+  try {
+    run()
+  } catch (error) {
+    return error
+  }
+  throw new Error('expected a throw')
+}
+
+test('conversion errors name the cause in kind', () => {
+  // `kind` lets a caller branch on the cause. Matching the message text is the
+  // alternative, and that breaks whenever the wording changes.
+  const unrecognized = caught(() => toMarkdownBytes(new TextEncoder().encode('not a document')))
+  assert.equal(unrecognized.name, 'ConvertError')
+  assert.equal(unrecognized.kind, 'unsupported')
+  assert.equal(typeof unrecognized.message, 'string')
+
+  const named = caught(() => toMarkdownBytes(new TextEncoder().encode('not a document'), 'docx'))
+  assert.ok(['malformed', 'unsupported'].includes(named.kind))
+
+  // Every variant maps to one of these names.
+  const kinds = ['unsupported', 'malformed', 'encrypted', 'resourceLimit', 'missingPart', 'io']
+  assert.ok(kinds.includes(unrecognized.kind))
+  assert.ok(kinds.includes(named.kind))
+})
