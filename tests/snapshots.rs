@@ -177,6 +177,25 @@ fn rtf_inline_picture_is_retained() {
     assert!(png.bytes.starts_with(&[0x89, b'P', b'N', b'G']), "payload decodes from hex");
 }
 
+/// A merge anchored on the only populated cell but extending past the used
+/// range keeps its full span in the document model; the rendered Markdown
+/// trims the empty tail, so the span is only observable here.
+#[test]
+fn xlsx_merge_past_the_used_range_is_retained() {
+    let bytes = std::fs::read(fixture_root().join("xlsx").join("handmade-overhang.xlsx")).unwrap();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Excel).unwrap();
+    let Some(anydoc::model::Block::Table(t)) = doc.blocks.first() else {
+        panic!("expected a table, got {:?}", doc.blocks.first());
+    };
+    assert_eq!((t.grid.len(), t.grid[0].len()), (3, 10), "grid covers the F1:O3 merge");
+    assert!(
+        matches!(&t.grid[0][0], anydoc::model::CellSlot::Origin(c)
+            if c.row_span == 3 && c.col_span == 10),
+        "origin keeps the source span: {:?}",
+        t.grid[0][0]
+    );
+}
+
 /// Resource-abuse fixtures must hard-fail with `ResourceLimit` - the one
 /// class of malformed input that never converts.
 #[test]

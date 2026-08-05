@@ -244,13 +244,15 @@ impl GridBuilder {
                 self.grid[row].push(CellSlot::Covered { origin_row, origin_col });
             }
         }
-        // Drop trailing all-empty rows.
-        while self.grid.last().is_some_and(|r| {
-            r.iter().all(|s| match s {
-                CellSlot::Origin(c) => c.is_empty(),
-                CellSlot::Covered { .. } => true,
-            })
-        }) {
+        // Drop trailing rows of nothing but empty origin cells. Rows claimed
+        // by a span (covered positions) are structure the producer declared
+        // — dropping them would clamp the span and silently shrink a valid
+        // source merge — so they survive even without content of their own.
+        while self
+            .grid
+            .last()
+            .is_some_and(|r| r.iter().all(|s| matches!(s, CellSlot::Origin(c) if c.is_empty())))
+        {
             self.grid.pop();
         }
         // Clamp stored spans to the surviving grid so every claimed
@@ -418,18 +420,35 @@ mod tests {
     }
 
     #[test]
-    fn trimmed_rows_clamp_surviving_spans() {
-        // A row-span whose covered rows are trimmed as trailing filler must
-        // not keep claiming them.
+    fn trailing_rows_claimed_by_a_span_survive() {
+        // Rows holding only covered positions are structure a producer
+        // declared (a source merge reaching into empty rows): trimming them
+        // would silently shrink the span.
         let mut b = GridBuilder::new();
         b.next_row();
         b.place(Cell::spanning(vec![Block::Paragraph(vec![Inline::plain("x")])], 1, 3)).unwrap();
         b.next_row();
         b.next_row();
         let t = b.finish(TableKind::Data);
-        assert_eq!(t.grid.len(), 1);
-        assert!(matches!(&t.grid[0][0], CellSlot::Origin(c) if c.row_span == 1));
+        assert_eq!(t.grid.len(), 3);
+        assert!(matches!(&t.grid[0][0], CellSlot::Origin(c) if c.row_span == 3));
+        assert!(matches!(t.grid[1][0], CellSlot::Covered { origin_row: 0, origin_col: 0 }));
+        assert!(matches!(t.grid[2][0], CellSlot::Covered { origin_row: 0, origin_col: 0 }));
         assert_spans_backed(&t);
+    }
+
+    #[test]
+    fn trailing_rows_of_empty_origins_still_trim() {
+        // Rows of plain empty cells stay filler; only span-claimed rows are
+        // exempt from the trailing trim.
+        let mut b = GridBuilder::new();
+        b.next_row();
+        b.place(text_cell("x")).unwrap();
+        b.next_row();
+        b.place(Cell::default()).unwrap();
+        b.next_row();
+        let t = b.finish(TableKind::Data);
+        assert_eq!(t.grid.len(), 1);
     }
 
     #[test]
