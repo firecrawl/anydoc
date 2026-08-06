@@ -75,11 +75,19 @@ fn parse_presentation(pres: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertEr
         let mut body = Vec::new();
         let mut notes = Vec::new();
         walk_shapes(page, ctx, &mut title, &mut body, &mut notes)?;
-        blocks.append(&mut title);
-        blocks.append(&mut body);
+        let mut page_blocks: Vec<Block> = Vec::new();
+        page_blocks.append(&mut title);
+        page_blocks.append(&mut body);
         // Speaker notes are included (fixed policy), set off as a quote.
         if !notes.is_empty() {
-            blocks.push(Block::BlockQuote(notes));
+            page_blocks.push(Block::BlockQuote(notes));
+        }
+        // Separate pages with a thematic break — see the pptx parser for why.
+        if !page_blocks.is_empty() {
+            if !blocks.is_empty() {
+                blocks.push(Block::Rule);
+            }
+            blocks.append(&mut page_blocks);
         }
     }
     Ok(blocks)
