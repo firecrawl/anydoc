@@ -9,12 +9,13 @@ mod tables;
 
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Note, NoteKind, Style, inlines_are_empty};
+use crate::package::limits;
 use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::field_result;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::text::clean_text;
-use lexer::{Lexer, Token};
+use lexer::{Lexer, Token, scan_prelude};
 use std::collections::HashMap;
 use table::TableState;
 use tables::{LIST_LEVELS, Prelude, codepage_encoding, parse_prelude};
@@ -23,26 +24,17 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     if !bytes.starts_with(b"{\\rtf") {
         return Err(ConvertError::malformed("not an RTF file"));
     }
-    // The code page must be known before the font table decodes; scan the
-    // header for \ansicpg first.
-    let default_encoding = scan_codepage(bytes);
-    let prelude = parse_prelude(bytes, default_encoding);
+    // One header scan finds the codepage and prelude tables; the main
+    // parse pass below is the only other full lex.
+    let scan = scan_prelude(bytes);
+    let default_encoding = scan
+        .codepage
+        .map(|cp| codepage_encoding(cp.max(0) as u32))
+        .unwrap_or(encoding_rs::WINDOWS_1252);
+    let prelude = parse_prelude(&scan, default_encoding);
     let mut parser = Parser::new(bytes, prelude, default_encoding);
     parser.run()?;
     parser.finish()
-}
-
-fn scan_codepage(bytes: &[u8]) -> &'static encoding_rs::Encoding {
-    // \ansicpg sits in the header, but generator comments and extra header
-    // words can push it past any fixed prefix; the lexer scan is linear and
-    // stops at the first match.
-    let mut lexer = Lexer::new(bytes);
-    while let Some(token) = lexer.next_token() {
-        if let Token::Word { name: "ansicpg", param: Some(cp) } = token {
-            return codepage_encoding(cp.max(0) as u32);
-        }
-    }
-    encoding_rs::WINDOWS_1252
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -436,6 +428,12 @@ impl<'a> Parser<'a> {
             match token {
                 Token::Open => {
                     self.flush_pending();
+                    if self.stack.len() >= limits::MAX_RTF_DEPTH {
+                        return Err(ConvertError::ResourceLimit {
+                            limit: "max_rtf_depth",
+                            detail: format!("group nesting exceeds {}", limits::MAX_RTF_DEPTH),
+                        });
+                    }
                     self.stack.push(self.state);
                 }
                 Token::Close => {
@@ -1035,6 +1033,16 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn group_nesting_depth_is_capped() {
+        let mut src = br"{\rtf1".to_vec();
+        for _ in 0..(limits::MAX_RTF_DEPTH + 2) {
+            src.push(b'{');
+        }
+        let err = parse(&src).unwrap_err();
+        assert!(matches!(err, ConvertError::ResourceLimit { limit: "max_rtf_depth", .. }));
+    }
 
     #[test]
     fn missing_list_table_keeps_listtext_marker() {
