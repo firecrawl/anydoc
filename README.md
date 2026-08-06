@@ -32,7 +32,7 @@ npx @firecrawl/anydoc slides.pptx -o slides.md  # or to a file
 npx @firecrawl/anydoc - --format csv < data.csv # read stdin
 ```
 
-`npx` downloads the prebuilt binary for your platform on first run. For a permanent `anydoc` command, install globally with `npm install -g @firecrawl/anydoc`. Run `anydoc --help` for all options.
+`npx` downloads the prebuilt binary for your platform on first run. For a permanent `anydoc` command, install globally with `npm install -g @firecrawl/anydoc`, or build the same CLI from source with `cargo install anydoc`. Run `anydoc --help` for all options.
 
 ### Node.js
 
