@@ -207,8 +207,10 @@ pub enum Format {
     /// OpenDocument Text (`.odt`).
     Odt,
     /// Converted with [pdf-inspector], which emits Markdown directly:
-    /// [`to_document`] is unsupported for PDFs. Scanned/image-only PDFs
-    /// (needing OCR) error as unsupported.
+    /// [`to_document`] is unsupported for PDFs. Pages that carry no
+    /// extractable text need OCR: a converter without an engine reports them
+    /// as unsupported, while one built with OCR models (the `ocr` feature)
+    /// recognizes exactly those pages and merges them with the rest.
     ///
     /// [pdf-inspector]: https://github.com/firecrawl/pdf-inspector
     Pdf,
