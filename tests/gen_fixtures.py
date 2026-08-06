@@ -1359,6 +1359,47 @@ def merge_rtf():
 
 
 # ---------------------------------------------------------------------------
+# Quote and code paragraph styles map to their block containers; the names
+# cover the Word, Pandoc, and LibreOffice writers, inherited through basedOn.
+
+def styleroles_docx():
+    def p(style, text):
+        return (f'<w:p><w:pPr><w:pStyle w:val="{style}"/></w:pPr>'
+                f'<w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>')
+
+    highlighted_code = (
+        '<w:p><w:pPr><w:pStyle w:val="SourceCode"/></w:pPr>'
+        '<w:r><w:rPr><w:rStyle w:val="KeywordTok"/></w:rPr><w:t>fn</w:t></w:r>'
+        '<w:r><w:t xml:space="preserve"> main() { println!("ok | *raw*"); }</w:t></w:r></w:p>')
+    document = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document {W}><w:body>
+{p("Quote", "A quoted paragraph.")}
+{p("Quote", "Its second paragraph, same quotation.")}
+<w:p><w:r><w:t>Plain text between the containers.</w:t></w:r></w:p>
+{highlighted_code}
+{p("SourceCode", "let x = 1;")}
+{p("DerivedQuote", "Quoted through a basedOn chain.")}
+{p("PreformattedText", "LibreOffice preformatted line.")}
+</w:body></w:document>"""
+    styles = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles {W}>
+<w:docDefaults><w:rPrDefault><w:rPr/></w:rPrDefault></w:docDefaults>
+<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/></w:style>
+<w:style w:type="paragraph" w:styleId="DerivedQuote"><w:name w:val="Derived Quote"/><w:basedOn w:val="Quote"/></w:style>
+<w:style w:type="paragraph" w:styleId="SourceCode"><w:name w:val="Source Code"/></w:style>
+<w:style w:type="character" w:styleId="KeywordTok"><w:name w:val="KeywordTok"/><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="PreformattedText"><w:name w:val="Preformatted Text"/></w:style>
+</w:styles>"""
+    ct = CONTENT_TYPES_BASE.format(extra="")
+    write_zip(OUT / "docx" / "handmade-styleroles.docx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/document.xml", document),
+        ("word/styles.xml", styles),
+    ])
+
+
+# ---------------------------------------------------------------------------
 # R10/R11: per-chapter CSS cascades and spine-only anchor classification
 
 def css_links_epub():
@@ -1739,6 +1780,7 @@ def main():
     order_pptx()
     css_links_epub()
     merge_rtf()
+    styleroles_docx()
     multimaster_ppt()
     sparsenotes_ppt()
     tables_docx()

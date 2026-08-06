@@ -39,6 +39,25 @@ impl Toggles {
     }
 }
 
+/// Block container a paragraph style names. Producers mark quotations and
+/// code with well-known built-in style names rather than dedicated markup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParaRole {
+    Quote,
+    Code,
+}
+
+/// The role a style *name* declares: Word's built-ins ("Quote", "Intense
+/// Quote", "HTML Preformatted"), Pandoc's writer ("Source Code", "Block
+/// Text"), LibreOffice's Writer ("Quotations", "Preformatted Text").
+fn name_role(name: &str) -> Option<ParaRole> {
+    match name.to_ascii_lowercase().as_str() {
+        "quote" | "intense quote" | "block text" | "quotations" => Some(ParaRole::Quote),
+        "source code" | "preformatted text" | "html preformatted" => Some(ParaRole::Code),
+        _ => None,
+    }
+}
+
 pub struct Styles<'a> {
     chains: StyleChains<'a, Element>,
     /// docDefaults as absolute values (the base the toggles flip over).
@@ -114,6 +133,15 @@ impl<'a> Styles<'a> {
                 .parse::<u8>()
                 .ok()?;
             Some(if level < 9 { Some(level + 1) } else { None })
+        })
+    }
+
+    /// The block role a paragraph style resolves to from its name,
+    /// inherited through `basedOn` like [`Styles::heading_level`].
+    pub fn para_role(&self, id: &str) -> Result<Option<ParaRole>, ConvertError> {
+        self.chains.walk(id, |style| {
+            let name = style.find(ns::W, "name").and_then(|e| e.attr(ns::W, "val"))?;
+            name_role(name)
         })
     }
 
@@ -220,6 +248,24 @@ mod tests {
         let flip = Toggles { bold: true, ..Default::default() };
         assert!(!flip.apply_over(base).bold);
         assert!(flip.xor(flip).apply_over(base).bold);
+    }
+
+    #[test]
+    fn para_role_matches_producer_names_through_basedon() {
+        let styles_xml = r#"<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/></w:style>
+            <w:style w:type="paragraph" w:styleId="MyQuote"><w:name w:val="My Quote"/><w:basedOn w:val="Quote"/></w:style>
+            <w:style w:type="paragraph" w:styleId="SourceCode"><w:name w:val="Source Code"/></w:style>
+            <w:style w:type="paragraph" w:styleId="Body"><w:name w:val="Body Text"/></w:style>
+        </w:styles>"#;
+        let root = parse(styles_xml);
+        let styles = Styles::parse(root.find(ns::W, "styles").unwrap());
+        assert_eq!(styles.para_role("Quote").unwrap(), Some(ParaRole::Quote));
+        // A custom name inherits its role through basedOn.
+        assert_eq!(styles.para_role("MyQuote").unwrap(), Some(ParaRole::Quote));
+        assert_eq!(styles.para_role("SourceCode").unwrap(), Some(ParaRole::Code));
+        assert_eq!(styles.para_role("Body").unwrap(), None);
+        assert_eq!(styles.para_role("Missing").unwrap(), None);
     }
 
     #[test]

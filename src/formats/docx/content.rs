@@ -2,9 +2,10 @@
 
 use crate::error::ConvertError;
 use crate::formats::docx::numbering::{Counters, Numbering};
-use crate::formats::docx::styles::{Styles, on_off, rpr_delta};
+use crate::formats::docx::styles::{ParaRole, Styles, on_off, rpr_delta};
 use crate::model::{
     Block, Cell, GridBuilder, ImageSource, Inline, LinkTarget, Style, TableKind, inlines_are_empty,
+    inlines_to_plain_text,
 };
 use crate::package::Package;
 use crate::package::relationships::{RelTarget, Relationships, TargetMode, rel_target_bytes};
@@ -98,6 +99,10 @@ pub(super) enum ParaKind {
         number: u64,
         label: Option<String>,
     },
+    /// A quotation paragraph, mapped from its style name.
+    Quote,
+    /// A code paragraph, mapped from its style name.
+    Code,
     Plain,
 }
 
@@ -180,6 +185,42 @@ fn emit_paragraph(
             }
             blocks.extend(after);
         }
+        ParaKind::Quote => {
+            flush_list(blocks, list_run);
+            let (inlines, after) = split_pieces(pieces);
+            let mut inner = Vec::new();
+            if !inlines_are_empty(&inlines) {
+                inner.push(Block::Paragraph(inlines));
+            }
+            inner.extend(after);
+            // Consecutive quote paragraphs are one quotation: the source
+            // styles each paragraph, the container itself has no marker.
+            if !inner.is_empty() {
+                if let Some(Block::BlockQuote(prev)) = blocks.last_mut() {
+                    prev.extend(inner);
+                } else {
+                    blocks.push(Block::BlockQuote(inner));
+                }
+            }
+        }
+        ParaKind::Code => {
+            flush_list(blocks, list_run);
+            let (inlines, after) = split_pieces(pieces);
+            // Code is verbatim: styled runs (bold keywords, highlight
+            // tokens) flatten to their text, in-paragraph breaks are lines.
+            let line = inlines_to_plain_text(&inlines);
+            match blocks.last_mut() {
+                // Consecutive code paragraphs are lines of one block,
+                // blank lines between them included.
+                Some(Block::CodeBlock { text, .. }) => {
+                    text.push('\n');
+                    text.push_str(&line);
+                }
+                _ if line.trim().is_empty() => {}
+                _ => blocks.push(Block::CodeBlock { lang: None, text: line }),
+            }
+            blocks.extend(after);
+        }
         ParaKind::Plain => {
             flush_list(blocks, list_run);
             // Emit in source order: paragraph text split around attachments.
@@ -222,6 +263,14 @@ fn parse_paragraph(p: &Element, ctx: &Ctx) -> Result<(ParaKind, Vec<Piece>), Con
     };
     let paragraph_level = parity.apply_over(ctx.styles.doc_defaults);
 
+    // Style-named containers: heading and numbering semantics keep
+    // precedence (a numbered quote stays a list item), so a role only
+    // types an otherwise plain paragraph.
+    let role = match pstyle_id {
+        Some(id) if heading.is_none() && numbering.is_none() => ctx.styles.para_role(id)?,
+        _ => None,
+    };
+
     let kind = match heading {
         Some(level) => {
             let label = match &numbering {
@@ -234,7 +283,11 @@ fn parse_paragraph(p: &Element, ctx: &Ctx) -> Result<(ParaKind, Vec<Piece>), Con
         }
         None => match numbering {
             Some((ilvl, key, number, label)) => ParaKind::ListItem { ilvl, key, number, label },
-            None => ParaKind::Plain,
+            None => match role {
+                Some(ParaRole::Quote) => ParaKind::Quote,
+                Some(ParaRole::Code) => ParaKind::Code,
+                None => ParaKind::Plain,
+            },
         },
     };
 

@@ -1,0 +1,20 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+> A quoted paragraph.
+>
+> Its second paragraph, same quotation.
+
+Plain text between the containers.
+
+```
+fn main() { println!("ok | *raw*"); }
+let x = 1;
+```
+
+> Quoted through a basedOn chain.
+
+```
+LibreOffice preformatted line.
+```

@@ -174,6 +174,57 @@ mod tests {
         assert!(doc.assets.is_empty(), "external images are not retained as assets");
     }
 
+    #[test]
+    fn quote_and_code_styles_become_their_blocks() {
+        // Producers mark quotations and code with built-in paragraph style
+        // names, not dedicated markup; adjacent same-role paragraphs form
+        // one container, and code flattens styled runs to verbatim text.
+        let document = format!(
+            r#"<w:document {W}><w:body>
+            <w:p><w:pPr><w:pStyle w:val="Quote"/></w:pPr><w:r><w:t>quoted one</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Quote"/></w:pPr><w:r><w:t>quoted two</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="SourceCode"/></w:pPr>
+                <w:r><w:rPr><w:b/></w:rPr><w:t>fn</w:t></w:r>
+                <w:r><w:t xml:space="preserve"> main() {{}}</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="SourceCode"/></w:pPr><w:r><w:t>let x = 1;</w:t></w:r></w:p>
+            </w:body></w:document>"#
+        );
+        let styles = format!(
+            r#"<w:styles {W}>
+            <w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/></w:style>
+            <w:style w:type="paragraph" w:styleId="SourceCode"><w:name w:val="Source Code"/></w:style>
+            </w:styles>"#
+        );
+        let bytes = docx_parts(&[("word/document.xml", &document), ("word/styles.xml", &styles)]);
+        let doc = parse(&bytes).unwrap();
+        assert_eq!(doc.blocks.len(), 2, "{:?}", doc.blocks);
+        let Block::BlockQuote(inner) = &doc.blocks[0] else { panic!("{:?}", doc.blocks) };
+        assert_eq!(inner.len(), 2, "one quotation of two paragraphs");
+        let Block::CodeBlock { text, lang } = &doc.blocks[1] else { panic!("{:?}", doc.blocks) };
+        assert_eq!(text, "fn main() {}\nlet x = 1;");
+        assert_eq!(*lang, None);
+    }
+
+    #[test]
+    fn heading_and_numbering_keep_precedence_over_style_roles() {
+        // A quote-styled paragraph that carries an outline level is still a
+        // heading; the role only types otherwise plain paragraphs.
+        let document = format!(
+            r#"<w:document {W}><w:body>
+            <w:p><w:pPr><w:pStyle w:val="Quote"/><w:outlineLvl w:val="0"/></w:pPr>
+            <w:r><w:t>heading text</w:t></w:r></w:p>
+            </w:body></w:document>"#
+        );
+        let styles = format!(
+            r#"<w:styles {W}>
+            <w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/></w:style>
+            </w:styles>"#
+        );
+        let bytes = docx_parts(&[("word/document.xml", &document), ("word/styles.xml", &styles)]);
+        let doc = parse(&bytes).unwrap();
+        assert!(matches!(doc.blocks[0], Block::Heading { level: 1, .. }), "{:?}", doc.blocks);
+    }
+
     fn numbering_with_start(start: &str) -> String {
         format!(
             r#"<w:numbering {W}>
