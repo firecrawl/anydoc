@@ -2,6 +2,7 @@
 
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, TableKind};
+use crate::package::limits;
 use crate::shared::header::resolve_header_rows;
 use crate::shared::text::clean_text;
 use calamine::{Data, Dimensions, Reader, Sheets, open_workbook_auto_from_rs};
@@ -61,13 +62,23 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             // The span keeps the region's full extent past the used range: a
             // merge anchored on populated cells but reaching into empty rows
             // or columns is source structure and must not silently collapse
-            // to the populated rectangle. `GridBuilder::place` charges the
-            // whole span against the expansion budget, so a crafted huge
-            // region fails as a resource limit rather than materializing.
+            // to the populated rectangle. A region whose full extent would
+            // blow the expansion budget (a crafted or whole-column merge)
+            // degrades to today's clipped form instead — the file still
+            // converts, it just loses the overhang.
             let r0 = (row0 - start.0) as usize;
             let c0 = (col0 - start.1) as usize;
-            let r1 = (d.end.0 as u64 + 1 - start.0 as u64) as usize;
-            let c1 = (d.end.1 as u64 + 1 - start.1 as u64) as usize;
+            let full_row_end = d.end.0 as u64 + 1 - start.0 as u64;
+            let full_col_end = d.end.1 as u64 + 1 - start.1 as u64;
+            let area = (full_row_end - r0 as u64).saturating_mul(full_col_end - c0 as u64);
+            let (r1, c1) = if area <= limits::MAX_EXPANSION {
+                (full_row_end as usize, full_col_end as usize)
+            } else {
+                (
+                    (clipped_row_end - start.0 as u64) as usize,
+                    (clipped_col_end - start.1 as u64) as usize,
+                )
+            };
             if r1 - r0 == 1 && c1 - c0 == 1 {
                 continue;
             }
@@ -326,12 +337,16 @@ mod tests {
     }
 
     #[test]
-    fn oversized_merge_fails_as_a_resource_limit() {
-        // A crafted whole-sheet merge must not materialize: the span area is
-        // charged against the expansion budget before any expansion.
+    fn oversized_merge_degrades_to_the_clipped_form() {
+        // A crafted whole-sheet merge must not materialize a huge grid, but
+        // the file must still convert: the region degrades to the populated
+        // range (here 1x1) instead of erroring.
         let sheet = r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>x</t></is></c></row></sheetData><mergeCells count="1"><mergeCell ref="A1:XFD1048576"/></mergeCells></worksheet>"#;
-        let err = parse(&xlsx_with_sheet(sheet)).unwrap_err();
-        assert!(matches!(err, ConvertError::ResourceLimit { limit: "max_expansion", .. }));
+        let doc = parse(&xlsx_with_sheet(sheet)).unwrap();
+        let t = first_table(&doc);
+        assert_eq!((t.grid.len(), t.grid[0].len()), (1, 1));
+        assert!(matches!(&t.grid[0][0], crate::model::CellSlot::Origin(c)
+            if c.row_span == 1 && c.col_span == 1));
     }
 
     #[test]
