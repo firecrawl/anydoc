@@ -96,3 +96,29 @@ jobs:
       # Must run from the repo root: with python/ as cwd, the source anydoc/
       # package dir shadows the installed compiled module.
       - run: python -m unittest discover -s python/tests
+
+  docker:
+    name: Docker image (CLI)
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    # CI builds amd64 only; arm64 emulation under QEMU is slow and the
+    # Dockerfile is arch-neutral (verified locally on the darwin/arm64 host).
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        run: docker build -t anydoc .
+      - name: Smoke convert (non-empty Markdown)
+        run: |
+          set -o pipefail
+          docker run --rm -v "$PWD":/work -w /work anydoc convert tests/fixtures/docx/text.docx > /tmp/out.md
+          test -s /tmp/out.md
+      - name: No-args prints usage and exits non-zero
+        run: |
+          set +e
+          docker run --rm anydoc > /tmp/usage.txt 2>&1
+          code=$?
+          if [ "$code" -eq 0 ]; then
+            echo "::error::no-args invocation exited 0; expected non-zero"
+            exit 1
+          fi
+          grep -q 'usage:' /tmp/usage.txt
