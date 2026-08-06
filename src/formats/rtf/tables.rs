@@ -1,7 +1,7 @@
 //! RTF prelude tables parsed into typed definitions: the font table (with
 //! per-font charsets), the style sheet, and the list/list-override tables.
 
-use crate::formats::rtf::lexer::{Lexer, Token, destination_groups};
+use crate::formats::rtf::lexer::{Lexer, PreludeScan, Token};
 use crate::shared::blockstyle::{self, BlockStyle};
 use crate::shared::delta::StyleDelta;
 use crate::shared::list::MarkerKind;
@@ -80,20 +80,20 @@ pub struct Prelude {
     pub lists: HashMap<i32, ListDef>,
 }
 
-pub fn parse_prelude(bytes: &[u8], default_encoding: &'static encoding_rs::Encoding) -> Prelude {
+pub fn parse_prelude(scan: &PreludeScan<'_>, default_encoding: &'static encoding_rs::Encoding) -> Prelude {
     let mut prelude = Prelude::default();
 
-    for group in destination_groups(bytes, "fonttbl") {
+    for group in &scan.fonttbl {
         parse_fonttbl(group, &mut prelude.fonts, default_encoding);
     }
-    for group in destination_groups(bytes, "stylesheet") {
+    for group in &scan.stylesheet {
         parse_stylesheet(group, &mut prelude.styles, default_encoding);
     }
     let mut by_list_id: HashMap<i32, ListDef> = HashMap::new();
-    for group in destination_groups(bytes, "listtable") {
+    for group in &scan.listtable {
         parse_listtable(group, &mut by_list_id, default_encoding);
     }
-    for group in destination_groups(bytes, "listoverridetable") {
+    for group in &scan.listoverridetable {
         parse_overrides(group, &by_list_id, &mut prelude.lists, default_encoding);
     }
     prelude
