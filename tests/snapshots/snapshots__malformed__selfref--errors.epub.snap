@@ -1,0 +1,5 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+ERROR: malformed document: no chapter in the book could be read
