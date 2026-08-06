@@ -1359,6 +1359,28 @@ def merge_rtf():
 
 
 # ---------------------------------------------------------------------------
+# Cocoa RTF: TextEdit ends every body paragraph with `\` + newline instead of
+# a spelled-out \par; the escaped newline is a paragraph mark per the spec.
+
+def newline_rtf():
+    parts = [
+        b"{\\rtf1\\ansi\\ansicpg1252\\cocoartf2822",
+        b"\\cocoatextscaling0\\cocoaplatform0{\\fonttbl\\f0\\fswiss\\fcharset0 Helvetica;}",
+        b"{\\colortbl;\\red255\\green255\\blue255;}",
+        b"{\\*\\expandedcolortbl;;}",
+        b"\\paperw11900\\paperh16840\\margl1440\\margr1440\\vieww11520\\viewh8400\\viewkind0",
+        b"\\pard\\tx566\\pardirnatural\\partightenfactor0",
+        b"",
+        # Every `\` at end of line below is an escaped newline: one \par.
+        b"\\f0\\fs24 \\cf0 First Cocoa paragraph.\\",
+        b"Second paragraph, ended by an escaped LF.\\",
+        b"\\b Bold third paragraph\\b0 , mark escaped as CRLF.\\\r\nFourth paragraph with an \\'e9 accent.}",
+    ]
+    (OUT / "rtf").mkdir(parents=True, exist_ok=True)
+    (OUT / "rtf" / "handmade-newline.rtf").write_bytes(b"\n".join(parts))
+
+
+# ---------------------------------------------------------------------------
 # R10/R11: per-chapter CSS cascades and spine-only anchor classification
 
 def css_links_epub():
@@ -1739,6 +1761,7 @@ def main():
     order_pptx()
     css_links_epub()
     merge_rtf()
+    newline_rtf()
     multimaster_ppt()
     sparsenotes_ppt()
     tables_docx()

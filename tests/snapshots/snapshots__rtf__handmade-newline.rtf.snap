@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+First Cocoa paragraph.
+
+Second paragraph, ended by an escaped LF.
+
+**Bold third paragraph**, mark escaped as CRLF.
+
+Fourth paragraph with an é accent.

@@ -1045,6 +1045,18 @@ mod tests {
     }
 
     #[test]
+    fn escaped_newline_ends_the_paragraph() {
+        // Cocoa's writer ends body paragraphs with `\` + newline instead of
+        // a spelled-out \par; both forms must break paragraphs identically.
+        let escaped = "{\\rtf1 Alpha\\\nBeta\\\r\nGamma}";
+        let spelled = r"{\rtf1 Alpha\par Beta\par Gamma}";
+        let convert =
+            |src: &str| crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(convert(escaped), "Alpha\n\nBeta\n\nGamma\n");
+        assert_eq!(convert(escaped), convert(spelled));
+    }
+
+    #[test]
     fn pict_hex_payload_becomes_an_asset() {
         let doc = parse(br"{\rtf1 before {\pict\pngblip 89504e470d0a1a0a} after}").unwrap();
         assert_eq!(doc.assets.len(), 1, "assets: {:?}", doc.assets);

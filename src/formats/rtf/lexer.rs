@@ -60,6 +60,15 @@ impl<'a> Lexer<'a> {
                     _ => Some(Token::Byte(b'\'')),
                 };
             }
+            // An escaped CR or LF is a paragraph mark: the spec makes `\`
+            // followed by a newline equivalent to `\par` (Cocoa's writer
+            // ends every body paragraph this way). Lexing it as the control
+            // word keeps every consumer's `par` handling in one place; the
+            // LF of a `\<CR><LF>` pair is then plain-text whitespace, which
+            // `next_token` already skips.
+            if b == b'\r' || b == b'\n' {
+                return Some(Token::Word { name: "par", param: None });
+            }
             return Some(Token::Symbol(b));
         }
         let start = self.pos;
@@ -166,6 +175,23 @@ mod tests {
         }
         assert_eq!(bin, br"}}{\\");
         assert_eq!((opens, closes), (1, 1));
+    }
+
+    #[test]
+    fn escaped_newline_lexes_as_par() {
+        // `\<LF>`, `\<CR><LF>` and `\<CR>` are each one paragraph mark.
+        let src = b"{\\rtf1 Alpha\\\nBeta\\\r\nGamma\\\rDelta}";
+        let mut lexer = Lexer::new(src);
+        let (mut pars, mut text) = (0, Vec::new());
+        while let Some(t) = lexer.next_token() {
+            match t {
+                Token::Word { name: "par", .. } => pars += 1,
+                Token::Byte(b) => text.push(b),
+                _ => {}
+            }
+        }
+        assert_eq!(pars, 3);
+        assert_eq!(text, b"AlphaBetaGammaDelta");
     }
 
     #[test]
