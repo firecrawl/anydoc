@@ -9,14 +9,15 @@ mod tables;
 
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Note, NoteKind, Style, inlines_are_empty};
+use crate::shared::binary::codepage_encoding;
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::field_result;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::text::clean_text;
-use lexer::{Lexer, Token};
+use lexer::{Lexer, Token, destination_groups};
 use std::collections::HashMap;
 use table::TableState;
-use tables::{LIST_LEVELS, Prelude, codepage_encoding, parse_prelude};
+use tables::{LIST_LEVELS, Prelude, parse_prelude};
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     if !bytes.starts_with(b"{\\rtf") {
@@ -29,6 +30,75 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let mut parser = Parser::new(bytes, prelude, default_encoding);
     parser.run()?;
     parser.finish()
+}
+
+/// Extract the optional `\\info\\title` destination without allowing its
+/// metadata controls or nested groups to enter the document body.
+pub(crate) fn document_title(bytes: &[u8]) -> Option<String> {
+    let encoding = scan_codepage(bytes);
+    for info in destination_groups(bytes, "info") {
+        for title in destination_groups(info, "title") {
+            let text = decode_title(title, encoding);
+            let text = clean_text(&text);
+            if !text.trim().is_empty() {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+fn decode_title(bytes: &[u8], encoding: &'static encoding_rs::Encoding) -> String {
+    let mut lexer = Lexer::new(bytes);
+    let mut decoder = TextDecoder::new(encoding);
+    let mut uc_skip = 1;
+    let mut out = String::new();
+    let flush = |decoder: &mut TextDecoder, out: &mut String| {
+        if let Some(text) = decoder.take_pending(None) {
+            out.push_str(&text);
+        }
+    };
+    while let Some(token) = lexer.next_token() {
+        match token {
+            Token::Open | Token::Close => {
+                flush(&mut decoder, &mut out);
+            }
+            Token::Word { name, param } => match name {
+                "uc" => {
+                    flush(&mut decoder, &mut out);
+                    uc_skip = param.unwrap_or(1).max(0) as u32;
+                }
+                "u" => {
+                    flush(&mut decoder, &mut out);
+                    if let Some(c) = decoder.unicode(param, uc_skip) {
+                        out.push(c);
+                    }
+                }
+                "par" | "line" => {
+                    flush(&mut decoder, &mut out);
+                    out.push('\n');
+                }
+                _ => flush(&mut decoder, &mut out),
+            },
+            Token::Symbol(b'~') => {
+                flush(&mut decoder, &mut out);
+                out.push('\u{00A0}');
+            }
+            Token::Symbol(b'_') => {
+                flush(&mut decoder, &mut out);
+                out.push('-');
+            }
+            Token::Symbol(b @ (b'\\' | b'{' | b'}')) => {
+                flush(&mut decoder, &mut out);
+                out.push(b as char);
+            }
+            Token::Symbol(_) => {}
+            Token::Hex(b) | Token::Byte(b) => decoder.byte(b),
+            Token::Bin(_) => {}
+        }
+    }
+    flush(&mut decoder, &mut out);
+    out
 }
 
 fn scan_codepage(bytes: &[u8]) -> &'static encoding_rs::Encoding {
@@ -552,7 +622,7 @@ impl<'a> Parser<'a> {
             "s" => {
                 // Paragraph style: outline level for headings plus its
                 // formatting delta as the new base.
-                let def = param.and_then(|id| self.prelude.styles.get(&id).copied());
+                let def = param.and_then(|id| self.prelude.styles.get(&id).cloned());
                 if let Some(def) = def {
                     self.flush_pending();
                     self.state.outline = def.outline;
@@ -1088,5 +1158,16 @@ mod tests {
         .unwrap();
         assert_eq!(doc.assets.len(), 1, "only the preferred picture: {:?}", doc.assets);
         assert_eq!(doc.assets[0].media_type, "image/png");
+    }
+
+    #[test]
+    fn info_title_decodes_code_page_and_nested_formatting() {
+        let bytes = b"{\\rtf1\\ansi\\ansicpg1251{\\info{\\title \\'cf\\'f0\\'e8\\'e2\\'e5\\'f2 {\\b Deck}}}}";
+        assert_eq!(document_title(bytes).as_deref(), Some("Привет Deck"));
+    }
+
+    #[test]
+    fn malformed_info_title_is_ignored() {
+        assert_eq!(document_title(b"{\\rtf1{\\info{\\title truncated}"), None);
     }
 }

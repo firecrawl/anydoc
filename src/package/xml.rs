@@ -34,6 +34,7 @@ pub mod ns {
     pub const STYLE: &str = "urn:oasis:names:tc:opendocument:xmlns:style:1.0";
     pub const FO: &str = "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0";
     pub const PRESENTATION: &str = "urn:oasis:names:tc:opendocument:xmlns:presentation:1.0";
+    pub const DC: &str = "http://purl.org/dc/elements/1.1/";
     pub const MANIFEST: &str = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0";
     pub const XLINK: &str = "http://www.w3.org/1999/xlink";
     pub const XML: &str = "http://www.w3.org/XML/1998/namespace";

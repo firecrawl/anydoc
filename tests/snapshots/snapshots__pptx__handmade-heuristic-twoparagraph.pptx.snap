@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+First paragraph
+
+Second paragraph
+
+Body text

@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+## Styled Title
+
+### Styled Subtitle
+
+**Styled Body**

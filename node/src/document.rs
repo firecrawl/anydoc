@@ -8,10 +8,27 @@ use anydoc::model;
 #[napi(object)]
 pub struct Document {
     pub blocks: Vec<Block>,
+    pub outline: Vec<OutlineEntry>,
     /// Footnote and endnote bodies, referenced from text by a `noteRef`
     /// inline.
     pub notes: Vec<Note>,
     pub assets: Vec<Asset>,
+}
+
+#[napi(object)]
+pub struct OutlineEntry {
+    /// Source outline depth, 1-based.
+    pub level: u8,
+    /// Heading text with styling and links flattened away.
+    pub text: String,
+    /// Stable source anchor, when the heading carries one.
+    pub anchor: Option<String>,
+}
+
+impl From<model::OutlineEntry> for OutlineEntry {
+    fn from(entry: model::OutlineEntry) -> Self {
+        OutlineEntry { level: entry.level, text: entry.text, anchor: entry.anchor }
+    }
 }
 
 #[napi(string_enum)]
@@ -453,8 +470,10 @@ impl From<model::Asset> for Asset {
 
 impl From<model::Document> for Document {
     fn from(document: model::Document) -> Self {
+        let outline = document.outline().into_iter().map(OutlineEntry::from).collect();
         Document {
             blocks: blocks(document.blocks),
+            outline,
             notes: document.notes.into_iter().map(Note::from).collect(),
             assets: document.assets.into_iter().map(Asset::from).collect(),
         }

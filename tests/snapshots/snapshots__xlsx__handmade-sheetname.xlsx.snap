@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+## Quarterly Revenue
+
+| Region | Revenue |
+| --- | --- |
+| North | 42 |

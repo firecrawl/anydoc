@@ -40,6 +40,10 @@ class AnydocTest(unittest.TestCase):
         self.assertIsInstance(heading.content[0].text, str)
         self.assertEqual(heading.content[0].kind, "text")
         self.assertIsInstance(heading.content[0].style.bold, bool)
+        self.assertIsInstance(document.outline, list)
+        self.assertEqual(document.outline[0].level, heading.level)
+        self.assertIsInstance(document.outline[0].text, str)
+        self.assertIsInstance(document.outline[0].level, int)
 
     def test_to_document_carries_embedded_assets_as_bytes(self):
         document = anydoc.to_document(RICH.read_bytes(), "docx")

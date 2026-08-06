@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+assertion_line: 69
+expression: output
+---
+# Deck Document Title
+
+## First Slide

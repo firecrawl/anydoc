@@ -2,7 +2,7 @@
 source: tests/snapshots.rs
 expression: output
 ---
-Deck Title Slide
+## Deck Title Slide
 
 - Top level point
 

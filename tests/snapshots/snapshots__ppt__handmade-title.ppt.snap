@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Legacy Deck
+
+- **Alpha master body text**
+
+*Beta master body text*

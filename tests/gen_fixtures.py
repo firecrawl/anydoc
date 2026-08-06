@@ -155,6 +155,57 @@ def write_cfb(path, streams):
     path.write_bytes(header + b"".join(sectors))
 
 
+def summary_information(title, codepage=1252, utf16=False, malformed=False):
+    """PIDSI_TITLE property set for a small, deterministic OLE fixture."""
+    codepage_value = struct.pack("<HHH", 2, 0, codepage) + b"\x00\x00"
+    if utf16:
+        encoded = title.encode("utf-16-le") + b"\x00\x00"
+        title_value = struct.pack("<HHI", 0x1F, 0, len(encoded) // 2) + encoded
+    else:
+        codec = {932: "cp932", 936: "gbk", 949: "euc_kr", 950: "big5"}.get(
+            codepage, f"cp{codepage}"
+        )
+        encoded = title.encode(codec) + b"\x00"
+        title_value = struct.pack("<HHI", 0x1E, 0, len(encoded)) + encoded
+    codepage_offset = 24
+    title_offset = codepage_offset + len(codepage_value)
+    section_size = title_offset + len(title_value)
+    section = struct.pack("<II", section_size, 2)
+    section += struct.pack("<II", 1, codepage_offset)
+    section += struct.pack("<II", 2, 0xFFFFFFF0 if malformed else title_offset)
+    section += codepage_value + title_value
+    return (b"\xfe\xff\x00\x00" + b"\x00" * 20 + struct.pack("<I", 1)
+            + b"\x00" * 16 + struct.pack("<I", 48) + section)
+
+
+def biff_record(record_type, body):
+    return struct.pack("<HH", record_type, len(body)) + body
+
+
+def binary_title_xls():
+    """Minimal BIFF8 workbook containing one readable cell."""
+    sheet_name = "Data"
+    globals_bof = biff_record(0x0809, struct.pack("<HHHHHHHH", 0x0600, 0x0005, 0, 0, 0, 0, 0, 0))
+    codepage = biff_record(0x0042, struct.pack("<H", 0x04E4))
+    sheet_bof_offset = (len(globals_bof) + len(codepage) + 4
+                        + 6 + 2 + len(sheet_name.encode("utf-16-le")) + 4)
+    boundsheet = biff_record(
+        0x0085,
+        struct.pack("<IBB", sheet_bof_offset, 0, 0)
+        + struct.pack("<BB", len(sheet_name), 1)
+        + sheet_name.encode("utf-16-le"),
+    )
+    globals_stream = globals_bof + codepage + boundsheet + biff_record(0x000A, b"")
+    sheet_bof = biff_record(0x0809, struct.pack("<HHHHHHHH", 0x0600, 0x0010, 0, 0, 0, 0, 0, 0))
+    dimensions = biff_record(0x0200, struct.pack("<IIHHH", 0, 1, 0, 1, 0))
+    label = biff_record(
+        0x0204,
+        struct.pack("<HHH", 0, 0, 0) + struct.pack("<HB", 4, 1)
+        + "Data".encode("utf-16-le"),
+    )
+    return globals_stream + sheet_bof + dimensions + label + biff_record(0x000A, b"")
+
+
 def write_zip(path, entries, mimetype_first=None):
     """entries: list of (name, bytes). Deterministic timestamps."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -342,6 +393,36 @@ def numbering_docx():
         ("word/_rels/document.xml.rels", doc_rels),
         ("word/styles.xml", styles),
         ("word/numbering.xml", numbering),
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Handmade DOCX: Subtitle and styleId heading recognition (F6)
+
+def stylenames_docx():
+    document = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document {W}><w:body>
+<w:p><w:pPr><w:pStyle w:val="Subtitle"/></w:pPr><w:r><w:t>Subtitle heading</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Style ID heading</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Heading_Box"/></w:pPr><w:r><w:t>Custom box stays a paragraph</w:t></w:r></w:p>
+</w:body></w:document>'''
+    styles = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles {W}>
+<w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/></w:style>
+<w:style w:type="paragraph" w:styleId="Heading2"/>
+<w:style w:type="paragraph" w:styleId="Heading_Box"><w:name w:val="Custom Box"/></w:style>
+</w:styles>'''
+    doc_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>'''
+    ct = CONTENT_TYPES_BASE.format(extra="")
+    write_zip(OUT / "docx" / "handmade-stylenames.docx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/document.xml", document),
+        ("word/_rels/document.xml.rels", doc_rels),
+        ("word/styles.xml", styles),
     ])
 
 
@@ -549,6 +630,263 @@ def inherit_pptx():
 
 
 # ---------------------------------------------------------------------------
+# Handmade PPTX: slide placeholder type inherited from layout by idx (F1)
+
+def layoutph_pptx():
+    presentation = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation {PPTX_NS}>
+<p:sldIdLst><p:sldId id="256" r:id="rId1"/><p:sldId id="257" r:id="rId2"/></p:sldIdLst>
+</p:presentation>'''
+    pres_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/>
+</Relationships>'''
+    slide1 = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld {PPTX_NS}>
+<p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+<p:sp><p:nvSpPr><p:cNvPr id="2" name="Inherited title"/><p:cNvSpPr/><p:nvPr><p:ph idx="0"/></p:nvPr></p:nvSpPr>
+<p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>Inherited Layout Title</a:t></a:r></a:p></p:txBody></p:sp>
+</p:spTree></p:cSld>
+</p:sld>'''
+    slide2 = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld {PPTX_NS}>
+<p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+<p:sp><p:nvSpPr><p:cNvPr id="2" name="Plain text"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+<p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>Plain text box stays a paragraph</a:t></a:r></a:p></p:txBody></p:sp>
+</p:spTree></p:cSld>
+</p:sld>'''
+    slide_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+</Relationships>'''
+    layout_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
+</Relationships>'''
+    layout = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldLayout {PPTX_NS}>
+<p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title" idx="0"/></p:nvPr></p:nvSpPr>
+<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/></p:txBody></p:sp>
+</p:spTree></p:cSld>
+</p:sldLayout>'''
+    master = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster {PPTX_NS}>
+<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>
+<p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle/></p:txStyles>
+</p:sldMaster>'''
+    ct = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+<Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
+<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>
+</Types>'''
+    root_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>'''
+    write_zip(OUT / "pptx" / "handmade-layoutph.pptx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", root_rels),
+        ("ppt/presentation.xml", presentation),
+        ("ppt/_rels/presentation.xml.rels", pres_rels),
+        ("ppt/slides/slide1.xml", slide1),
+        ("ppt/slides/_rels/slide1.xml.rels", slide_rels),
+        ("ppt/slides/slide2.xml", slide2),
+        ("ppt/slides/_rels/slide2.xml.rels", slide_rels),
+        ("ppt/slideLayouts/slideLayout1.xml", layout),
+        ("ppt/slideLayouts/_rels/slideLayout1.xml.rels", layout_rels),
+        ("ppt/slideMasters/slideMaster1.xml", master),
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Handmade PPTX: guarded title recovery for placeholder-free decks (A5)
+
+def heuristic_shape(shape_id, text, y, paragraphs=None, placeholder=None):
+    values = paragraphs if paragraphs is not None else [text]
+    body = "".join(
+        f'<a:p><a:r><a:t>{value}</a:t></a:r></a:p>' for value in values
+    )
+    ph = f'<p:ph type="{placeholder}"/>' if placeholder else ""
+    return f'''<p:sp><p:nvSpPr><p:cNvPr id="{shape_id}" name="Shape {shape_id}"/><p:cNvSpPr/><p:nvPr>{ph}</p:nvPr></p:nvSpPr>
+<p:spPr><a:xfrm><a:off x="0" y="{y}"/><a:ext cx="100" cy="100"/></a:xfrm></p:spPr>
+<p:txBody><a:bodyPr/><a:lstStyle/>{body}</p:txBody></p:sp>'''
+
+
+def heuristic_pptx():
+    def slide(shapes):
+        return f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld {PPTX_NS}><p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+{''.join(shapes)}
+</p:spTree></p:cSld></p:sld>'''
+
+    def write_deck(name, slides):
+        slide_count = len(slides)
+        presentation = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation {PPTX_NS}><p:sldIdLst>{''.join(
+            f'<p:sldId id="{256 + i}" r:id="rId{i + 1}"/>'
+            for i in range(slide_count)
+        )}</p:sldIdLst></p:presentation>'''
+        pres_rels = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{''.join(
+            f'<Relationship Id="rId{i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide{i + 1}.xml"/>'
+            for i in range(slide_count)
+        )}</Relationships>'''
+        ct_slides = "".join(
+            f'<Override PartName="/ppt/slides/slide{i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
+            for i in range(slide_count)
+        )
+        ct = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>{ct_slides}
+</Types>'''
+        root_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>'''
+        entries = [
+            ("[Content_Types].xml", ct),
+            ("_rels/.rels", root_rels),
+            ("ppt/presentation.xml", presentation),
+            ("ppt/_rels/presentation.xml.rels", pres_rels),
+        ]
+        entries.extend((f"ppt/slides/slide{i + 1}.xml", value)
+                       for i, value in enumerate(slides))
+        write_zip(OUT / "pptx" / name, entries)
+
+    # A real title placeholder anywhere in the deck suppresses recovery on
+    # every slide, including the otherwise-eligible second slide.
+    write_deck("handmade-noheuristic.pptx", [
+        slide([heuristic_shape(2, "Real Placeholder Title", 100, placeholder="title")]),
+        slide([
+            heuristic_shape(2, "Would Be Guessed", 100),
+            heuristic_shape(3, "Body text", 500),
+        ]),
+    ])
+
+    # The following fixtures pin the rejection boundaries independently of
+    # producer-generated decks: paragraph count, character count, and shape
+    # document order versus vertical position.
+    write_deck("handmade-heuristic-twoparagraph.pptx", [slide([
+        heuristic_shape(2, "Two paragraph title", 100,
+                        paragraphs=["First paragraph", "Second paragraph"]),
+        heuristic_shape(3, "Body text", 500),
+    ])])
+    write_deck("handmade-heuristic-121chars.pptx", [slide([
+        heuristic_shape(2, "X" * 121, 100),
+        heuristic_shape(3, "Body text", 500),
+    ])])
+    write_deck("handmade-heuristic-order.pptx", [slide([
+        heuristic_shape(2, "Later on slide", 500),
+        heuristic_shape(3, "Topmost on slide", 100),
+    ])])
+
+
+# ---------------------------------------------------------------------------
+# Handmade PPTX: subtitle placeholders become H3 while retaining body styles
+
+def subtitle_pptx():
+    presentation = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation {PPTX_NS}><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>'''
+    pres_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>'''
+    slide = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld {PPTX_NS}><p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>Styled Title</a:t></a:r></a:p></p:txBody></p:sp>
+<p:sp><p:nvSpPr><p:cNvPr id="3" name="Subtitle"/><p:cNvSpPr/><p:nvPr><p:ph type="subTitle" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>Styled Subtitle</a:t></a:r></a:p></p:txBody></p:sp>
+<p:sp><p:nvSpPr><p:cNvPr id="4" name="Body"/><p:cNvSpPr/><p:nvPr><p:ph type="body" idx="2"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>Styled Body</a:t></a:r></a:p></p:txBody></p:sp>
+</p:spTree></p:cSld></p:sld>'''
+    slide_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>'''
+    layout_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/></Relationships>'''
+    layout = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldLayout {PPTX_NS}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sldLayout>'''
+    master = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster {PPTX_NS}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>
+<p:txStyles><p:titleStyle><a:lvl1pPr><a:defRPr i="1"/></a:lvl1pPr></p:titleStyle><p:bodyStyle><a:lvl1pPr><a:defRPr b="1"/></a:lvl1pPr></p:bodyStyle><p:otherStyle/></p:txStyles></p:sldMaster>'''
+    ct = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/></Types>'''
+    root_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>'''
+    write_zip(OUT / "pptx" / "handmade-subtitle.pptx", [
+        ("[Content_Types].xml", ct), ("_rels/.rels", root_rels),
+        ("ppt/presentation.xml", presentation), ("ppt/_rels/presentation.xml.rels", pres_rels),
+        ("ppt/slides/slide1.xml", slide), ("ppt/slides/_rels/slide1.xml.rels", slide_rels),
+        ("ppt/slideLayouts/slideLayout1.xml", layout), ("ppt/slideLayouts/_rels/slideLayout1.xml.rels", layout_rels),
+        ("ppt/slideMasters/slideMaster1.xml", master),
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Handmade PPTX: document title from a relationship-selected core part (B6)
+
+def doctitle_pptx():
+    def make(filename, document_title, slide_title):
+        presentation = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation {PPTX_NS}>
+<p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+</p:presentation>'''
+        pres_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>'''
+        slide = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld {PPTX_NS}>
+<p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+<p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>{slide_title}</a:t></a:r></a:p></p:txBody></p:sp>
+</p:spTree></p:cSld>
+</p:sld>'''
+        core = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{document_title}</dc:title></cp:coreProperties>'''
+        ct = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+<Override PartName="/meta/custom-core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+</Types>'''
+        root_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="meta/custom-core.xml"/>
+</Relationships>'''
+        write_zip(OUT / "pptx" / filename, [
+            ("[Content_Types].xml", ct),
+            ("_rels/.rels", root_rels),
+            ("ppt/presentation.xml", presentation),
+            ("ppt/_rels/presentation.xml.rels", pres_rels),
+            ("ppt/slides/slide1.xml", slide),
+            ("meta/custom-core.xml", core),
+        ])
+
+    make("handmade-doctitle.pptx", "Deck Document Title", "First Slide")
+    make("handmade-doctitle-duplicate.pptx", "Same Slide", "Same Slide")
+    make("handmade-doctitle-empty.pptx", "  \t", "Untitled Slide")
+
+
+# ---------------------------------------------------------------------------
 # R8: titles keep their shape-order position; p:oleObj payloads extracted
 
 def order_pptx():
@@ -626,6 +964,18 @@ def encoded_docs():
     ru = "Привет, мир!\rВторой абзац по-русски.\r".encode("cp1251")
     write_cfb(d / "handmade-cyrillic.doc",
               [("WordDocument", word_doc_stream(0x0419, ru))])
+    write_cfb(d / "handmade-title.doc", [
+        ("WordDocument", word_doc_stream(0x0419, b"Body text\r")),
+        ("\x05SummaryInformation", summary_information("Заголовок", 1251)),
+    ])
+    write_cfb(OUT / "malformed" / "badsummary--recovers.doc", [
+        ("WordDocument", word_doc_stream(0x0419, b"Body text\r")),
+        ("\x05SummaryInformation", summary_information("Ignored", malformed=True)),
+    ])
+    write_cfb(OUT / "xls" / "handmade-title.xls", [
+        ("Workbook", binary_title_xls()),
+        ("\x05SummaryInformation", summary_information("Legacy Workbook", utf16=True)),
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -867,6 +1217,94 @@ or <a href="notes.txt">a relative resource</a>.</p>
 
 
 # ---------------------------------------------------------------------------
+# EPUB navigation outlines: nested EPUB3 nav, NCX fallback, partial coverage,
+# malformed optional navigation, and a depth-limit shape (B1)
+
+def toc_epub():
+    container = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"""
+
+    def write_book(name, title, manifest, spine, parts):
+        opf = f'''<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="uid">urn:uuid:{name}</dc:identifier><dc:title>{title}</dc:title></metadata>
+<manifest>{manifest}</manifest><spine>{spine}</spine></package>'''
+        write_zip(OUT / "epub" / name, [
+            ("META-INF/container.xml", container),
+            ("OEBPS/content.opf", opf),
+            *parts,
+        ], mimetype_first="application/epub+zip")
+
+    nested_nav = '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body>
+<nav epub:type="toc"><h1>Contents</h1><ol>
+<li><a href="ch.xhtml#top">Top</a><ol><li><a href="ch.xhtml#sub">Sub</a><ol><li><a href="ch.xhtml#deep">Deep</a></li></ol></li></ol></li>
+</ol></nav></body></html>'''
+    nested_ch = '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body>
+<h1 id="top">Top</h1><h2 id="sub">Sub</h2><h3 id="deep">Deep</h3>
+</body></html>'''
+    write_book(
+        "handmade-nestedtoc.epub", "Nested Contents",
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="ch" href="ch.xhtml" media-type="application/xhtml+xml"/>',
+        '<itemref idref="ch"/>',
+        [("OEBPS/nav.xhtml", nested_nav), ("OEBPS/ch.xhtml", nested_ch)],
+    )
+
+    ncx = '''<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx"><navMap>
+<navPoint id="top"><navLabel><text>NCX Top</text></navLabel><content src="ch.xhtml#top"/>
+<navPoint id="sub"><navLabel><text>NCX Sub</text></navLabel><content src="ch.xhtml#sub"/></navPoint>
+</navPoint></navMap></ncx>'''
+    ncx_ch = '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body>
+<h1 id="top">NCX Top</h1><h2 id="sub">NCX Sub</h2>
+</body></html>'''
+    write_book(
+        "handmade-ncxonly.epub", "NCX Only",
+        '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="ch" href="ch.xhtml" media-type="application/xhtml+xml"/>',
+        '<spine toc="ncx"><itemref idref="ch"/></spine>',
+        [("OEBPS/toc.ncx", ncx), ("OEBPS/ch.xhtml", ncx_ch)],
+    )
+
+    partial_nav = '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body>
+<nav epub:type="toc"><ol><li><a href="front.xhtml#root">Front</a><ol>
+<li><a href="covered.xhtml">Covered</a><ol><li><a href="empty.xhtml">Empty</a></li></ol></li>
+</ol></li></ol></nav></body></html>'''
+    front = '''<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="root">Front</h1></body></html>'''
+    covered = '''<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Covered</h1></body></html>'''
+    uncovered = '''<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Uncovered</h1></body></html>'''
+    empty = '''<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><body><p>No authored heading.</p></body></html>'''
+    write_book(
+        "handmade-partialtoc.epub", "Partial Contents",
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="front" href="front.xhtml" media-type="application/xhtml+xml"/><item id="covered" href="covered.xhtml" media-type="application/xhtml+xml"/><item id="uncovered" href="uncovered.xhtml" media-type="application/xhtml+xml"/><item id="empty" href="empty.xhtml" media-type="application/xhtml+xml"/>',
+        '<itemref idref="front"/><itemref idref="covered"/><itemref idref="uncovered"/><itemref idref="empty"/>',
+        [("OEBPS/nav.xhtml", partial_nav), ("OEBPS/front.xhtml", front), ("OEBPS/covered.xhtml", covered), ("OEBPS/uncovered.xhtml", uncovered), ("OEBPS/empty.xhtml", empty)],
+    )
+
+    bad_opf = '''<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Broken TOC</dc:title></metadata>
+<manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="ch" href="ch.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="ch"/></spine></package>'''
+    write_zip(OUT / "malformed" / "badtoc--recovers.epub", [
+        ("META-INF/container.xml", container), ("OEBPS/content.opf", bad_opf),
+        ("OEBPS/nav.xhtml", b"not xml\x00broken"),
+        ("OEBPS/ch.xhtml", nested_ch),
+    ], mimetype_first="application/epub+zip")
+
+    depth = 300
+    nested = "<ol>" * depth + '<li><a href="ch.xhtml">Too Deep</a></li>' + "</ol>" * depth
+    deep_nav = f'''<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc">{nested}</nav></body></html>'''
+    deep_opf = '''<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="ch" href="ch.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="ch"/></spine></package>'''
+    write_zip(OUT / "abuse" / "deeptoc--errors.epub", [
+        ("META-INF/container.xml", container), ("OEBPS/content.opf", deep_opf),
+        ("OEBPS/nav.xhtml", deep_nav), ("OEBPS/ch.xhtml", nested_ch),
+    ], mimetype_first="application/epub+zip")
+
+
+# ---------------------------------------------------------------------------
 # R17a: merged ranges in spreadsheets become spanning grid cells
 
 def merged_xlsx():
@@ -911,6 +1349,72 @@ def merged_xlsx():
         ("xl/workbook.xml", workbook),
         ("xl/_rels/workbook.xml.rels", wb_rels),
         ("xl/worksheets/sheet1.xml", sheet),
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Handmade XLSX: a single authored sheet name remains visible (B3)
+
+def sheetname_xlsx():
+    ct = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'''
+    root_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'''
+    workbook = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Quarterly Revenue" sheetId="1" r:id="rId1"/></sheets></workbook>'''
+    workbook_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'''
+    sheet = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Region</t></is></c><c r="B1" t="inlineStr"><is><t>Revenue</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>North</t></is></c><c r="B2"><v>42</v></c></row></sheetData></worksheet>'''
+    write_zip(OUT / "xlsx" / "handmade-sheetname.xlsx", [
+        ("[Content_Types].xml", ct), ("_rels/.rels", root_rels),
+        ("xl/workbook.xml", workbook), ("xl/_rels/workbook.xml.rels", workbook_rels),
+        ("xl/worksheets/sheet1.xml", sheet),
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Handmade XLSX: relationship-selected core-properties title (B6)
+
+def doctitle_xlsx():
+    ct = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/custom/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+</Types>'''
+    root_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="custom/core.xml"/>
+</Relationships>'''
+    workbook = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="First" sheetId="1" r:id="rId1"/><sheet name="Second" sheetId="2" r:id="rId2"/></sheets></workbook>'''
+    wb_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+</Relationships>'''
+    sheet = lambda value: f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+<row r="1"><c r="A1" t="inlineStr"><is><t>{value}</t></is></c></row>
+</sheetData></worksheet>'''
+    core = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Workbook Document Title</dc:title></cp:coreProperties>'''
+    write_zip(OUT / "xlsx" / "handmade-doctitle.xlsx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", root_rels),
+        ("xl/workbook.xml", workbook),
+        ("xl/_rels/workbook.xml.rels", wb_rels),
+        ("xl/worksheets/sheet1.xml", sheet("One")),
+        ("xl/worksheets/sheet2.xml", sheet("Two")),
+        ("custom/core.xml", core),
     ])
 
 
@@ -1029,6 +1533,76 @@ def defaults_odf():
         ("content.xml", b"\x00\x01ciphertext-stand-in"),
         ("META-INF/manifest.xml", manifest_encrypted),
     ], mimetype_first="application/vnd.oasis.opendocument.text")
+
+
+# ---------------------------------------------------------------------------
+# Handmade ODP: page-name fallback and title/subtitle/outline classes (F2/F3)
+
+def pagenames_odp():
+    content = '''<?xml version="1.0"?>
+<office:document-content
+ xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+ xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+<office:body><office:presentation>
+<draw:page draw:name="Named slide">
+  <draw:frame presentation:class="title"><draw:text-box><text:p>Frame wins</text:p></draw:text-box></draw:frame>
+  <draw:frame presentation:class="subtitle"><draw:text-box><text:p>Subtitle survives</text:p></draw:text-box></draw:frame>
+  <draw:frame presentation:class="outline"><draw:text-box><text:p>Outline stays body</text:p></draw:text-box></draw:frame>
+</draw:page>
+<draw:page draw:name="Summary"/>
+<draw:page draw:name="page3"/>
+<draw:page/>
+</office:presentation></office:body>
+</office:document-content>'''
+    write_zip(OUT / "odp" / "handmade-pagenames.odp", [
+        ("content.xml", content),
+    ], mimetype_first="application/vnd.oasis.opendocument.presentation")
+
+
+# ---------------------------------------------------------------------------
+# Handmade ODF: document title from office:meta for presentations/workbooks
+
+def doctitle_odf():
+    def meta(title):
+        return f'''<?xml version="1.0"?>
+<office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"><office:meta><dc:title>{title}</dc:title></office:meta>
+</office:document-meta>'''
+
+    pres_content = '''<?xml version="1.0"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+ xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+<office:body><office:presentation><draw:page>
+<draw:frame presentation:class="title"><draw:text-box><text:p>First Slide</text:p></draw:text-box></draw:frame>
+</draw:page></office:presentation></office:body></office:document-content>'''
+    write_zip(OUT / "odp" / "handmade-doctitle.odp", [
+        ("content.xml", pres_content),
+        ("meta.xml", meta("Presentation Document Title")),
+    ], mimetype_first="application/vnd.oasis.opendocument.presentation")
+    write_zip(OUT / "odp" / "handmade-doctitle-duplicate.odp", [
+        ("content.xml", pres_content),
+        ("meta.xml", meta("First Slide")),
+    ], mimetype_first="application/vnd.oasis.opendocument.presentation")
+    write_zip(OUT / "odp" / "handmade-doctitle-empty.odp", [
+        ("content.xml", pres_content),
+        ("meta.xml", meta("  ")),
+    ], mimetype_first="application/vnd.oasis.opendocument.presentation")
+
+    sheet_content = '''<?xml version="1.0"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+<office:body><office:spreadsheet><table:table table:name="Data">
+<table:table-row><table:table-cell office:value-type="string"><text:p>Value</text:p></table:table-cell></table:table-row>
+</table:table></office:spreadsheet></office:body></office:document-content>'''
+    write_zip(OUT / "ods" / "handmade-doctitle.ods", [
+        ("content.xml", sheet_content),
+        ("meta.xml", meta("Workbook Document Title")),
+    ], mimetype_first="application/vnd.oasis.opendocument.spreadsheet")
 
 
 # ---------------------------------------------------------------------------
@@ -1282,6 +1856,11 @@ def multimaster_ppt():
         ("Current User", current_user),
         ("PowerPoint Document", stream),
     ])
+    write_cfb(OUT / "ppt" / "handmade-title.ppt", [
+        ("Current User", current_user),
+        ("\x05SummaryInformation", summary_information("Legacy Deck")),
+        ("PowerPoint Document", stream),
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -1447,6 +2026,36 @@ p.strong { font-weight: bold; }
         ("OEBPS/pic.png", DOT_PNG),
         ("OEBPS/data.bin", b"NOT-A-DOCUMENT"),
     ], mimetype_first="application/epub+zip")
+
+
+# ---------------------------------------------------------------------------
+# Handmade RTF: stylesheet names are a heading fallback when outlinelevel is
+# absent; explicit outlinelevel remains authoritative (F5)
+
+def stylenames_rtf():
+    data = br'''{\rtf1\ansi\ansicpg1252
+{\stylesheet
+{\s1 heading 2;}
+{\s2 heading box;}
+{\s3 heading 3\outlinelevel0;}
+}
+\pard\s1 Named level two\par
+\pard\s2 Not a heading\par
+\pard\s3 Explicit level one\par
+}'''
+    (OUT / "rtf" / "handmade-stylenames.rtf").write_bytes(data)
+
+
+# Handmade RTF: the metadata title is decoded from the declared code page and
+# nested formatting groups remain part of the title text (B7).
+
+def title_rtf():
+    title = "Привет".encode("cp1251")
+    escaped = b"".join((b"\\'" + f"{byte:02x}".encode("ascii")) for byte in title)
+    data = (b"{\\rtf1\\ansi\\ansicpg1251"
+            b"{\\info{\\title " + escaped + b" {\\b Deck}}{\\subject ignored}}"
+            b"\\pard Body text\\par}")
+    (OUT / "rtf" / "handmade-title.rtf").write_bytes(data)
 
 
 # ---------------------------------------------------------------------------
@@ -1731,13 +2340,20 @@ def main():
              "--resource-path", str(SRC)])
 
     numbering_docx()
+    stylenames_docx()
     rich_docx()
     inherit_pptx()
+    layoutph_pptx()
+    heuristic_pptx()
+    subtitle_pptx()
+    doctitle_pptx()
     strict_alt_ooxml()
     gaps_ods()
     encoded_docs()
     order_pptx()
     css_links_epub()
+    stylenames_rtf()
+    title_rtf()
     merge_rtf()
     multimaster_ppt()
     sparsenotes_ppt()
@@ -1747,8 +2363,13 @@ def main():
     links_pptx()
     manyrefs_docx()
     defaults_odf()
+    pagenames_odp()
+    doctitle_odf()
     merged_xlsx()
+    sheetname_xlsx()
+    doctitle_xlsx()
     features_epub()
+    toc_epub()
     bin_rtf()
     csvs()
     malformed()

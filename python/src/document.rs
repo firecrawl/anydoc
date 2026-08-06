@@ -14,11 +14,27 @@ use anydoc::model;
 pub struct Document {
     /// list[Block]
     blocks: Py<PyList>,
+    /// list[OutlineEntry], in document reading order.
+    outline: Py<PyList>,
     /// Footnote and endnote bodies, referenced from text by a `note_ref`
     /// inline. list[Note]
     notes: Py<PyList>,
     /// list[Asset]
     assets: Py<PyList>,
+}
+
+#[pyclass(frozen, get_all, module = "anydoc")]
+pub struct OutlineEntry {
+    /// Source outline depth, 1-based.
+    level: u8,
+    /// Heading text with styling and links flattened away.
+    text: String,
+    /// Stable source anchor, when the heading carries one.
+    anchor: Option<String>,
+}
+
+fn outline_entry(entry: model::OutlineEntry) -> OutlineEntry {
+    OutlineEntry { level: entry.level, text: entry.text, anchor: entry.anchor }
 }
 
 #[pyclass(frozen, get_all, module = "anydoc")]
@@ -368,8 +384,10 @@ fn asset(py: Python<'_>, asset: model::Asset) -> PyResult<Asset> {
 }
 
 pub fn document(py: Python<'_>, document: model::Document) -> PyResult<Document> {
+    let outline = document.outline();
     Ok(Document {
         blocks: blocks(py, document.blocks)?,
+        outline: pylist(py, outline.into_iter().map(|entry| Ok(outline_entry(entry))))?,
         notes: pylist(py, document.notes.into_iter().map(|n| note(py, n)))?,
         assets: pylist(py, document.assets.into_iter().map(|a| asset(py, a)))?,
     })

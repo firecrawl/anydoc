@@ -74,10 +74,20 @@ def to_document(data: bytes | bytearray, format: Format | None = None) -> Docume
 @final
 class Document:
     blocks: list[Block]
+    outline: list[OutlineEntry]
     notes: list[Note]
     """Footnote and endnote bodies, referenced from text by a `note_ref`
     inline."""
     assets: list[Asset]
+
+@final
+class OutlineEntry:
+    level: int
+    """Source outline depth, 1-based."""
+    text: str
+    """Heading text with styling and links flattened away."""
+    anchor: str | None
+    """Stable source anchor, when the heading carries one."""
 
 @final
 class Block:

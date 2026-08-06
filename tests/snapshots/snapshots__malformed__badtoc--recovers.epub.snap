@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Broken TOC
+
+# Top
+
+## Sub
+
+### Deep
