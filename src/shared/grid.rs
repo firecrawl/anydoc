@@ -6,6 +6,7 @@
 
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, GridBuilder, TableKind};
+use crate::shared::header::resolve_header_rows;
 use std::collections::HashMap;
 
 /// Merge/boundary properties of one cell.
@@ -145,6 +146,6 @@ pub fn build_edge_table(rows: Vec<GridRow>) -> Result<Option<Block>, ConvertErro
     if table.grid.is_empty() {
         return Ok(None);
     }
-    table.header_rows = header_rows.min(table.grid.len());
+    table.header_rows = resolve_header_rows(&table, header_rows);
     Ok(Some(Block::Table(table)))
 }

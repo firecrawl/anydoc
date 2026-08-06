@@ -13,6 +13,7 @@ use crate::formats::odf::text::{Ctx, parse_container};
 use crate::model::{Block, Cell, GridBuilder, Inline, TableKind};
 use crate::package::limits;
 use crate::package::xml::{Element, ns};
+use crate::shared::header::resolve_header_rows;
 
 pub fn parse_table(elem: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError> {
     let mut state = TableState {
@@ -28,7 +29,7 @@ pub fn parse_table(elem: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError
     if table.grid.is_empty() {
         return Ok(Vec::new());
     }
-    table.header_rows = state.header_rows.min(table.grid.len());
+    table.header_rows = resolve_header_rows(&table, state.header_rows);
     Ok(vec![Block::Table(table)])
 }
 

@@ -16,7 +16,9 @@ use crate::package::relationships::{
 use crate::package::xml::{Element, ns, parse_xml};
 use crate::package::{Package, archive::probe_ole, path};
 use crate::shared::assets::AssetSink;
+use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::classify_rel_target;
+use crate::shared::header::resolve_header_rows;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::text::clean_text;
 use cascade::{Bullet, LevelStyle, Placeholder, TextProps, TitleClass};
@@ -420,10 +422,12 @@ fn push_title_heading(
         if let Some(ppr) = ppr {
             props = props.merge(cascade::paragraph_props(ppr));
         }
-        let para = parse_para_inlines(p, ctx, props.delta.resolve());
+        let base = props.delta.resolve();
+        let mut para = parse_para_inlines(p, ctx, base);
         if inlines_are_empty(&para) {
             continue;
         }
+        rebase_emphasis(&mut para, base);
         if !inlines.is_empty() {
             inlines.push(Inline::LineBreak);
         }
@@ -628,7 +632,7 @@ fn parse_table(tbl: &Element, ctx: &SlideCtx, blocks: &mut Vec<Block>) -> Result
     if table.grid.is_empty() {
         return Ok(());
     }
-    table.header_rows = header_rows;
+    table.header_rows = resolve_header_rows(&table, header_rows);
     blocks.push(Block::Table(table));
     Ok(())
 }

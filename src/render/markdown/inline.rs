@@ -21,8 +21,10 @@ pub(crate) enum Norm<'a> {
 /// whitespace-only runs, merges adjacent same-style runs, and re-joins styled
 /// runs split only by whitespace (`**a** **b**` -> `**a b**`). Runs borrow
 /// from the source inlines; text is owned only where runs actually merge.
-pub(crate) fn normalize(inlines: &[Inline]) -> Vec<Norm<'_>> {
-    let mut out: Vec<Norm<'_>> = Vec::new();
+/// Untargeted anchors drop out here: they render as nothing, so leaving them
+/// in would part runs that belong together.
+pub(crate) fn normalize<'a>(inlines: &'a [Inline], rc: &Ctx) -> Vec<Norm<'a>> {
+    let mut out: Vec<Norm<'a>> = Vec::new();
     for inline in inlines {
         match inline {
             Inline::Text { text, style } => {
@@ -60,13 +62,14 @@ pub(crate) fn normalize(inlines: &[Inline]) -> Vec<Norm<'_>> {
                 if target.is_empty() {
                     // No usable destination: keep the content as plain inlines.
                     if !inlines_are_empty(content) {
-                        out.extend(normalize(content));
+                        out.extend(normalize(content, rc));
                     }
                     continue;
                 }
                 out.push(Norm::Link { content, target });
             }
             Inline::Image { alt, source } => out.push(Norm::Image { alt, source }),
+            Inline::Anchor(id) if rc.anchors.html_id(id).is_none() => continue,
             Inline::Anchor(id) => out.push(Norm::Anchor(id)),
             Inline::NoteRef(id) => out.push(Norm::NoteRef(id)),
             Inline::LineBreak => out.push(Norm::LineBreak),
@@ -80,7 +83,7 @@ pub(crate) fn render_inlines(inlines: &[Inline], ctx: InlineContext, rc: &Ctx) -
 }
 
 fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, rc: &Ctx) -> String {
-    let runs = normalize(inlines);
+    let runs = normalize(inlines, rc);
     let mut out = String::new();
     for (idx, run) in runs.iter().enumerate() {
         match run {

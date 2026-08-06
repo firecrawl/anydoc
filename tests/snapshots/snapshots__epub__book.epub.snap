@@ -4,13 +4,13 @@ expression: output
 ---
 # Fixture Book
 
-# **Fixture Book**
+# Fixture Book
 
 anydoc tests
 
 <a id="epub-text-ch001-xhtml-chapter-one"></a>
 
-# **Chapter One**
+# Chapter One
 
 Opening paragraph with **bold**, *italic*, and `code` runs.
 
@@ -30,7 +30,7 @@ tiny dot tiny dot
 
 <a id="epub-text-ch002-xhtml-chapter-two"></a>
 
-# **Chapter Two**
+# Chapter Two
 
 | Name | Qty |
 | --- | --- |

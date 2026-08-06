@@ -16,6 +16,7 @@ use crate::model::{
 use crate::package::limits;
 use crate::shared::assets::AssetSink;
 use crate::shared::binary::{get_u16, get_u32, read_ole_stream};
+use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
 use crate::shared::grid::{CellProp, GridRow, build_edge_table};
 use crate::shared::list::MarkerKind;
@@ -826,10 +827,12 @@ impl Assembler {
             flush_list(blocks, list_run);
             return;
         }
-        let heading = self.stylesheet.get(pap.istd).heading.or(pap.effective.outline.flatten());
+        let style = self.stylesheet.get(pap.istd);
+        let heading = style.heading.or(pap.effective.outline.flatten());
         if let Some(level) = heading {
             flush_list(blocks, list_run);
             let mut content = inlines;
+            rebase_emphasis(&mut content, style.chp);
             // A numbered heading advances its sequence and keeps its number
             // visible - headings have no native numbering in the output.
             if let Some(label) = self.heading_label(pap) {

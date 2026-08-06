@@ -4,9 +4,8 @@ expression: output
 ---
 ## Values
 
-|  |  |  |
-| --- | --- | --- |
 | Kind | Value | Note |
+| --- | --- | --- |
 | Percent | 15.5% | fifteen and a half |
 | Currency | $1,234.50 | dollars |
 | Thousands | 9,876,543 | grouped |

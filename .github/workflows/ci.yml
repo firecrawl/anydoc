@@ -57,6 +57,29 @@ jobs:
             exit 1
           fi
 
+  wasm:
+    name: Wasm bindings
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32-unknown-unknown
+      - run: cargo clippy -p anydoc-wasm --target wasm32-unknown-unknown -- -D warnings
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - name: Install wasm-pack
+        run: >
+          curl -sSfL https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz
+          | tar xz --strip-components=1 -C /usr/local/bin wasm-pack-v0.15.0-x86_64-unknown-linux-musl/wasm-pack
+      - run: wasm-pack build wasm --release --target web --scope firecrawl
+      - run: node --test wasm/test.mjs
+
   python:
     name: Python bindings
     runs-on: blacksmith-8vcpu-ubuntu-2404

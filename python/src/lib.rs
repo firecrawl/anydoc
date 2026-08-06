@@ -12,9 +12,48 @@ create_exception!(
     anydoc,
     ConvertError,
     PyException,
-    "Meaningful conversion was impossible: the input was unreadable or \
-     structurally unusable, encrypted, or crossed a fixed safety limit. \
-     Unreadable files raise `OSError` instead."
+    "Meaningful conversion was impossible. Catch this to handle every kind of \
+     failure, or one of the subclasses below to single one out. An unreadable \
+     file raises `OSError` instead."
+);
+
+create_exception!(
+    anydoc,
+    UnsupportedError,
+    ConvertError,
+    "The format is unknown, or cannot be converted at all: a scanned or \
+     image-only PDF needs OCR, which anydoc does not do."
+);
+
+create_exception!(
+    anydoc,
+    MalformedError,
+    ConvertError,
+    "The document is structurally unusable: no meaningful content could be \
+     extracted. `part` names the package part or stream at fault, and is \
+     `None` when no single part is."
+);
+
+create_exception!(
+    anydoc,
+    EncryptedError,
+    ConvertError,
+    "The document is encrypted or password-protected."
+);
+
+create_exception!(
+    anydoc,
+    ResourceLimitError,
+    ConvertError,
+    "A fixed safety limit was crossed: decompression, nesting depth, node \
+     count, repeat expansion, or retained asset bytes. `limit` names it."
+);
+
+create_exception!(
+    anydoc,
+    MissingPartError,
+    ConvertError,
+    "A part required for any meaningful output is absent. `part` names it."
 );
 
 /// Format names, as the extension that identifies each format. Container
@@ -53,11 +92,37 @@ fn format_name(format: anydoc::Format) -> &'static str {
         .expect("every format is named")
 }
 
-fn convert_error(error: anydoc::ConvertError) -> PyErr {
-    match error {
-        anydoc::ConvertError::Io(e) => e.into(),
-        other => ConvertError::new_err(other.to_string()),
-    }
+/// Raise the subclass that names the failure, carrying the part or limit at
+/// fault where the variant knows one. An unreadable file raises the `OSError`
+/// subclass any other read of it would.
+fn convert_error(py: Python<'_>, error: anydoc::ConvertError) -> PyErr {
+    let error = match error {
+        anydoc::ConvertError::Io(e) => return e.into(),
+        other => other,
+    };
+    let message = error.to_string();
+    // A variant added later raises the base class until it is named here.
+    let raised = match &error {
+        anydoc::ConvertError::Unsupported(_) => UnsupportedError::new_err(message),
+        anydoc::ConvertError::Malformed { .. } => MalformedError::new_err(message),
+        anydoc::ConvertError::Encrypted => EncryptedError::new_err(message),
+        anydoc::ConvertError::ResourceLimit { .. } => ResourceLimitError::new_err(message),
+        anydoc::ConvertError::MissingPart { .. } => MissingPartError::new_err(message),
+        _ => ConvertError::new_err(message),
+    };
+    let detail = match &error {
+        anydoc::ConvertError::Malformed { part, .. } => {
+            raised.value(py).setattr("part", part.as_deref())
+        }
+        anydoc::ConvertError::ResourceLimit { limit, .. } => {
+            raised.value(py).setattr("limit", *limit)
+        }
+        anydoc::ConvertError::MissingPart { part } => {
+            raised.value(py).setattr("part", part.as_str())
+        }
+        _ => Ok(()),
+    };
+    detail.err().unwrap_or(raised)
 }
 
 /// Detect the format from the content itself: the signature and identity each
@@ -86,7 +151,7 @@ fn format_from_path(path: PathBuf) -> Option<&'static str> {
 /// and unrecognizable containers.
 #[pyfunction]
 fn to_markdown(py: Python<'_>, path: PathBuf) -> PyResult<String> {
-    py.detach(|| anydoc::to_markdown(&path)).map_err(convert_error)
+    py.detach(|| anydoc::to_markdown(&path)).map_err(|e| convert_error(py, e))
 }
 
 /// Convert an in-memory document to Markdown. Without a format, it is
@@ -96,7 +161,7 @@ fn to_markdown(py: Python<'_>, path: PathBuf) -> PyResult<String> {
 #[pyo3(signature = (data, format=None))]
 fn to_markdown_bytes(py: Python<'_>, data: Vec<u8>, format: Option<&str>) -> PyResult<String> {
     let format = format.map(parse_format).transpose()?;
-    py.detach(|| anydoc::to_markdown_bytes(&data, format)).map_err(convert_error)
+    py.detach(|| anydoc::to_markdown_bytes(&data, format)).map_err(|e| convert_error(py, e))
 }
 
 /// Parse an in-memory document into the document model, which also carries
@@ -112,7 +177,8 @@ fn to_document(
     format: Option<&str>,
 ) -> PyResult<document::Document> {
     let format = format.map(parse_format).transpose()?;
-    let parsed = py.detach(|| anydoc::to_document(&data, format)).map_err(convert_error)?;
+    let parsed =
+        py.detach(|| anydoc::to_document(&data, format)).map_err(|e| convert_error(py, e))?;
     document::document(py, parsed)
 }
 
@@ -139,5 +205,10 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<document::Style>()?;
     m.add_class::<document::Table>()?;
     m.add("ConvertError", m.py().get_type::<ConvertError>())?;
+    m.add("EncryptedError", m.py().get_type::<EncryptedError>())?;
+    m.add("MalformedError", m.py().get_type::<MalformedError>())?;
+    m.add("MissingPartError", m.py().get_type::<MissingPartError>())?;
+    m.add("ResourceLimitError", m.py().get_type::<ResourceLimitError>())?;
+    m.add("UnsupportedError", m.py().get_type::<UnsupportedError>())?;
     Ok(())
 }

@@ -2,8 +2,7 @@
 source: tests/snapshots.rs
 expression: output
 ---
-|  |  |  |
-| --- | --- | --- |
 | a | b | c |
+| --- | --- | --- |
 | 1,5 | 2,5 | x |
 | 3,0 | y | z |

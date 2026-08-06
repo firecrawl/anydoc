@@ -22,6 +22,7 @@ const fixture = (name) => fileURLToPath(new URL(`../tests/fixtures/${name}`, imp
 const OUTLINE = fixture('docx/handmade-outline.docx')
 const RICH = fixture('docx/handmade-rich.docx')
 const CSV = fixture('csv/sheet.csv')
+const ENCRYPTED = fixture('malformed/encrypted--errors.odt')
 
 test('toMarkdown detects the format from the file content', async () => {
   const markdown = await toMarkdown(OUTLINE)
@@ -68,8 +69,20 @@ test('format detection reads content, extension, and path', async () => {
   assert.equal(formatFromPath('/tmp/report.unknown'), null)
 })
 
-test('conversion errors reject with the crate error message', async () => {
-  await assert.rejects(toMarkdownBytes(Buffer.from('not a document'), 'docx'), /malformed|unsupported/)
+// `code` is what callers branch on, so every kind of failure is pinned here.
+test('conversion errors reject with a coded Error', async () => {
+  const rejects = (promise, code, message) =>
+    assert.rejects(promise, (error) => {
+      assert.equal(error.code, code)
+      assert.match(error.message, message)
+      return true
+    })
+
+  await rejects(toMarkdownBytes(Buffer.from('not a document'), 'docx'), 'malformed', /malformed/)
+  await rejects(toMarkdownBytes(await readFile(CSV)), 'unsupported', /unrecognized file content/)
+  await rejects(toMarkdownBytes(await readFile(ENCRYPTED), 'odt'), 'encrypted', /encrypted/)
+  await rejects(toDocument(await readFile(ENCRYPTED), 'odt'), 'encrypted', /encrypted/)
+  await rejects(toMarkdown(fixture('docx/no-such-file.docx')), 'io', /io error/)
 })
 
 const CLI = fileURLToPath(new URL('./cli.js', import.meta.url))

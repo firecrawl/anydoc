@@ -24,7 +24,7 @@ jobs:
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - name: All six version locations agree (and match the tag)
+      - name: All seven version locations agree (and match the tag)
         id: check
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
@@ -208,6 +208,59 @@ jobs:
         # would otherwise publish the per-platform packages and cut a GitHub release.
         run: npm publish --dry-run --ignore-scripts --access public
         working-directory: node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-npm-wasm:
+    name: Publish npm (wasm)
+    needs: [gate, test-rust]
+    # npm rejects provenance attestations minted on self-hosted runners
+    # (Blacksmith counts as self-hosted), so build and publish run GitHub-hosted.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32-unknown-unknown
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          registry-url: 'https://registry.npmjs.org'
+      - name: Install wasm-pack
+        run: >
+          curl -sSfL https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz
+          | tar xz --strip-components=1 -C /usr/local/bin wasm-pack-v0.15.0-x86_64-unknown-linux-musl/wasm-pack
+      # --scope turns the anydoc-wasm crate into @firecrawl/anydoc-wasm.
+      - run: wasm-pack build wasm --release --target web --scope firecrawl
+      - name: Smoke test the built package
+        run: node --test wasm/test.mjs
+      - name: Skip if this version is already on npm
+        id: probe
+        run: |
+          version='${{ needs.gate.outputs.version }}'
+          if npm view "@firecrawl/anydoc-wasm@$version" version > /dev/null 2>&1; then
+            echo "@firecrawl/anydoc-wasm@$version is already published; skipping."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish
+        if: github.event_name == 'push' && steps.probe.outputs.published == 'false'
+        run: npm publish --access public
+        working-directory: wasm/pkg
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+      - name: Publish (dry run)
+        if: github.event_name == 'workflow_dispatch' && steps.probe.outputs.published == 'false'
+        run: npm publish --dry-run --access public
+        working-directory: wasm/pkg
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -508,7 +561,7 @@ jobs:
   # succeeded, carrying the Node addons, wheels, and sdist.
   github-release:
     name: GitHub release
-    needs: [publish-npm, publish-crates, publish-pypi, test-go]
+    needs: [publish-npm, publish-npm-wasm, publish-crates, publish-pypi, test-go]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

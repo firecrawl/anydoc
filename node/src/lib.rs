@@ -93,20 +93,29 @@ pub fn format_from_path(path: String) -> Option<Format> {
 /// Convert a document file to Markdown. The format is detected from the file
 /// content; the extension is the fallback for signature-less formats (CSV)
 /// and unrecognizable containers.
+///
+/// Rejects with an `Error` carrying a `ConvertErrorCode` on `code`; a file
+/// that cannot be read is `'io'`.
 #[napi(ts_return_type = "Promise<string>")]
 pub fn to_markdown(path: String) -> AsyncTask<MarkdownFileTask> {
-    AsyncTask::new(MarkdownFileTask { path })
+    AsyncTask::new(MarkdownFileTask { path, failure: Failure::default() })
 }
 
 /// Convert an in-memory document to Markdown. Without a format, it is
 /// detected from the content, which signature-less formats (CSV) have to name
 /// explicitly.
+///
+/// Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
 #[napi(ts_return_type = "Promise<string>")]
 pub fn to_markdown_bytes(
     bytes: Uint8Array,
     format: Option<Format>,
 ) -> AsyncTask<MarkdownBytesTask> {
-    AsyncTask::new(MarkdownBytesTask { bytes: bytes.to_vec(), format: format.map(Into::into) })
+    AsyncTask::new(MarkdownBytesTask {
+        bytes: bytes.to_vec(),
+        format: format.map(Into::into),
+        failure: Failure::default(),
+    })
 }
 
 /// Parse an in-memory document into the document model, which also carries
@@ -114,13 +123,46 @@ pub fn to_markdown_bytes(
 ///
 /// Unsupported for `pdf`: PDF conversion produces Markdown directly and has
 /// no document-model form; use `toMarkdownBytes`.
+///
+/// Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
 #[napi(ts_return_type = "Promise<Document>")]
 pub fn to_document(bytes: Uint8Array, format: Option<Format>) -> AsyncTask<DocumentTask> {
-    AsyncTask::new(DocumentTask { bytes: bytes.to_vec(), format: format.map(Into::into) })
+    AsyncTask::new(DocumentTask {
+        bytes: bytes.to_vec(),
+        format: format.map(Into::into),
+        failure: Failure::default(),
+    })
+}
+
+/// The kind of a failed conversion, held between the two threads a rejection
+/// crosses: `compute` runs on the libuv pool, where there is no `Env` to build
+/// a JS error with, and `reject` runs on the JS thread, where there is.
+#[derive(Default)]
+struct Failure(Option<&'static str>);
+
+impl Failure {
+    /// Keep the kind, and hand napi the message to reject with.
+    fn capture(&mut self, error: anydoc::ConvertError) -> Error {
+        self.0 = Some(error.code());
+        Error::from_reason(error.to_string())
+    }
+
+    /// Rebuild the rejection as an error whose `code` is the `ConvertError`
+    /// kind. napi fills `code` from the error's status, so the status here is
+    /// a plain string rather than the `Status` enum it defaults to. Anything
+    /// that did not come from `capture` is napi's own failure: pass it on.
+    fn reject(&self, env: Env, error: Error) -> Error {
+        let Some(code) = self.0 else {
+            return error;
+        };
+        let coded = Error::new(code.to_owned(), error.reason.clone());
+        Error::from(JsError::from(coded).into_unknown(env))
+    }
 }
 
 pub struct MarkdownFileTask {
     path: String,
+    failure: Failure,
 }
 
 impl Task for MarkdownFileTask {
@@ -128,17 +170,22 @@ impl Task for MarkdownFileTask {
     type JsValue = String;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        anydoc::to_markdown(&self.path).map_err(to_napi_error)
+        anydoc::to_markdown(&self.path).map_err(|e| self.failure.capture(e))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output)
+    }
+
+    fn reject(&mut self, env: Env, error: Error) -> Result<Self::JsValue> {
+        Err(self.failure.reject(env, error))
     }
 }
 
 pub struct MarkdownBytesTask {
     bytes: Vec<u8>,
     format: Option<anydoc::Format>,
+    failure: Failure,
 }
 
 impl Task for MarkdownBytesTask {
@@ -146,17 +193,22 @@ impl Task for MarkdownBytesTask {
     type JsValue = String;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        anydoc::to_markdown_bytes(&self.bytes, self.format).map_err(to_napi_error)
+        anydoc::to_markdown_bytes(&self.bytes, self.format).map_err(|e| self.failure.capture(e))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output)
+    }
+
+    fn reject(&mut self, env: Env, error: Error) -> Result<Self::JsValue> {
+        Err(self.failure.reject(env, error))
     }
 }
 
 pub struct DocumentTask {
     bytes: Vec<u8>,
     format: Option<anydoc::Format>,
+    failure: Failure,
 }
 
 impl Task for DocumentTask {
@@ -164,14 +216,14 @@ impl Task for DocumentTask {
     type JsValue = Document;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        anydoc::to_document(&self.bytes, self.format).map_err(to_napi_error)
+        anydoc::to_document(&self.bytes, self.format).map_err(|e| self.failure.capture(e))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output.into())
     }
-}
 
-fn to_napi_error(error: anydoc::ConvertError) -> Error {
-    Error::from_reason(error.to_string())
+    fn reject(&mut self, env: Env, error: Error) -> Result<Self::JsValue> {
+        Err(self.failure.reject(env, error))
+    }
 }

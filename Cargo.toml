@@ -1,11 +1,11 @@
 [workspace]
-members = ["node", "python", "go"]
+members = ["node", "python", "wasm", "go"]
 # cargo-fuzz keeps its own lockfile and nightly-only dependencies.
 exclude = ["fuzz"]
 
 [package]
 name = "anydoc"
-version = "0.1.3"
+version = "0.1.6"
 edition = "2024"
 # Edition 2024 needs 1.85; zip and calamine both raise it to 1.88.
 rust-version = "1.88"

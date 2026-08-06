@@ -1,6 +1,6 @@
 {
   "name": "@firecrawl/anydoc",
-  "version": "0.1.3",
+  "version": "0.1.6",
   "description": "Convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown",
   "license": "MIT",
   "homepage": "https://github.com/firecrawl/anydoc#readme",
@@ -39,6 +39,7 @@
   "napi": {
     "binaryName": "anydoc",
     "packageName": "@firecrawl/anydoc",
+    "dtsHeaderFile": "dts-header.d.ts",
     "targets": [
       "x86_64-apple-darwin",
       "aarch64-apple-darwin",

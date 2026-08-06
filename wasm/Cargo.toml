@@ -1,0 +1,28 @@
+# Released to npm as @firecrawl/anydoc-wasm (wasm-pack reads the package
+# name, version, description, license, and repository from here), so the
+# version is release-synced by scripts/check-versions.sh. `publish = false`
+# only keeps it off crates.io.
+[package]
+name = "anydoc-wasm"
+version = "0.1.6"
+edition = "2024"
+description = "WebAssembly bindings for anydoc: convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown in the browser"
+license = "MIT"
+repository = "https://github.com/firecrawl/anydoc"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# rustc emits bulk-memory and nontrapping-fptoint by default; wasm-pack's
+# bundled wasm-opt rejects them unless enabled explicitly.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
+[dependencies]
+anydoc = { path = ".." }
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "0.2"

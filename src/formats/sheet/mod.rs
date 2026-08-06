@@ -2,6 +2,7 @@
 
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, TableKind};
+use crate::shared::header::resolve_header_rows;
 use crate::shared::text::clean_text;
 use calamine::{Data, Dimensions, Reader, Sheets, open_workbook_auto_from_rs};
 use std::collections::{HashMap, HashSet};
@@ -98,11 +99,12 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
                 }
             }
         }
-        // Spreadsheet data has no header semantics unless the format says so.
-        let table = builder.finish(TableKind::Data);
+        // A spreadsheet marks no header row, so the shape of the data decides.
+        let mut table = builder.finish(TableKind::Data);
         if table.grid.is_empty() {
             continue;
         }
+        table.header_rows = resolve_header_rows(&table, 0);
         if multi_sheet {
             doc.blocks.push(Block::heading(2, vec![Inline::plain(name.clone())]));
         }

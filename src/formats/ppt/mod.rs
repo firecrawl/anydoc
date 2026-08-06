@@ -12,6 +12,7 @@ use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Style, inlines_are_empty};
 use crate::package::limits;
 use crate::shared::binary::{get_u32, read_ole_stream};
+use crate::shared::delta::{StyleDelta, rebase_emphasis};
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::officeart::record_at;
 use crate::shared::text::clean_text;
@@ -603,13 +604,16 @@ impl Extractor {
             paragraphs.push((inlines, depth, bullet));
         }
 
-        for (inlines, depth, bullet) in paragraphs {
+        for (mut inlines, depth, bullet) in paragraphs {
             if inlines_are_empty(&inlines) {
                 flush_list(&mut self.current, &mut self.list_run);
                 continue;
             }
             if is_title {
                 flush_list(&mut self.current, &mut self.list_run);
+                let d = level_default(depth);
+                let base = StyleDelta { bold: d.bold, italic: d.italic, ..Default::default() };
+                rebase_emphasis(&mut inlines, base.resolve());
                 let anchor = Some(crate::model::inlines_to_plain_text(&inlines));
                 self.current.push(Block::Heading { level: 2, anchor, content: inlines });
                 continue;

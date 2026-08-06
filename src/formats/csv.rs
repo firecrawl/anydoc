@@ -4,10 +4,13 @@
 //! field); only control characters are cleaned. Encoding is detected from
 //! the BOM (UTF-8, UTF-16LE/BE), then UTF-8, then Windows-1252. The
 //! delimiter is chosen by trial-parsing candidates and scoring record
-//! consistency, so delimiters inside quoted fields don't skew the choice.
+//! consistency, so delimiters inside quoted fields don't skew the choice. The
+//! format marks no header row, so the shape of the data decides whether the
+//! first record is one.
 
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, Inline, Table, TableKind};
+use crate::shared::header::resolve_header_rows;
 use crate::shared::text::clean_text;
 use csv::ReaderBuilder;
 use std::borrow::Cow;
@@ -37,7 +40,8 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     }
 
     let mut doc = Document::default();
-    let table = Table::from_rows(rows, 0, TableKind::Data);
+    let mut table = Table::from_rows(rows, 0, TableKind::Data);
+    table.header_rows = resolve_header_rows(&table, 0);
     if !table.grid.is_empty() {
         doc.blocks.push(Block::Table(table));
     }

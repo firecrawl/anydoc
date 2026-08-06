@@ -2,7 +2,7 @@
 source: tests/snapshots.rs
 expression: output
 ---
-# **Heading via style**
+# Heading via style
 
 Before the binary blob.
 
