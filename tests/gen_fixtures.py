@@ -1530,6 +1530,33 @@ def zip_replace(src, dst, name, data):
     write_zip(dst, entries)
 
 
+
+def zero_minifat(raw):
+    """Zero every MiniFAT sector, replicating the Apple Cocoa .doc writer
+    defect (TextEdit "Save as Word 97", `textutil -convert doc`): chains are
+    left as zeros instead of FREESECT/ENDOFCHAIN markers, which strict CFB
+    readers reject as a self-referencing mini-sector chain."""
+    d = bytearray(raw)
+    shift = int.from_bytes(d[30:32], "little")
+    size = 1 << shift
+    minifat_start = int.from_bytes(d[60:64], "little")
+    num_minifat = int.from_bytes(d[64:68], "little")
+    fat = []
+    for i in range(109):
+        s = int.from_bytes(d[76 + i * 4:80 + i * 4], "little")
+        if s >= 0xFFFFFFFA:
+            break
+        off = (s + 1) * size
+        fat.extend(int.from_bytes(d[off + j * 4:off + j * 4 + 4], "little")
+                   for j in range(size // 4))
+    cur = minifat_start
+    for _ in range(num_minifat):
+        off = (cur + 1) * size
+        d[off:off + size] = b"\0" * size
+        cur = fat[cur]
+    return bytes(d)
+
+
 def malformed():
     m = OUT / "malformed"
     m.mkdir(parents=True, exist_ok=True)
@@ -1560,6 +1587,8 @@ def malformed():
     doc = OUT / "doc" / "text.doc"
     if doc.exists():
         (m / "truncated--errors.doc").write_bytes(doc.read_bytes()[:4096])
+        (m / "zeroed-minifat--recovers.doc").write_bytes(
+            zero_minifat(doc.read_bytes()))
     ppt = OUT / "ppt" / "pres.ppt"
     if ppt.exists():
         # Corrupt every UserEditAtom record type so the persist directory is

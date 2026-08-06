@@ -24,7 +24,6 @@ use crate::Format;
 use crate::package::Package;
 use crate::package::relationships::{read_rels, rel_type};
 use crate::package::xml::{Element, ns};
-use std::io::Cursor;
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const CT_NS: &str = "http://schemas.openxmlformats.org/package/2006/content-types";
@@ -51,7 +50,7 @@ pub fn from_bytes(bytes: &[u8]) -> Option<Format> {
 /// OOXML packages (`EncryptedPackage`) stay `None`: the inner format is
 /// unknowable, and the frontend reports `Encrypted` precisely.
 fn detect_ole(bytes: &[u8]) -> Option<Format> {
-    let ole = cfb::CompoundFile::open(Cursor::new(bytes)).ok()?;
+    let ole = crate::shared::binary::open_ole(bytes).ok()?;
     // Stream-name comparison is case-insensitive, matching CFB's own
     // uppercase name comparisons; producers vary (`WORKBOOK`, `BOOK`).
     let mut found = None;
@@ -209,6 +208,7 @@ fn opc_format_by_path(part: &str) -> Option<Format> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
     use std::io::Write;
 
     fn zip_of(parts: &[(&str, &[u8])]) -> Vec<u8> {

@@ -11,13 +11,12 @@ mod styletext;
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Style, inlines_are_empty};
 use crate::package::limits;
-use crate::shared::binary::{get_u32, read_ole_stream};
+use crate::shared::binary::{get_u32, open_ole, read_ole_stream};
 use crate::shared::delta::{StyleDelta, rebase_emphasis};
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::officeart::record_at;
 use crate::shared::text::clean_text;
 use std::collections::HashMap;
-use std::io::Cursor;
 use styletext::{CharProps, MasterLevel, StyleRuns};
 
 /// One master's per-text-type level defaults, keyed by TxMasterStyleAtom
@@ -25,9 +24,7 @@ use styletext::{CharProps, MasterLevel, StyleRuns};
 type MasterStyles = HashMap<u16, Vec<MasterLevel>>;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
-    let cursor = Cursor::new(bytes);
-    let mut ole = cfb::CompoundFile::open(cursor)
-        .map_err(|e| ConvertError::malformed(format!("not an OLE2 compound file: {e}")))?;
+    let mut ole = open_ole(bytes)?;
     let data = read_ole_stream(&mut ole, "PowerPoint Document")?;
     let current_user = read_ole_stream(&mut ole, "Current User").unwrap_or_default();
     if get_u32(&current_user, 12) == Some(0xF3D1_C4DF) {
