@@ -381,6 +381,57 @@ fn hard_break() {
 }
 
 #[test]
+fn delimiters_cannot_pair_across_a_hard_break() {
+    // A delimiter is inert only while nothing pairs with it. Each run here
+    // holds one, and a hard break does not end the paragraph, so the pair
+    // would form a code span, emphasis, or a link out of document text.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        Inline::plain("b `"),
+    ])]);
+    assert_eq!(md, "a \\`\\\nb `\n");
+
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a *x"),
+        Inline::LineBreak,
+        Inline::plain("y* b"),
+    ])]);
+    assert_eq!(md, "a \\*x\\\ny* b\n");
+
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("see ["),
+        Inline::LineBreak,
+        Inline::plain("note](http://example.com)"),
+    ])]);
+    assert_eq!(md, "see \\[\\\nnote](http://example.com)\n");
+}
+
+#[test]
+fn a_pasted_code_fence_stays_literal() {
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("```"),
+        Inline::LineBreak,
+        Inline::plain("let x = 1;"),
+        Inline::LineBreak,
+        Inline::plain("```"),
+    ])]);
+    assert_eq!(md, "\\`\\`\\`\\\nlet x = 1;\\\n\\`\\``\n");
+}
+
+#[test]
+fn a_delimiter_with_nothing_after_it_stays_bare() {
+    // The paragraph's last run has no partner ahead of it, so minimal
+    // escaping still applies.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("intro"),
+        Inline::LineBreak,
+        Inline::plain("only one `"),
+    ])]);
+    assert_eq!(md, "intro\\\nonly one `\n");
+}
+
+#[test]
 fn line_start_escape_after_hard_break() {
     let md = doc(vec![Block::Paragraph(vec![
         Inline::plain("intro"),

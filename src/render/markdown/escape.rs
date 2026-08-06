@@ -23,6 +23,11 @@ pub(crate) struct EscapeOpts {
     /// The character following the run is unknown or active markup; pairable
     /// delimiters must assume the worst.
     pub trailing_active: bool,
+    /// More of the same paragraph follows this run. A delimiter is left
+    /// unescaped when nothing in the run pairs with it, but Markdown pairs
+    /// across the whole paragraph, not one run: the partner can arrive in a
+    /// later run, with a line break or an anchor in between.
+    pub pairs_ahead: bool,
     /// Inside a link label / image alt, where an unmatched `]` (or `[`)
     /// would terminate the label early.
     pub in_label: bool,
@@ -30,7 +35,7 @@ pub(crate) struct EscapeOpts {
 
 /// Escape Markdown syntax in document text.
 pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> String {
-    let EscapeOpts { at_line_start, styled, trailing_active, in_label } = opts;
+    let EscapeOpts { at_line_start, styled, trailing_active, pairs_ahead, in_label } = opts;
     let chars: Vec<char> = text.chars().collect();
     // Last position of each pairable delimiter; a lone one is inert.
     let mut last: [Option<usize>; 5] = [None; 5]; // * _ ~ ` ]
@@ -64,7 +69,8 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
         let next = chars.get(i + 1).copied();
         // At the run's end the next character is unknown; trailing_active assumes the worst.
         let next_nonspace = next.map_or(trailing_active, |n| !n.is_whitespace());
-        let paired = |slot: usize| trailing_active || last[slot].is_some_and(|j| j > i);
+        let paired =
+            |slot: usize| trailing_active || pairs_ahead || last[slot].is_some_and(|j| j > i);
         let escape = match c {
             '\\' => true,
             ']' if in_label => true,
