@@ -15,7 +15,7 @@ use crate::model::{
 };
 use crate::package::limits;
 use crate::shared::assets::AssetSink;
-use crate::shared::binary::{get_u16, get_u32, read_ole_stream};
+use crate::shared::binary::{get_u16, get_u32, open_ole, read_ole_stream};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
 use crate::shared::grid::{CellProp, GridRow, build_edge_table};
@@ -24,13 +24,10 @@ use crate::shared::list::{ListEntry, ListKey, flush_list};
 use lists::{LEVELS, ListDef, Lists};
 use sprm::{PapDelta, Tap, apply_chpx, apply_pap_sprms, chpx_istd};
 use std::collections::HashMap;
-use std::io::Cursor;
 use stsh::Stylesheet;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
-    let cursor = Cursor::new(bytes);
-    let mut ole = cfb::CompoundFile::open(cursor)
-        .map_err(|e| ConvertError::malformed(format!("not an OLE2 compound file: {e}")))?;
+    let mut ole = open_ole(bytes)?;
 
     let word_doc = read_ole_stream(&mut ole, "WordDocument")?;
     if get_u16(&word_doc, 0) != Some(0xA5EC) {
