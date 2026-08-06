@@ -4,7 +4,7 @@ use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, TableKind};
 use crate::shared::header::resolve_header_rows;
 use crate::shared::text::clean_text;
-use calamine::{Data, Dimensions, Reader, Sheets, open_workbook_auto_from_rs};
+use calamine::{Data, Dimensions, Reader, SheetVisible, Sheets, open_workbook_auto_from_rs};
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 
@@ -25,12 +25,33 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         contained("workbook open", || open_workbook_auto_from_rs(Cursor::new(bytes)))?
             .map_err(map_open_error)?;
     let sheet_names = contained("sheet listing", || workbook.sheet_names().to_owned())?;
-    let multi_sheet = sheet_names.len() > 1;
+    // `sheets_metadata()` shares one backing `Vec<Sheet>` with `sheet_names()`,
+    // so the Nth metadata entry describes the Nth name - a name lookup would
+    // reintroduce the bug under re-ordering, only positional access is sound.
+    let metadata = contained("sheet metadata", || workbook.sheets_metadata().to_owned())?;
+    // The multi-sheet heading ("## <name>") is only useful when more than one
+    // sheet is actually shown: a single visible sheet inside a workbook full
+    // of hidden ones must not gain (or lose) its heading. Count visible sheets
+    // rather than all sheets so hidden ones stay invisible to this decision.
+    let multi_sheet = sheet_names
+        .iter()
+        .zip(metadata.iter())
+        .filter(|(_, m)| m.visible == SheetVisible::Visible)
+        .count()
+        > 1;
     let merged = merged_regions(&mut workbook, &sheet_names)?;
 
     let mut doc = Document::default();
     let mut failed = 0usize;
-    for name in &sheet_names {
+    for (name, meta) in sheet_names.iter().zip(metadata.iter()) {
+        // A hidden or veryHidden sheet is not visible to an end user opening
+        // the workbook, so it must contribute no block at all - skip it before
+        // any heading or table is emitted. This runs before the read attempt,
+        // so a hidden sheet never counts as "unreadable" (hidden != unreadable)
+        // and an all-hidden workbook degrades to an empty Document, not an error.
+        if meta.visible != SheetVisible::Visible {
+            continue;
+        }
         let range = match contained("worksheet read", || workbook.worksheet_range(name))? {
             Ok(r) => r,
             Err(e) => {

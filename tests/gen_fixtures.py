@@ -915,6 +915,71 @@ def merged_xlsx():
 
 
 # ---------------------------------------------------------------------------
+# R-hidden-sheet: hidden / veryHidden worksheets must not render as visible
+# content (sheet-level visibility, the half of #9 calamine exposes). A visible
+# sheet keeps its table; a hidden and a veryHidden sheet drop out entirely.
+
+def hidden_xlsx():
+    ct = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"""
+    root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"""
+    workbook = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets>
+<sheet name="Visible" sheetId="1" r:id="rId1"/>
+<sheet name="Hidden" sheetId="2" r:id="rId2" state="hidden"/>
+<sheet name="VeryHidden" sheetId="3" r:id="rId3" state="veryHidden"/>
+</sheets></workbook>"""
+    wb_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/>
+</Relationships>"""
+    sheet1 = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData><row r="1">
+<c r="A1" t="inlineStr"><is><t>visible cell</t></is></c>
+<c r="B1" t="inlineStr"><is><t>shown</t></is></c>
+</row></sheetData>
+</worksheet>"""
+    sheet2 = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData><row r="1">
+<c r="A1" t="inlineStr"><is><t>hidden cell</t></is></c>
+<c r="B1" t="inlineStr"><is><t>must not appear</t></is></c>
+</row></sheetData>
+</worksheet>"""
+    sheet3 = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData><row r="1">
+<c r="A1" t="inlineStr"><is><t>very hidden cell</t></is></c>
+<c r="B1" t="inlineStr"><is><t>must not appear either</t></is></c>
+</row></sheetData>
+</worksheet>"""
+    write_zip(OUT / "xlsx" / "handmade-hidden.xlsx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", root_rels),
+        ("xl/workbook.xml", workbook),
+        ("xl/_rels/workbook.xml.rels", wb_rels),
+        ("xl/worksheets/sheet1.xml", sheet1),
+        ("xl/worksheets/sheet2.xml", sheet2),
+        ("xl/worksheets/sheet3.xml", sheet3),
+    ])
+
+
+# ---------------------------------------------------------------------------
 # R16: ODF style:default-style beneath named chains; full ISO durations
 
 def defaults_odf():
@@ -1748,6 +1813,7 @@ def main():
     manyrefs_docx()
     defaults_odf()
     merged_xlsx()
+    hidden_xlsx()
     features_epub()
     bin_rtf()
     csvs()

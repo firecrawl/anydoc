@@ -11,6 +11,7 @@ mod common;
 
 use common::{fixture_root, walk};
 use std::fmt::Write as _;
+use std::io::Write as _;
 use std::path::Path;
 
 /// Convert one file, capturing panics so a bad parser records a baseline
@@ -164,6 +165,74 @@ fn doc_inline_picture_is_retained() {
         "expected an extracted picture asset, got {:?}",
         doc.assets.iter().map(|a| (&a.media_type, a.bytes.len())).collect::<Vec<_>>()
     );
+}
+
+/// Hidden and veryHidden worksheets contribute no heading and no table; only
+/// the visible sheet renders. This is the sheet-level half of #9 (calamine
+/// exposes `state="hidden"`/`state="veryHidden"`; row/column visibility is a
+/// separate, out-of-scope half). The committed fixture holds one visible sheet
+/// plus a hidden and a veryHidden sheet, each with identifying cell content.
+#[test]
+fn hidden_worksheets_do_not_render() {
+    let path = fixture_root().join("xlsx").join("handmade-hidden.xlsx");
+    let bytes = std::fs::read(&path).unwrap();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Excel).unwrap();
+    // Exactly one table - the visible sheet's; no heading is emitted because a
+    // single visible sheet needs no "## <name>" disambiguator.
+    assert_eq!(doc.blocks.len(), 1, "only the visible sheet should render, got {:?}", doc.blocks);
+    assert!(matches!(doc.blocks[0], anydoc::model::Block::Table(_)));
+
+    // The hidden sheets' cell content and names must be absent from the
+    // rendered Markdown (no heading, no rendered table).
+    let md = anydoc::to_markdown(&path).unwrap();
+    assert!(md.contains("visible cell"), "visible content should render:\n{md}");
+    for needle in ["Hidden", "VeryHidden", "must not appear", "very hidden cell"] {
+        assert!(!md.contains(needle), "hidden content leaked into output ({needle}):\n{md}");
+    }
+}
+
+/// A workbook whose every sheet is hidden degrades to an empty Document, not a
+/// panic and not a misleading "no sheet could be read" error (hidden is a valid
+/// state, not unreadable). Built inline so no committed fixture is all-hidden.
+#[test]
+fn all_hidden_workbook_yields_empty_document() {
+    let bytes = all_hidden_xlsx();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Excel).unwrap();
+    assert!(doc.blocks.is_empty(), "an all-hidden workbook must render no blocks");
+    let md = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Excel).unwrap();
+    assert!(md.trim().is_empty(), "an all-hidden workbook must render no markdown");
+}
+
+/// Minimal xlsx whose single sheet is `state="hidden"`, so every sheet is
+/// non-visible. Mirrors the inline xlsx builder the sheet unit tests use.
+fn all_hidden_xlsx() -> Vec<u8> {
+    let parts: &[(&str, &str)] = &[
+        (
+            "[Content_Types].xml",
+            r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#,
+        ),
+        (
+            "_rels/.rels",
+            r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
+        ),
+        (
+            "xl/workbook.xml",
+            r#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Only" sheetId="1" r:id="rId1" state="hidden"/></sheets></workbook>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+        ),
+    ];
+    let sheet = r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>hidden only</t></is></c></row></sheetData></worksheet>"#;
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, body) in parts {
+        w.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(body.as_bytes()).unwrap();
+    }
+    w.start_file("xl/worksheets/sheet1.xml", zip::write::SimpleFileOptions::default()).unwrap();
+    w.write_all(sheet.as_bytes()).unwrap();
+    w.finish().unwrap().into_inner()
 }
 
 /// The RTF `\pict` payload is retained as an asset (the Markdown output
