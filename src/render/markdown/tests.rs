@@ -200,6 +200,63 @@ fn data_table_1x1_not_unwrapped() {
 }
 
 #[test]
+fn single_cell_wrapper_around_nested_table_unwrapped() {
+    // A 1x1 data table whose lone cell holds a nested table is layout
+    // scaffolding (the Word-form shape): the wrapper unwraps so the inner
+    // grid renders as a real table instead of `a / b` runs.
+    let inner = table_from(
+        vec![
+            vec![
+                Cell::from_inlines(vec![Inline::plain("Metric")]),
+                Cell::from_inlines(vec![Inline::plain("Value")]),
+            ],
+            vec![
+                Cell::from_inlines(vec![Inline::plain("Height")]),
+                Cell::from_inlines(vec![Inline::plain("120")]),
+            ],
+        ],
+        1,
+    );
+    let cell = Cell::new(vec![
+        Block::Paragraph(vec![Inline::plain("Section A")]),
+        inner,
+        Block::Paragraph(vec![Inline::plain("End of section")]),
+    ]);
+    let md = doc(vec![table_from(vec![vec![cell]], 0)]);
+    assert_eq!(
+        md,
+        "Section A\n\n| Metric | Value |\n| --- | --- |\n| Height | 120 |\n\nEnd of section\n"
+    );
+}
+
+#[test]
+fn nested_table_in_multi_cell_table_still_flattens() {
+    // Only the single-cell wrapper unwraps; a nested table inside a real
+    // multi-cell grid keeps the flattened `a / b` form.
+    let inner = table_from(
+        vec![vec![
+            Cell::from_inlines(vec![Inline::plain("a")]),
+            Cell::from_inlines(vec![Inline::plain("b")]),
+        ]],
+        0,
+    );
+    let md = doc(vec![table_from(
+        vec![vec![Cell::new(vec![inner]), Cell::from_inlines(vec![Inline::plain("right")])]],
+        0,
+    )]);
+    assert_eq!(md, "|  |  |\n| --- | --- |\n| a / b | right |\n");
+}
+
+#[test]
+fn wrappers_unwrap_recursively() {
+    // Wrapper-in-wrapper (nested forms) unwraps all the way down.
+    let innermost = table_from(vec![vec![Cell::from_inlines(vec![Inline::plain("v")])]], 0);
+    let mid = table_from(vec![vec![Cell::new(vec![innermost])]], 0);
+    let md = doc(vec![table_from(vec![vec![Cell::new(vec![mid])]], 0)]);
+    assert_eq!(md, "|  |\n| --- |\n| v |\n");
+}
+
+#[test]
 fn trailing_empty_rows_and_columns_trimmed() {
     let empty = Cell::default;
     let filled = |s: &str| Cell::from_inlines(vec![Inline::plain(s)]);
