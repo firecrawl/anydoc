@@ -27,7 +27,8 @@ Options:
 The format is detected from the file content; the file extension is the
 fallback for signature-less formats (CSV). stdin has no extension, so CSV
 input from stdin needs --format csv. Scanned or image-only PDFs need OCR,
-which anydoc does not do, and error as unsupported.
+which this CLI does not carry, and error as unsupported; the library API
+reads them when you build a Converter with OCR models.
 
 Exit codes:
   0  success

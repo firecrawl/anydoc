@@ -22,5 +22,5 @@ Rules:
 2. The format is detected from the file content. Pass `--format <name>` only when detection cannot work: CSV from stdin, or a missing or wrong extension.
 3. Exit codes: 0 success, 1 the document could not be converted, 2 usage error. Failures print one `anydoc: <message>` line to stderr. The CLI never prompts.
 4. For a large document, write to a file with `-o` and read the parts you need instead of streaming everything into context.
-5. Scanned and image-only PDFs need OCR, which anydoc does not do; they fail as unsupported. The hosted [Firecrawl Parse](https://firecrawl.dev/parse) API handles those.
+5. Scanned and image-only PDFs need OCR, which this CLI does not carry; they fail as unsupported. The Rust, Node, and browser APIs can read them with local OCR when the caller supplies models, and the hosted [Firecrawl Parse](https://firecrawl.dev/parse) API handles them with no setup.
 6. Inside a Node, Python, or Rust codebase, prefer the library over shelling out: `@firecrawl/anydoc` on npm, `firecrawl-anydoc` on PyPI, `anydoc` on crates.io. Each exposes the same `to_markdown` / `toMarkdown` API.

@@ -20,8 +20,10 @@ pub enum Format {
     Docx = "docx",
     Odt = "odt",
     /// Converted with pdf-inspector, which emits Markdown directly:
-    /// `toDocument` is unsupported for PDFs. Scanned or image-only PDFs
-    /// (needing OCR) error as unsupported.
+    /// `toDocument` is unsupported for PDFs. Pages with no extractable text
+    /// need OCR: the module-level functions report them as unsupported,
+    /// while a `Converter`, in a build with the `ocr` feature, recognizes
+    /// exactly those pages.
     Pdf = "pdf",
     Ppt = "ppt",
     Pptx = "pptx",
