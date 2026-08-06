@@ -8,7 +8,9 @@ mod table;
 mod tables;
 
 use crate::error::ConvertError;
-use crate::model::{Block, Document, Inline, Note, NoteKind, Style, inlines_are_empty};
+use crate::model::{
+    Block, Document, DocumentMeta, Inline, Note, NoteKind, Style, inlines_are_empty,
+};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::field_result;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
@@ -1013,7 +1015,12 @@ impl<'a> Parser<'a> {
         self.table.collapse_nested()?;
         self.flush_top_table()?;
         self.flush_list();
-        Ok(Document { blocks: self.blocks, notes: self.dest.notes, assets: self.assets.assets })
+        Ok(Document {
+            meta: DocumentMeta::default(),
+            blocks: self.blocks,
+            notes: self.dest.notes,
+            assets: self.assets.assets,
+        })
     }
 }
 

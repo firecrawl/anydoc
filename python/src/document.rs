@@ -12,6 +12,8 @@ use anydoc::model;
 
 #[pyclass(frozen, get_all, module = "anydoc")]
 pub struct Document {
+    /// DocumentMeta
+    meta: Py<DocumentMeta>,
     /// list[Block]
     blocks: Py<PyList>,
     /// Footnote and endnote bodies, referenced from text by a `note_ref`
@@ -19,6 +21,35 @@ pub struct Document {
     notes: Py<PyList>,
     /// list[Asset]
     assets: Py<PyList>,
+}
+
+#[pyclass(frozen, get_all, module = "anydoc")]
+pub struct DocumentMeta {
+    /// str | None
+    title: Option<String>,
+    /// list[str]
+    authors: Vec<String>,
+    /// str | None
+    language: Option<String>,
+    /// str | None
+    date: Option<String>,
+    /// str | None
+    publisher: Option<String>,
+    /// str | None
+    description: Option<String>,
+}
+
+impl From<model::DocumentMeta> for DocumentMeta {
+    fn from(meta: model::DocumentMeta) -> Self {
+        DocumentMeta {
+            title: meta.title,
+            authors: meta.authors,
+            language: meta.language,
+            date: meta.date,
+            publisher: meta.publisher,
+            description: meta.description,
+        }
+    }
 }
 
 #[pyclass(frozen, get_all, module = "anydoc")]
@@ -369,6 +400,7 @@ fn asset(py: Python<'_>, asset: model::Asset) -> PyResult<Asset> {
 
 pub fn document(py: Python<'_>, document: model::Document) -> PyResult<Document> {
     Ok(Document {
+        meta: Py::new(py, DocumentMeta::from(document.meta))?,
         blocks: blocks(py, document.blocks)?,
         notes: pylist(py, document.notes.into_iter().map(|n| note(py, n)))?,
         assets: pylist(py, document.assets.into_iter().map(|a| asset(py, a)))?,

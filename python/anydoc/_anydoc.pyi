@@ -73,11 +73,22 @@ def to_document(data: bytes | bytearray, format: Format | None = None) -> Docume
 
 @final
 class Document:
+    meta: DocumentMeta
     blocks: list[Block]
     notes: list[Note]
     """Footnote and endnote bodies, referenced from text by a `note_ref`
     inline."""
     assets: list[Asset]
+
+@final
+class DocumentMeta:
+    title: str | None
+    authors: list[str]
+    """Authors, in source order."""
+    language: str | None
+    date: str | None
+    publisher: str | None
+    description: str | None
 
 @final
 class Block:

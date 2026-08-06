@@ -2,7 +2,10 @@
 source: tests/snapshots.rs
 expression: output
 ---
-# Feature Book
+---
+title: "Feature Book"
+language: "en"
+---
 
 <a id="oebps-ch1-xhtml"></a>
 

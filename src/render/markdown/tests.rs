@@ -5,7 +5,7 @@ use crate::model::{
 };
 
 fn doc(blocks: Vec<Block>) -> String {
-    document_to_markdown(&Document { blocks, notes: Vec::new(), assets: Vec::new() })
+    document_to_markdown(&Document { blocks, ..Default::default() })
 }
 
 fn styled(text: &str, style: Style) -> Inline {
@@ -27,6 +27,53 @@ const ITALIC: Style = Style { bold: false, italic: true, strike: false, code: fa
 fn heading_and_paragraph() {
     let md = doc(vec![heading(2, "Title"), Block::Paragraph(vec![Inline::plain("Hello world.")])]);
     assert_eq!(md, "## Title\n\nHello world.\n");
+}
+
+fn doc_with_meta(meta: crate::model::DocumentMeta, blocks: Vec<Block>) -> String {
+    document_to_markdown(&Document { meta, blocks, ..Default::default() })
+}
+
+#[test]
+fn front_matter_single_author() {
+    let meta = crate::model::DocumentMeta {
+        title: Some("My Book".into()),
+        authors: vec!["Ada".into()],
+        language: Some("en".into()),
+        ..Default::default()
+    };
+    let md = doc_with_meta(meta, vec![heading(1, "Chapter")]);
+    assert_eq!(
+        md,
+        "---\ntitle: \"My Book\"\nauthor: \"Ada\"\nlanguage: \"en\"\n---\n\n# Chapter\n"
+    );
+}
+
+#[test]
+fn front_matter_multiple_authors_render_as_a_list() {
+    let meta = crate::model::DocumentMeta {
+        title: Some("Two Authors".into()),
+        authors: vec!["Ada".into(), "Grace".into()],
+        ..Default::default()
+    };
+    let md = doc_with_meta(meta, vec![]);
+    assert_eq!(md, "---\ntitle: \"Two Authors\"\nauthor:\n  - \"Ada\"\n  - \"Grace\"\n---\n");
+}
+
+#[test]
+fn front_matter_quotes_and_collapses_values() {
+    // Colons, quotes, backslashes, and newlines must not break the YAML.
+    let meta = crate::model::DocumentMeta {
+        title: Some("A: \"quoted\"\nand \\ split".into()),
+        ..Default::default()
+    };
+    let md = doc_with_meta(meta, vec![]);
+    assert_eq!(md, "---\ntitle: \"A: \\\"quoted\\\" and \\\\ split\"\n---\n");
+}
+
+#[test]
+fn empty_meta_emits_no_front_matter() {
+    let md = doc_with_meta(crate::model::DocumentMeta::default(), vec![heading(1, "Only body")]);
+    assert_eq!(md, "# Only body\n");
 }
 
 #[test]
@@ -393,6 +440,7 @@ fn footnotes() {
             ),
         ],
         assets: Vec::new(),
+        meta: Default::default(),
     });
     assert_eq!(
         md,
@@ -412,6 +460,7 @@ fn empty_and_unreferenced_notes() {
             note("orphan", vec![Block::Paragraph(vec![Inline::plain("Kept.")])]),
         ],
         assets: Vec::new(),
+        meta: Default::default(),
     });
     assert_eq!(md, "Text\n\n[^1]: Kept.\n");
 }
@@ -425,6 +474,7 @@ fn duplicate_note_ids_render_one_definition() {
             note("a", vec![Block::Paragraph(vec![Inline::plain("Duplicate dropped.")])]),
         ],
         assets: Vec::new(),
+        meta: Default::default(),
     });
     assert_eq!(md, "Text[^1]\n\n[^1]: First wins.\n");
 }

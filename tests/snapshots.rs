@@ -177,6 +177,20 @@ fn rtf_inline_picture_is_retained() {
     assert!(png.bytes.starts_with(&[0x89, b'P', b'N', b'G']), "payload decodes from hex");
 }
 
+/// EPUB Dublin Core metadata reaches the document model: the main title is
+/// chosen through the EPUB3 refinement, and repeated `dc:creator` are all kept.
+#[test]
+fn epub_metadata_is_parsed_into_the_model() {
+    let bytes = std::fs::read(fixture_root().join("epub").join("handmade-metadata.epub")).unwrap();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Epub).unwrap();
+    assert_eq!(doc.meta.title.as_deref(), Some("The Main Title"));
+    assert_eq!(doc.meta.authors, ["Ada Lovelace", "Grace Hopper"]);
+    assert_eq!(doc.meta.language.as_deref(), Some("en"));
+    // dc:date repeats (creation, publication); the first non-empty one wins.
+    assert_eq!(doc.meta.date.as_deref(), Some("2019-01-01"));
+    assert_eq!(doc.meta.publisher.as_deref(), Some("Analytical Press"));
+}
+
 /// Resource-abuse fixtures must hard-fail with `ResourceLimit` - the one
 /// class of malformed input that never converts.
 #[test]
