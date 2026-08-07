@@ -39,6 +39,13 @@
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Shared types used by both the native and WebAssembly bindings live in
+       Firecrawl.Anydoc.Shared/ so neither package owns a duplicate copy. -->
+  <ItemGroup>
+    <Compile Include="../Firecrawl.Anydoc.Shared/Model.cs" Link="Model.cs" />
+    <Compile Include="../Firecrawl.Anydoc.Shared/Types.cs" Link="Types.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Include="../README.md" Pack="true" PackagePath="\" />
   </ItemGroup>

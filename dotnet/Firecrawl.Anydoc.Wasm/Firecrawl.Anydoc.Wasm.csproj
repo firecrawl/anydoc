@@ -34,8 +34,8 @@
   <!-- Reuse the exact document model and shared types the native binding
        publishes, so both packages expose the same Firecrawl.Anydoc types. -->
   <ItemGroup>
-    <Compile Include="../Firecrawl.Anydoc/Model.cs" Link="Shared/Model.cs" />
-    <Compile Include="../Firecrawl.Anydoc/Types.cs" Link="Shared/Types.cs" />
+    <Compile Include="../Firecrawl.Anydoc.Shared/Model.cs" Link="Shared/Model.cs" />
+    <Compile Include="../Firecrawl.Anydoc.Shared/Types.cs" Link="Shared/Types.cs" />
   </ItemGroup>
 
   <ItemGroup>
