@@ -6,7 +6,7 @@
 name = "anydoc-wasm"
 version = "0.1.7"
 edition = "2024"
-description = "WebAssembly bindings for anydoc: convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown in the browser"
+description = "WebAssembly bindings for anydoc: convert documents (doc, docx, odt, rtf, epub, html, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown in the browser"
 license = "MIT"
 repository = "https://github.com/firecrawl/anydoc"
 publish = false

@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/firecrawl-anydoc.svg)](https://pypi.org/project/firecrawl-anydoc/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/firecrawl/anydoc/blob/main/LICENSE)
 
-Convert Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF files into clean GitHub-Flavored Markdown. Python bindings for the [anydoc](https://github.com/firecrawl/anydoc) Rust crate, built by [Firecrawl](https://firecrawl.dev). Also available as a hosted API through [Firecrawl Parse](https://firecrawl.dev/parse), which adds our OCR models for the scanned pages anydoc can't read on its own.
+Convert Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, HTML, CSV, and PDF files into clean GitHub-Flavored Markdown. Python bindings for the [anydoc](https://github.com/firecrawl/anydoc) Rust crate, built by [Firecrawl](https://firecrawl.dev). Also available as a hosted API through [Firecrawl Parse](https://firecrawl.dev/parse), which adds our OCR models for the scanned pages anydoc can't read on its own.
 
 Every format parses into one shared document model and renders through a single Markdown serializer, so headings, tables, lists, and footnotes come out the same no matter which format goes in. Conversion releases the GIL, so other threads keep running. Type stubs ship with the package.
 
@@ -23,6 +23,7 @@ The package installs as `firecrawl-anydoc` and imports as `anydoc`.
 | OpenDocument     | `.odt`, `.ods`, `.odp`                                     |
 | Rich Text Format | `.rtf`                                                     |
 | EPUB             | `.epub`                                                    |
+| HTML             | `.html`, `.htm`                                            |
 | CSV              | `.csv`                                                     |
 | PDF              | `.pdf`                                                     |
 
@@ -70,7 +71,7 @@ The five conversion failures subclass `anydoc.ConvertError`, so catching that ha
 
 ## Format detection
 
-The format is read from the file content, using the marker its specification designates: the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types. CSV has no such marker, so detection returns `None` for it and the extension, or an explicit format, names it instead.
+The format is read from the file content, using the marker its specification designates: the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types, or an HTML doctype/root element. CSV has no such marker, so detection returns `None` for it and the extension, or an explicit format, names it instead. Standalone HTML is supported; MHTML is not yet supported.
 
 ```python
 anydoc.format_from_bytes(data)  # 'docx', or None when nothing matches
