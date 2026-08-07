@@ -77,7 +77,9 @@ impl fmt::Display for ConversionError {
         write!(formatter, "{}: ", self.code())?;
         match self {
             Self::InvalidLabel => write!(formatter, "label must be non-empty and contain no slash"),
-            Self::FormatDetection => write!(formatter, "input format is unsupported or unrecognized"),
+            Self::FormatDetection => {
+                write!(formatter, "input format is unsupported or unrecognized")
+            }
             Self::AnyDoc(error) => write!(formatter, "{error}"),
             Self::EmptyMarkdown => write!(formatter, "conversion produced no extractable text"),
             Self::OutputCollision => write!(formatter, "Markdown and report paths must differ"),
@@ -123,10 +125,7 @@ pub fn summarize_markdown(markdown: &str) -> StructureStats {
         if trimmed.starts_with('#') {
             stats.headings += 1;
         }
-        if trimmed.starts_with("- ")
-            || trimmed.starts_with("* ")
-            || trimmed.starts_with("1. ")
-        {
+        if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("1. ") {
             stats.list_items += 1;
         }
         if trimmed.starts_with('|') && trimmed.ends_with('|') {
@@ -176,8 +175,8 @@ pub fn convert_file(
         warnings: Vec::new(),
     };
 
-    let mut report_json = serde_json::to_vec_pretty(&conversion_report)
-        .map_err(ConversionError::from)?;
+    let mut report_json =
+        serde_json::to_vec_pretty(&conversion_report).map_err(ConversionError::from)?;
     report_json.push(b'\n');
     atomic_write(output, markdown.as_bytes()).map_err(ConversionError::from)?;
     atomic_write(report, &report_json).map_err(ConversionError::from)?;
@@ -193,10 +192,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
     let file_name = path.file_name().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "output has no file name")
     })?;
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let temporary_name = format!(
         ".{}.tmp-{}-{timestamp}-{sequence}",
@@ -206,10 +202,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
     let temporary_path = parent.join(temporary_name);
 
     let result = (|| {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary_path)?;
+        let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary_path)?;
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
