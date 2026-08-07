@@ -1,4 +1,5 @@
 /target
+/.local-rust/
 /samples
 # Digests of the local `samples/` corpus: they quote converted content, so they
 # stay local like the corpus itself. Regenerate with `cargo test -- --ignored`.
