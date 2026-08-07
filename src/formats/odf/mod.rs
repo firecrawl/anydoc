@@ -70,16 +70,27 @@ fn is_encrypted(pkg: &RefCell<Package>) -> Result<bool, ConvertError> {
 
 fn parse_presentation(pres: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError> {
     let mut blocks = Vec::new();
-    for page in pres.find_all(ns::DRAW, "page") {
+    let mut emitted_content_slide = false;
+    for (slide_index, page) in pres.find_all(ns::DRAW, "page").enumerate() {
+        let mut page_blocks =
+            vec![Block::Paragraph(vec![Inline::Anchor(format!("slide-{}", slide_index + 1))])];
         let mut title = Vec::new();
         let mut body = Vec::new();
         let mut notes = Vec::new();
         walk_shapes(page, ctx, &mut title, &mut body, &mut notes)?;
-        blocks.append(&mut title);
-        blocks.append(&mut body);
+        page_blocks.append(&mut title);
+        page_blocks.append(&mut body);
         // Speaker notes are included (fixed policy), set off as a quote.
         if !notes.is_empty() {
-            blocks.push(Block::BlockQuote(notes));
+            page_blocks.push(Block::BlockQuote(notes));
+        }
+        let has_content = page_blocks.len() > 1;
+        if has_content && emitted_content_slide {
+            blocks.push(Block::Rule);
+        }
+        blocks.append(&mut page_blocks);
+        if has_content {
+            emitted_content_slide = true;
         }
     }
     Ok(blocks)

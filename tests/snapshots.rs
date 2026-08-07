@@ -9,6 +9,7 @@
 
 mod common;
 
+use anydoc::model::{Block, Inline, LinkTarget};
 use common::{fixture_root, walk};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -111,6 +112,66 @@ fn fixtures_detect_from_content() {
             );
         }
     }
+}
+
+fn slide_anchor_ids(doc: &anydoc::model::Document) -> Vec<String> {
+    doc.blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(inlines) => match inlines.as_slice() {
+                [Inline::Anchor(id)] if id.starts_with("slide-") => Some(id.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+fn has_slide_link(doc: &anydoc::model::Document, target: &str) -> bool {
+    doc.blocks.iter().any(|block| match block {
+        Block::Paragraph(inlines) | Block::Heading { content: inlines, .. } => {
+            inlines.iter().any(|inline| {
+                matches!(
+                    inline,
+                    Inline::Link { target: LinkTarget::Anchor(id), .. } if id == target
+                )
+            })
+        }
+        _ => false,
+    })
+}
+
+#[test]
+fn presentation_slides_are_anchored_and_separated() {
+    for (directory, filename, format) in [
+        ("pptx", "handmade-slide-identity.pptx", anydoc::Format::Pptx),
+        ("ppt", "handmade-slide-identity.ppt", anydoc::Format::Ppt),
+        ("odp", "handmade-slide-identity.odp", anydoc::Format::Odp),
+    ] {
+        let path = fixture_root().join(directory).join(filename);
+        let bytes = std::fs::read(&path).unwrap();
+        let doc = anydoc::to_document(&bytes, format).unwrap();
+        assert_eq!(
+            slide_anchor_ids(&doc),
+            ["slide-1", "slide-2", "slide-3", "slide-4"],
+            "{filename}: slide anchors must follow source order"
+        );
+        let rules = doc.blocks.iter().filter(|block| matches!(block, Block::Rule)).count();
+        assert_eq!(rules, 2, "{filename}: empty slides must not double a rule");
+        assert!(!matches!(doc.blocks.first(), Some(Block::Rule)));
+        assert!(!matches!(doc.blocks.last(), Some(Block::Rule)));
+        let markdown = anydoc::to_markdown(&path).unwrap();
+        assert!(!markdown.contains("---\n\n---"), "{filename}: empty slides must not double rules");
+    }
+}
+
+#[test]
+fn pptx_slide_links_still_target_the_sequential_anchor() {
+    let path = fixture_root().join("pptx").join("handmade-links.pptx");
+    let bytes = std::fs::read(path).unwrap();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Pptx).unwrap();
+    assert_eq!(slide_anchor_ids(&doc), ["slide-1", "slide-2"]);
+    assert!(has_slide_link(&doc, "slide-2"));
 }
 
 /// Embedded object payloads land in `Document::assets` with their identity

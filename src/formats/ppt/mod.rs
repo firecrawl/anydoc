@@ -106,12 +106,20 @@ struct PendingShape {
     styles: Option<StyleRuns>,
 }
 
+struct Segment {
+    blocks: Vec<Block>,
+    id: Option<u32>,
+    is_notes: bool,
+    slide_number: Option<usize>,
+}
+
 #[derive(Default)]
 struct Extractor {
-    /// Finished segments: (blocks, pairing id, is_notes).
-    segments: Vec<(Vec<Block>, Option<u32>, bool)>,
+    /// Finished slide and notes segments in source order.
+    segments: Vec<Segment>,
     current: Vec<Block>,
     current_is_notes: bool,
+    current_slide_number: Option<usize>,
     list_run: Vec<ListEntry>,
     pending: Option<PendingShape>,
     /// Master style tables in master-list order: (masterId, styles).
@@ -265,6 +273,7 @@ impl Extractor {
     ) -> Result<(), ConvertError> {
         // (persistIdRef, slideId) of the page whose container is pending.
         let mut pending: Option<(u32, u32)> = None;
+        let mut slide_number = 0usize;
         for (ver_inst, rec_type, body) in children(list) {
             match rec_type {
                 // SlidePersistAtom: the next slide/notes page begins.
@@ -273,6 +282,12 @@ impl Extractor {
                         self.finish_slide(pending.take(), persist, data, container_type, is_notes)?;
                     self.end_segment(id);
                     self.current_is_notes = is_notes;
+                    if is_notes {
+                        self.current_slide_number = None;
+                    } else {
+                        slide_number += 1;
+                        self.current_slide_number = Some(slide_number);
+                    }
                     pending = get_u32(body, 0).map(|p| (p, get_u32(body, 12).unwrap_or(0)));
                     if !is_notes {
                         self.select_master(pending.map(|(p, _)| p), persist, data);
@@ -320,21 +335,26 @@ impl Extractor {
     fn end_segment(&mut self, id: Option<u32>) {
         self.flush_shape();
         flush_list(&mut self.current, &mut self.list_run);
-        if !self.current.is_empty() {
-            let blocks = std::mem::take(&mut self.current);
-            self.segments.push((blocks, id, self.current_is_notes));
+        let slide_number = self.current_slide_number.take();
+        if !self.current.is_empty() || slide_number.is_some() {
+            self.segments.push(Segment {
+                blocks: std::mem::take(&mut self.current),
+                id,
+                is_notes: self.current_is_notes,
+                slide_number,
+            });
         }
     }
 
     fn into_blocks(mut self) -> Vec<Block> {
         self.end_segment(None);
-        let mut slides: Vec<(Option<u32>, Vec<Block>)> = Vec::new();
+        let mut slides: Vec<(Option<usize>, Option<u32>, Vec<Block>)> = Vec::new();
         let mut notes: Vec<(Option<u32>, Vec<Block>)> = Vec::new();
-        for (blocks, id, is_notes) in self.segments {
+        for Segment { blocks, id, is_notes, slide_number } in self.segments {
             if is_notes {
                 notes.push((id, blocks));
             } else {
-                slides.push((id, blocks));
+                slides.push((slide_number, id, blocks));
             }
         }
         // Notes pages pair to slides by their stored slide id, not by list
@@ -342,7 +362,18 @@ impl Extractor {
         // slides), which order-based zipping would misattribute.
         let mut used = vec![false; notes.len()];
         let mut out = Vec::new();
-        for (sid, blocks) in slides {
+        let mut emitted_content_slide = false;
+        for (slide_number, sid, blocks) in slides {
+            if let Some(slide_number) = slide_number {
+                let has_content = !blocks.is_empty();
+                if has_content && emitted_content_slide {
+                    out.push(Block::Rule);
+                }
+                out.push(Block::Paragraph(vec![Inline::Anchor(format!("slide-{slide_number}"))]));
+                if has_content {
+                    emitted_content_slide = true;
+                }
+            }
             out.extend(blocks);
             for (i, (nid, nblocks)) in notes.iter_mut().enumerate() {
                 if !used[i] && sid.is_some() && *nid == sid {

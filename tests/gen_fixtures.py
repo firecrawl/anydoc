@@ -1156,6 +1156,113 @@ def links_pptx():
 
 
 # ---------------------------------------------------------------------------
+# S21: every presentation slide keeps its identity, including untitled and
+# empty slides, without relying on an internal link targeting it.
+
+def slide_identity_pptx():
+    presentation = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation {PPTX_NS}>
+<p:sldIdLst><p:sldId id="256" r:id="rId1"/><p:sldId id="257" r:id="rId2"/>
+<p:sldId id="258" r:id="rId3"/><p:sldId id="259" r:id="rId4"/></p:sldIdLst>
+</p:presentation>"""
+    pres_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/>
+<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide3.xml"/>
+<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide4.xml"/>
+</Relationships>"""
+
+    def slide(body):
+        return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld {PPTX_NS}>
+<p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+{body}
+</p:spTree></p:cSld></p:sld>"""
+
+    def title(text):
+        return (
+            '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/>'
+            '<p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr/>'
+            f'<p:txBody><a:bodyPr/><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>'
+        )
+
+    def body(text):
+        return (
+            '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Body"/><p:cNvSpPr/>'
+            '<p:nvPr/></p:nvSpPr><p:spPr/>'
+            f'<p:txBody><a:bodyPr/><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>'
+        )
+
+    slides = [
+        slide(title("First title")),
+        slide(body("Untitled body")),
+        slide(""),
+        slide(title("Last title")),
+    ]
+    ct = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+<Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+<Override PartName="/ppt/slides/slide3.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+<Override PartName="/ppt/slides/slide4.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>"""
+    root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>"""
+    write_zip(OUT / "pptx" / "handmade-slide-identity.pptx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", root_rels),
+        ("ppt/presentation.xml", presentation),
+        ("ppt/_rels/presentation.xml.rels", pres_rels),
+        *[(f"ppt/slides/slide{i}.xml", value) for i, value in enumerate(slides, 1)],
+    ])
+
+
+# ---------------------------------------------------------------------------
+# S21: every OpenDocument presentation page keeps its identity, including
+# untitled and empty pages, without relying on an internal link targeting it.
+
+def slide_identity_odp():
+    ns = (
+        'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" '
+        'xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"'
+    )
+
+    def page(content):
+        return f'<draw:page draw:name="Page">{content}</draw:page>'
+
+    def frame(text, class_name=""):
+        cls = f' presentation:class="{class_name}"' if class_name else ""
+        return (
+            f'<draw:frame{cls}><draw:text-box><text:p>{text}</text:p>'
+            '</draw:text-box></draw:frame>'
+        )
+
+    content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content {ns}>
+<office:body><office:presentation>
+{page(frame("First title", "title"))}
+{page(frame("Untitled body"))}
+{page("")}
+{page(frame("Last title", "title"))}
+</office:presentation></office:body>
+</office:document-content>"""
+    write_zip(
+        OUT / "odp" / "handmade-slide-identity.odp",
+        [("content.xml", content)],
+        mimetype_first="application/vnd.oasis.opendocument.presentation",
+    )
+
+
+# ---------------------------------------------------------------------------
 # S5: standard Word OLE markup - a VML preview image next to the
 # o:OLEObject; the object's identity and payload must win over the preview.
 
@@ -1500,6 +1607,56 @@ def sparsenotes_ppt():
         "<IIIIIIHH", 0, 0, 0, off_dir, 1, 5, 0, 0))
     current_user = ppt_rec(0, 0x0FF6, struct.pack("<III", 20, 0xE391C05F, off_edit))
     write_cfb(OUT / "ppt" / "handmade-sparsenotes.ppt", [
+        ("Current User", current_user),
+        ("PowerPoint Document", stream),
+    ])
+
+
+# ---------------------------------------------------------------------------
+# S21: every legacy presentation slide keeps its identity, including untitled
+# and empty slides, without relying on an internal link targeting it.
+
+def slide_identity_ppt():
+    def slide(text, tx_type):
+        slide_atom = ppt_rec(2, 0x03EF, struct.pack("<I", 0) + b"\x00" * 8
+                             + struct.pack("<IIHH", 0, 0, 0, 0))
+        if text is None:
+            return ppt_container(0, 0x03EE, slide_atom)
+        th = ppt_rec(0, 0x0F9F, struct.pack("<I", tx_type))
+        tb = ppt_rec(0, 0x0FA8, text.encode("ascii"))
+        return ppt_container(0, 0x03EE, slide_atom + th + tb)
+
+    def persist_atom(persist_ref, sid):
+        return ppt_rec(0, 0x03F3, struct.pack("<IIIII", persist_ref, 0, 0, sid, 0))
+
+    slide_list = ppt_container(
+        0,
+        0x0FF0,
+        persist_atom(2, 256) + persist_atom(3, 257)
+        + persist_atom(4, 258) + persist_atom(5, 259),
+    )
+    doc = ppt_container(0, 0x03E8, slide_list)
+    slides = [
+        slide("First title", 0),
+        slide("Untitled body", 1),
+        slide(None, 1),
+        slide("Last title", 0),
+    ]
+
+    stream = b""
+    offsets = {}
+    for pid, blob in [(1, doc), *[(i + 2, value) for i, value in enumerate(slides)]]:
+        offsets[pid] = len(stream)
+        stream += blob
+    entries = struct.pack("<I", 1 | (5 << 20)) + struct.pack(
+        "<5I", *(offsets[i] for i in range(1, 6)))
+    off_dir = len(stream)
+    stream += ppt_rec(0, 0x1772, entries)
+    off_edit = len(stream)
+    stream += ppt_rec(0, 0x0FF5, struct.pack(
+        "<IIIIIIHH", 0, 0, 0, off_dir, 1, 6, 0, 0))
+    current_user = ppt_rec(0, 0x0FF6, struct.pack("<III", 20, 0xE391C05F, off_edit))
+    write_cfb(OUT / "ppt" / "handmade-slide-identity.ppt", [
         ("Current User", current_user),
         ("PowerPoint Document", stream),
     ])
@@ -1910,10 +2067,13 @@ def main():
     gaps_ods()
     encoded_docs()
     order_pptx()
+    slide_identity_pptx()
+    slide_identity_odp()
     css_links_epub()
     merge_rtf()
     multimaster_ppt()
     sparsenotes_ppt()
+    slide_identity_ppt()
     tables_docx()
     outline_docx()
     blockstyle_docx()

@@ -2,8 +2,12 @@
 source: tests/snapshots.rs
 expression: output
 ---
-- **Alpha master body text**
+## First title
 
 ---
 
-*Beta master body text*
+Untitled body
+
+---
+
+## Last title
