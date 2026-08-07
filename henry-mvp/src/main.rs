@@ -1,4 +1,4 @@
-use anydoc_henry_mvp::convert_file;
+use anydoc_henry_mvp::{convert_file, ensure_private_directory};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -26,7 +26,7 @@ fn run() -> Result<(), (u8, String)> {
     let args = parse_args(std::env::args_os().skip(1))
         .map_err(|error| (2, format!("cli_error: {error}")))?;
     let private_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("out/private");
-    fs::create_dir_all(&private_root)
+    ensure_private_directory(&private_root)
         .map_err(|error| (2, format!("cli_error: cannot prepare private output: {error}")))?;
     let output = validate_private_path(&args.output, &private_root)
         .map_err(|error| (2, format!("cli_error: invalid --output: {error}")))?;
@@ -34,6 +34,11 @@ fn run() -> Result<(), (u8, String)> {
         .map_err(|error| (2, format!("cli_error: invalid --report: {error}")))?;
     if output == report {
         return Err((2, "cli_error: --output and --report must differ".to_string()));
+    }
+    for parent in [output.parent(), report.parent()].into_iter().flatten() {
+        ensure_private_directory(parent).map_err(|error| {
+            (2, format!("cli_error: cannot secure private output directory: {error}"))
+        })?;
     }
 
     convert_file(&args.input, &output, &report, &args.label)

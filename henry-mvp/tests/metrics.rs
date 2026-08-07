@@ -11,6 +11,34 @@ fn counts_markdown_structure_without_copying_content() {
 }
 
 #[test]
+fn counts_arbitrary_ordered_list_markers() {
+    let stats = summarize_markdown("2. second\n17. seventeenth\n3) third\n");
+
+    assert_eq!(stats.list_items, 3);
+}
+
+#[test]
+fn counts_plain_paragraph_blocks() {
+    let stats = summarize_markdown(
+        "# Heading\n\nFirst paragraph line one.\nLine two.\n\n- list item\n\nSecond paragraph.\n",
+    );
+    let json = serde_json::to_value(&stats).unwrap();
+
+    assert_eq!(json["paragraphs"], 2);
+}
+
+#[test]
+fn counts_contiguous_table_blocks() {
+    let stats = summarize_markdown(
+        "| A | B |\n| - | - |\n| 1 | 2 |\n\nText between tables.\n\n| C | D |\n| - | - |\n",
+    );
+    let json = serde_json::to_value(&stats).unwrap();
+
+    assert_eq!(stats.table_rows, 5);
+    assert_eq!(json["tables"], 2);
+}
+
+#[test]
 fn report_json_omits_paths_and_markdown() {
     let report = anydoc_henry_mvp::ConversionReport::fixture_for_test();
     let json = serde_json::to_string(&report).unwrap();
@@ -36,6 +64,77 @@ fn conversion_report_contains_only_metrics_and_provenance() {
     assert_eq!(serialized.markdown_chars, markdown.chars().count() as u64);
     assert!(!json.contains(input.to_string_lossy().as_ref()));
     assert!(!json.contains(markdown.trim()));
+}
+
+#[cfg(unix)]
+#[test]
+fn conversion_creates_private_directories_and_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = tempfile::tempdir().unwrap();
+    let input =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/pdf/text.pdf");
+    let private_directory = temporary.path().join("new-private-directory");
+    let output = private_directory.join("converted.md");
+    let report_path = private_directory.join("report.json");
+
+    convert_file(&input, &output, &report_path, "permissions-fixture").unwrap();
+
+    assert_eq!(fs::metadata(&private_directory).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(fs::metadata(&output).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(fs::metadata(&report_path).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+#[cfg(unix)]
+#[test]
+fn conversion_does_not_repermission_an_existing_parent_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = tempfile::tempdir().unwrap();
+    let input =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/pdf/text.pdf");
+    fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o750)).unwrap();
+    let output = temporary.path().join("converted.md");
+    let report_path = temporary.path().join("report.json");
+
+    convert_file(&input, &output, &report_path, "existing-parent-fixture").unwrap();
+
+    assert_eq!(fs::metadata(temporary.path()).unwrap().permissions().mode() & 0o777, 0o750);
+}
+
+#[test]
+fn second_publication_failure_restores_existing_markdown() {
+    let temporary = tempfile::tempdir().unwrap();
+    let input =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/pdf/text.pdf");
+    let output = temporary.path().join("converted.md");
+    let report_path = temporary.path().join("report.json");
+    fs::write(&output, b"old markdown").unwrap();
+    fs::create_dir(&report_path).unwrap();
+
+    let result = convert_file(&input, &output, &report_path, "rollback-fixture");
+
+    assert!(result.is_err());
+    assert_eq!(fs::read(&output).unwrap(), b"old markdown");
+    assert!(report_path.is_dir());
+    assert_eq!(fs::read_dir(temporary.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn second_publication_failure_removes_new_markdown_without_a_previous_file() {
+    let temporary = tempfile::tempdir().unwrap();
+    let input =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/pdf/text.pdf");
+    let output = temporary.path().join("converted.md");
+    let report_path = temporary.path().join("report.json");
+    fs::create_dir(&report_path).unwrap();
+
+    let result = convert_file(&input, &output, &report_path, "rollback-fixture");
+
+    assert!(result.is_err());
+    assert!(!output.exists());
+    assert!(report_path.is_dir());
+    assert_eq!(fs::read_dir(temporary.path()).unwrap().count(), 1);
 }
 
 #[test]
@@ -71,6 +170,37 @@ fn image_only_pdf_returns_a_typed_ocr_error_and_writes_nothing() {
     assert!(!report.exists());
 }
 
+#[test]
+fn mixed_pdf_surfaces_ocr_warning_in_report() {
+    let temporary = tempfile::tempdir().unwrap();
+    let input = temporary.path().join("mixed.pdf");
+    let output = temporary.path().join("converted.md");
+    let report_path = temporary.path().join("report.json");
+    fs::write(&input, mixed_pdf()).unwrap();
+
+    let report = convert_file(&input, &output, &report_path, "mixed-fixture").unwrap();
+
+    assert!(report.warnings.iter().any(|warning| {
+        warning == "pdf_ocr_required: 1 of 2 pages need OCR and were not extracted"
+    }));
+}
+
+#[test]
+fn encoding_issue_pdf_surfaces_encoding_warning_in_report() {
+    let temporary = tempfile::tempdir().unwrap();
+    let input = temporary.path().join("encoding-issue.pdf");
+    let output = temporary.path().join("converted.md");
+    let report_path = temporary.path().join("report.json");
+    fs::write(&input, encoding_issue_pdf()).unwrap();
+
+    let report = convert_file(&input, &output, &report_path, "encoding-fixture").unwrap();
+
+    assert!(report.warnings.iter().any(|warning| {
+        warning
+            == "pdf_encoding_issues: broken font encodings detected; extracted text may be garbled"
+    }));
+}
+
 fn image_only_pdf() -> Vec<u8> {
     let content = b"q 1 0 0 1 0 0 cm /Im0 Do Q";
     let objects = [
@@ -91,6 +221,65 @@ fn image_only_pdf() -> Vec<u8> {
         ]
         .concat(),
     ];
+    build_pdf(&objects)
+}
+
+fn mixed_pdf() -> Vec<u8> {
+    let text_content = b"BT /F1 12 Tf 10 90 Td (Readable native text appears here) Tj 0 -20 Td (A second extractable line appears here) Tj 0 -20 Td (A third extractable line appears here) Tj ET";
+    let image_content = b"q 100 0 0 100 0 0 cm /Im0 Do Q";
+    let objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /XObject << /Im0 7 0 R >> >> /Contents 8 0 R >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        stream_object(text_content),
+        image_object(),
+        stream_object(image_content),
+    ];
+    build_pdf(&objects)
+}
+
+fn encoding_issue_pdf() -> Vec<u8> {
+    let garbled = "8VceZWZTReVW9VdZXReZdhZeYcVdaVTeeHVcZVd8EcVWVccVUHeT:iYZSZe-(,e2'WZ]V \
+        ;VScfRcj2&,*,*$ .'R CZdecfVehYZTYUVWZVdeYVcZXYedWY]UVcdW]X'eVcUVSeYVcVXZdecReRUR]]ed \
+        TCBGC@ZUReVUdfSdZUZRcZVdZdWZ]VUYVcVhZeYafcdfReeVXf]ReZV0*S$.$ZZZ$6$&ViTVae \
+        WceYVZdecfVedcVWVccVUe.'S&.'T&.'U&.'V&.'WSV]h(EfcdfReeYZdcVXf]ReZYV \
+        cVXZdecReYVcVSjRXcVVdeWfcZdYRTajWRjdfTYZdecfVeWZ]VUYVcVhZeYeYVH:8 \
+        cVbfVde( .'S fRcRejWTVceRZZXReZTZWZT7V]]IV]VaYV8(RUHfeYhVdeVc7V]]IV]VaYV8 \
+        :iYZSZe.'TeYVaVcZUVUZX9VTVSVc-&,*$";
+    let hex: String = garbled.as_bytes().iter().map(|byte| format!("{byte:02X}")).collect();
+    let content = format!("BT /F1 12 Tf 10 50 Td <{hex}> Tj ET");
+    let objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        stream_object(content.as_bytes()),
+    ];
+    build_pdf(&objects)
+}
+
+fn image_object() -> Vec<u8> {
+    [
+        b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n"
+            .to_vec(),
+        vec![0],
+        b"\nendstream".to_vec(),
+    ]
+    .concat()
+}
+
+fn stream_object(content: &[u8]) -> Vec<u8> {
+    [
+        format!("<< /Length {} >>\nstream\n", content.len()).into_bytes(),
+        content.to_vec(),
+        b"\nendstream".to_vec(),
+    ]
+    .concat()
+}
+
+fn build_pdf(objects: &[Vec<u8>]) -> Vec<u8> {
     let mut pdf = b"%PDF-1.4\n".to_vec();
     let mut offsets = Vec::new();
     for (index, object) in objects.iter().enumerate() {

@@ -107,6 +107,7 @@ name = "anydoc-henry-mvp"
 version = "0.1.0"
 dependencies = [
  "anydoc",
+ "pdf-inspector",
  "serde",
  "serde_json",
  "sha2",

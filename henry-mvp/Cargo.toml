@@ -6,6 +6,7 @@ rust-version = "1.88"
 
 [dependencies]
 anydoc = { path = ".." }
+pdf-inspector = "0.1.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
