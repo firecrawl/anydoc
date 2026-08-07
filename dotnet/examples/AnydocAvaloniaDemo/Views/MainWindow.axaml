@@ -1,0 +1,59 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:AnydocAvaloniaDemo.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
+        x:Class="AnydocAvaloniaDemo.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="Anydoc — Document to Markdown"
+        Width="900" Height="600">
+
+    <Design.DataContext>
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <DockPanel Margin="16">
+
+        <TextBlock DockPanel.Dock="Top"
+                   Text="Document to Markdown"
+                   FontSize="22" FontWeight="SemiBold"
+                   Margin="0,0,0,12" />
+
+        <!-- Control bar -->
+        <StackPanel DockPanel.Dock="Top"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    Margin="0,0,0,12">
+            <Button Name="SelectButton"
+                    Content="Select file…"
+                    IsEnabled="{Binding !IsBusy}" />
+            <Button Content="Convert"
+                    Command="{Binding ConvertCommand}"
+                    IsEnabled="{Binding !IsBusy}" />
+            <TextBlock Text="{Binding SelectedFile}"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource TextControlForeground}"
+                       TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+
+        <!-- Status -->
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{Binding Status}"
+                   Margin="0,0,0,12"
+                   TextWrapping="Wrap" />
+
+        <!-- Output -->
+        <TextBox Text="{Binding Markdown}"
+                 IsReadOnly="True"
+                 AcceptsReturn="True"
+                 AcceptsTab="True"
+                 FontFamily="Consolas, Courier New, monospace"
+                 TextWrapping="NoWrap"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 ScrollViewer.HorizontalScrollBarVisibility="Auto" />
+
+    </DockPanel>
+
+</Window>
