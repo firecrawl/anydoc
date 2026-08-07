@@ -15,9 +15,17 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 # rustc emits bulk-memory and nontrapping-fptoint by default; wasm-pack's
-# bundled wasm-opt rejects them unless enabled explicitly.
+# bundled wasm-opt rejects them unless enabled explicitly, and the same for
+# the simd128 the demo build asks for. Enabling a feature here only lets
+# wasm-opt accept it: a build that emits none is unaffected.
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "--enable-simd"]
+
+[features]
+default = []
+# Local OCR in the browser. Off by default: it multiplies the module size,
+# and the models are a separate download the caller supplies.
+ocr = ["anydoc/ocr"]
 
 [dependencies]
 anydoc = { path = ".." }

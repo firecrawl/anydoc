@@ -8,7 +8,7 @@
 
 Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
 
-Built by [Firecrawl](https://firecrawl.dev) to turn any office document into LLM-ready Markdown in single-digit milliseconds, with one consistent output no matter which format goes in. It powers [Firecrawl Parse](https://firecrawl.dev/parse), so if you'd rather not run it yourself, the hosted API gives you the same conversion plus our OCR models for the scanned pages anydoc can't read on its own.
+Built by [Firecrawl](https://firecrawl.dev) to turn any office document into LLM-ready Markdown in single-digit milliseconds, with one consistent output no matter which format goes in. It powers [Firecrawl Parse](https://firecrawl.dev/parse), so if you'd rather not run it yourself, the hosted API gives you the same conversion with the OCR models managed for you — anydoc reads scanned pages too, with [local OCR](#local-ocr-optional) you enable and supply models for.
 
 **[Try it in your browser](https://firecrawl.github.io/anydoc/)**: the demo page runs the library as WebAssembly, so files are converted locally and never leave your machine.
 
@@ -133,7 +133,7 @@ let document = anydoc::to_document(&bytes, None)?;
 - **Content-based format detection.** The format is read from the bytes themselves (PDF header, RTF open group, OLE stream names, ZIP package mimetype), so mislabeled files still convert correctly.
 - **Fast.** Pure Rust, no ML models, no external services. Median conversion time is under 5ms per document.
 - **Bindings that stay out of the way.** Node.js conversion runs on the libuv thread pool and never blocks the event loop; Python releases the GIL so other threads keep running. TypeScript types and Python stubs ship with the packages.
-- **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required.
+- **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required. Scanned and mixed PDFs, and image documents, can be read with [optional local OCR](#local-ocr-optional) when you supply the models.
 - **Agent ready.** Ships as an [Agent Skill](#agent-skill): one `npx skills add firecrawl/anydoc` and any agent can read office documents.
 
 ## Supported formats
@@ -148,6 +148,63 @@ let document = anydoc::to_document(&bytes, None)?;
 | EPUB             | `.epub`                                                    |
 | CSV              | `.csv`                                                     |
 | PDF              | `.pdf`                                                     |
+| Images           | `.png`, `.jpg`, `.jpeg`, `.webp`, `.tif`, `.tiff`, `.bmp`  |
+
+Text-based PDF pages convert locally with no OCR. Pages that carry no extractable text, and image documents, need [local OCR](#local-ocr-optional): without it they report as unsupported.
+
+## Local OCR (optional)
+
+anydoc extracts text; it does not read pixels. A scanned PDF page or an image document has no text to extract, so reading one needs OCR. That runs locally, behind the `ocr` cargo feature, and stays off unless you ask for it: the default build is pure Rust with no models and no network, exactly as before.
+
+The models are yours to supply — the library never downloads anything. Parse them once into a reusable converter and every conversion made with it shares that engine.
+
+```rust
+// Rust: cargo add anydoc --features ocr
+let converter = anydoc::Converter::builder()
+    .with_ocr_models(std::fs::read("text-detection.rten")?, std::fs::read("text-recognition.rten")?)?
+    .build();
+let markdown = converter.to_markdown_bytes(&std::fs::read("scan.pdf")?, anydoc::Format::Pdf)?;
+```
+
+```js
+// Node.js
+const converter = await Converter.create({ detectionModel, recognitionModel })
+const markdown = await converter.toMarkdownBytes(await readFile('scan.pdf'))
+```
+
+```js
+// Browser: build the wasm package with --features ocr, then run it in a Worker
+const converter = new Converter({ detectionModel, recognitionModel })
+const markdown = converter.toMarkdownBytes(pdfBytes, 'pdf')
+```
+
+### Models
+
+Two files from the [ocrs](https://github.com/robertknight/ocrs) project, in RTen format, published at `https://ocrs-models.s3-accelerate.amazonaws.com/`:
+
+| File                     | SHA-256                                                            |
+| ------------------------ | ------------------------------------------------------------------ |
+| `text-detection.rten`    | `f15cfb56bd02c4bf478a20343986504a1f01e1665c2b3a0ad66340f054b1b5ca` |
+| `text-recognition.rten`  | `e484866d4cce403175bd8d00b128feb08ab42e208de30e42cd9889d8f1735a6e` |
+
+The models are licensed CC-BY-SA-4.0, separately from anydoc's MIT license, so check that it suits your use before shipping them. Verify the digests after downloading: anydoc parses whatever bytes you hand it.
+
+The code the feature pulls in is permissively licensed throughout: `ocrs` and `rten` are MIT OR Apache-2.0, `image` is MIT OR Apache-2.0, and the PDF renderer behind it (`hayro`, `vello_cpu`) is Apache-2.0 OR MIT with `bytemuck` adding Zlib to that choice. Nothing in the graph is copyleft; the models are the only CC-BY-SA-4.0 component.
+
+### What to expect
+
+Local OCR is an early preview, and it is worth knowing its limits before relying on it:
+
+- The current models read **Latin scripts only**.
+- Output is **plain text**: no headings, tables, or lists are inferred from a recognized page, only the lines as read.
+- Accuracy varies with scan quality. **Overlapping text garbles lines** — a watermark across body text can merge into one unreadable line.
+- An image with no text can still produce **short spurious fragments**.
+- **EXIF orientation is not applied**: a photo stored rotated is read as stored.
+- A scanned document with no extractable text at all has **every page** rendered and recognized, not just some: there is no per-page text to tell the pages apart.
+- Recognition is **CPU-bound** and costs roughly a tenth of a second per page — a one-page scan converts in about 155 ms after a ~20 ms engine startup, against ~5 ms for a text document. In a browser, run it in a Web Worker or the page freezes while it works.
+- Building with `ocr` needs **Rust 1.92**; the crate without it keeps its 1.88 minimum.
+
+For hosted OCR with no models to manage, [Firecrawl Parse](https://firecrawl.dev) runs the same conversions as a service.
 
 ## Benchmark
 
@@ -222,9 +279,10 @@ match anydoc::to_markdown(path) {
 | `Encrypted`     | Encrypted or password-protected                                     |
 | `ResourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |
 | `MissingPart`   | A part required for any meaningful output is absent                 |
+| `Ocr`           | OCR ran on every page carrying content and read no text             |
 | `Io`            | The file could not be read, from `to_markdown` only                 |
 
-Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per variant, or `OSError` when the file cannot be read.
+Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per named variant (a variant added later, like the OCR ones, raises the base class until it gets a name), or `OSError` when the file cannot be read.
 
 ## How it works
 

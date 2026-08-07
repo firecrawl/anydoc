@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>anydoc: OCR in a Web Worker</title>
+  </head>
+  <body>
+    <h1>anydoc: OCR in a Web Worker</h1>
+    <p>
+      Pick a scanned PDF or an image. Recognition runs in a worker, so this
+      page stays responsive while it works.
+    </p>
+
+    <input type="file" id="file" />
+    <pre id="output"></pre>
+
+    <script type="module">
+      // Build the OCR package next to this file and serve the repository root:
+      //   wasm-pack build wasm --release --target web -- --features ocr
+      // The worker also expects the two models under /models/.
+      const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
+      const output = document.getElementById('output')
+      const pending = new Map()
+      let nextId = 0
+
+      worker.onmessage = ({ data: { id, markdown, error, code } }) => {
+        pending.get(id)?.(markdown ?? `${code ?? 'error'}: ${error}`)
+        pending.delete(id)
+      }
+
+      document.getElementById('file').addEventListener('change', async (event) => {
+        const file = event.target.files[0]
+        if (!file) return
+
+        output.textContent = 'Reading…'
+        const id = nextId++
+        const done = new Promise((resolve) => pending.set(id, resolve))
+        const document_ = new Uint8Array(await file.arrayBuffer())
+
+        // The bytes are transferred, not copied, so a large scan costs nothing
+        // extra to hand over.
+        worker.postMessage({ id, document: document_ }, [document_.buffer])
+        output.textContent = await done
+      })
+    </script>
+  </body>
+</html>

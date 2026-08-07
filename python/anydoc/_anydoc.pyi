@@ -4,7 +4,8 @@ import os
 from typing import Literal, final
 
 Format = Literal[
-    "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "xlsx", "ods", "odp", "csv"
+    "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "xlsx", "ods", "odp", "csv",
+    "image"
 ]
 
 class ConvertError(Exception):
@@ -14,7 +15,7 @@ class ConvertError(Exception):
 
 class UnsupportedError(ConvertError):
     """The format is unknown, or cannot be converted at all: a scanned or
-    image-only PDF needs OCR, which anydoc does not do."""
+    image-only PDF needs OCR, which this binding does not expose yet."""
 
 class MalformedError(ConvertError):
     """The document is structurally unusable: no meaningful content could be

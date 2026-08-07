@@ -18,3 +18,12 @@ export type ConvertErrorCode =
   | 'missingPart'
   /** The file could not be read, from `toMarkdown` only. */
   | 'io'
+  /**
+   * Local OCR was required for every page carrying content and recovered no
+   * text from any of them. Only a `Converter` conversion produces this.
+   */
+  | 'ocr'
+  /**
+   * The OCR models could not be loaded, from `Converter.create` only.
+   */
+  | 'ocrInit'

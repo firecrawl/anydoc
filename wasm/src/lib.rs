@@ -20,8 +20,10 @@ pub enum Format {
     Docx = "docx",
     Odt = "odt",
     /// Converted with pdf-inspector, which emits Markdown directly:
-    /// `toDocument` is unsupported for PDFs. Scanned or image-only PDFs
-    /// (needing OCR) error as unsupported.
+    /// `toDocument` is unsupported for PDFs. Pages with no extractable text
+    /// need OCR: the module-level functions report them as unsupported,
+    /// while a `Converter`, in a build with the `ocr` feature, recognizes
+    /// exactly those pages.
     Pdf = "pdf",
     Ppt = "ppt",
     Pptx = "pptx",
@@ -31,6 +33,10 @@ pub enum Format {
     Ods = "ods",
     Odp = "odp",
     Csv = "csv",
+    /// Raster image documents (PNG, JPEG, WebP, TIFF, BMP). Recognized with
+    /// local OCR where it is configured, and unsupported otherwise;
+    /// `toDocument` is unsupported for images the same way it is for PDFs.
+    Image = "image",
 }
 
 impl From<Format> for anydoc::Format {
@@ -48,6 +54,7 @@ impl From<Format> for anydoc::Format {
             Format::Ods => anydoc::Format::Ods,
             Format::Odp => anydoc::Format::Odp,
             Format::Csv => anydoc::Format::Csv,
+            Format::Image => anydoc::Format::Image,
             Format::__Invalid => unreachable!("wasm-bindgen rejects invalid enum strings"),
         }
     }
@@ -68,6 +75,7 @@ impl From<anydoc::Format> for Format {
             anydoc::Format::Ods => Format::Ods,
             anydoc::Format::Odp => Format::Odp,
             anydoc::Format::Csv => Format::Csv,
+            anydoc::Format::Image => Format::Image,
         }
     }
 }
@@ -118,12 +126,82 @@ pub fn to_document(bytes: &[u8], format: Option<Format>) -> Result<JsValue, JsVa
         .map_err(|error| js_sys::Error::new(&error.to_string()).into())
 }
 
+/// A reusable converter that carries local OCR.
+///
+/// The models are parsed once, when the converter is constructed, and every
+/// conversion made with it shares that engine; nothing is rebuilt per call.
+/// The module-level functions keep their own behavior, which never uses OCR.
+///
+/// Recognition is CPU-bound and blocks whatever thread it runs on, so a page
+/// that runs it in the UI thread freezes: see the package README for the Web
+/// Worker setup.
+#[cfg(feature = "ocr")]
+#[wasm_bindgen]
+pub struct Converter {
+    inner: anydoc::Converter,
+}
+
+#[cfg(feature = "ocr")]
+#[wasm_bindgen]
+impl Converter {
+    /// Parse the RTen detection and recognition models and keep them. anydoc
+    /// performs no download of its own: both are `Uint8Array`s the caller
+    /// fetched.
+    ///
+    /// Throws an `Error` with `'ocrInit'` on `code` when a model is missing,
+    /// is not a `Uint8Array`, or cannot be loaded.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        #[wasm_bindgen(unchecked_param_type = "OcrModels")] models: JsValue,
+    ) -> Result<Converter, JsValue> {
+        let detection = model_bytes(&models, "detectionModel")?;
+        let recognition = model_bytes(&models, "recognitionModel")?;
+        let built = anydoc::Converter::builder()
+            .with_ocr_models(detection, recognition)
+            .map_err(|error| coded_error(&error.to_string(), "ocrInit"))?;
+        Ok(Converter { inner: built.build() })
+    }
+
+    /// Convert an in-memory document to Markdown, recognizing the pages that
+    /// need OCR. Without a format, it is detected from the content, which
+    /// signature-less formats (CSV) have to name explicitly.
+    ///
+    /// Throws an `Error` carrying a `ConvertErrorCode` on `code`.
+    #[wasm_bindgen(js_name = toMarkdownBytes)]
+    pub fn to_markdown_bytes(
+        &self,
+        bytes: &[u8],
+        format: Option<Format>,
+    ) -> Result<String, JsValue> {
+        self.inner.to_markdown_bytes(bytes, format.map(anydoc::Format::from)).map_err(convert_error)
+    }
+}
+
+/// One model out of the options object, as owned bytes.
+#[cfg(feature = "ocr")]
+fn model_bytes(models: &JsValue, key: &str) -> Result<Vec<u8>, JsValue> {
+    use wasm_bindgen::JsCast as _;
+
+    let value = js_sys::Reflect::get(models, &JsValue::from_str(key))
+        .map_err(|_| coded_error(&format!("{key} could not be read"), "ocrInit"))?;
+    if value.is_undefined() || value.is_null() {
+        return Err(coded_error(&format!("{key} is required"), "ocrInit"));
+    }
+    value
+        .dyn_into::<js_sys::Uint8Array>()
+        .map(|model| model.to_vec())
+        .map_err(|_| coded_error(&format!("{key} has to be a Uint8Array"), "ocrInit"))
+}
+
 /// The thrown value: a JS `Error` carrying the crate's message, with the
 /// variant name on `code` for callers to branch on.
 fn convert_error(error: anydoc::ConvertError) -> JsValue {
-    let thrown = js_sys::Error::new(&error.to_string());
+    coded_error(&error.to_string(), error.code())
+}
+
+fn coded_error(message: &str, code: &str) -> JsValue {
+    let thrown = js_sys::Error::new(message);
     // Only fails on a non-object target, which `thrown` is not.
-    let _ =
-        js_sys::Reflect::set(&thrown, &JsValue::from_str("code"), &JsValue::from_str(error.code()));
+    let _ = js_sys::Reflect::set(&thrown, &JsValue::from_str("code"), &JsValue::from_str(code));
     thrown.into()
 }

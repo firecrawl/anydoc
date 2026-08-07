@@ -26,6 +26,28 @@ export type ConvertErrorCode =
   | 'resourceLimit'
   /** A part required for any meaningful output is absent. */
   | 'missingPart'
+  /**
+   * Local OCR was required for every page carrying content and recovered no
+   * text from any of them. Only a `Converter` conversion produces this, so
+   * never in a build without the `ocr` feature.
+   */
+  | 'ocr'
+  /**
+   * The OCR models could not be loaded: one is missing, is not a
+   * `Uint8Array`, or the pair could not initialize an engine. Only the
+   * `Converter` constructor produces this.
+   */
+  | 'ocrInit'
+
+/**
+ * The RTen models local OCR needs, as bytes the caller fetched. Passed to
+ * `new Converter(...)`, which is present only in a build with the `ocr`
+ * feature.
+ */
+export interface OcrModels {
+  detectionModel: Uint8Array
+  recognitionModel: Uint8Array
+}
 
 export interface Document {
   blocks: Array<Block>

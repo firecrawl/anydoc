@@ -9,6 +9,7 @@ import { test } from 'node:test'
 import { promisify } from 'node:util'
 
 import {
+  Converter,
   formatFromBytes,
   formatFromExtension,
   formatFromPath,
@@ -138,4 +139,58 @@ test('cli help and version go to stdout and exit 0', async () => {
   assert.match(help.stdout, /Exit codes:/)
   const version = await runCli(['--version'])
   assert.match(version.stdout.trim(), /^\d+\.\d+\.\d+/)
+})
+
+// The OCR models are external files, so the converter tests only run where
+// they are configured; everywhere else they report as skipped.
+const DETECTION_MODEL = process.env.ANYDOC_OCR_DETECTION_MODEL
+const RECOGNITION_MODEL = process.env.ANYDOC_OCR_RECOGNITION_MODEL
+const withoutModels = DETECTION_MODEL && RECOGNITION_MODEL
+  ? false
+  : 'set ANYDOC_OCR_DETECTION_MODEL and ANYDOC_OCR_RECOGNITION_MODEL to run'
+
+const readModels = async () =>
+  Promise.all([readFile(DETECTION_MODEL), readFile(RECOGNITION_MODEL)])
+
+test('Converter.create parses the models once and reuses them', { skip: withoutModels }, async () => {
+  const [detectionModel, recognitionModel] = await readModels()
+  const converter = await Converter.create({ detectionModel, recognitionModel })
+
+  const first = await converter.toMarkdownBytes(await readFile(OUTLINE))
+  const second = await converter.toMarkdownBytes(await readFile(CSV), 'csv')
+
+  assert.match(first, /^# /m)
+  assert.match(second, /\| --- \|/)
+})
+
+test('a converter conversion matches the free function where no OCR is needed', { skip: withoutModels }, async () => {
+  const [detectionModel, recognitionModel] = await readModels()
+  const converter = await Converter.create({ detectionModel, recognitionModel })
+  const bytes = await readFile(RICH)
+
+  assert.equal(await converter.toMarkdownBytes(bytes), await toMarkdownBytes(bytes))
+})
+
+test('a converter rejects unconvertible input with a coded Error', { skip: withoutModels }, async () => {
+  const [detectionModel, recognitionModel] = await readModels()
+  const converter = await Converter.create({ detectionModel, recognitionModel })
+
+  await assert.rejects(converter.toMarkdownBytes(await readFile(ENCRYPTED), 'odt'), (error) => {
+    assert.equal(error.code, 'encrypted')
+    return true
+  })
+})
+
+test('Converter.create rejects invalid model bytes with a coded Error', async () => {
+  await assert.rejects(
+    Converter.create({
+      detectionModel: Buffer.from([0, 1, 2, 3]),
+      recognitionModel: Buffer.from([4, 5, 6, 7]),
+    }),
+    (error) => {
+      assert.equal(error.code, 'ocrInit')
+      assert.match(error.message, /detection model/)
+      return true
+    },
+  )
 })

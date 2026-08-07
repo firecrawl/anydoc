@@ -702,9 +702,11 @@
               Text-based PDFs convert locally through
               <a href="https://github.com/firecrawl/pdf-inspector"
                 >pdf-inspector</a
-              >. Scanned pages need OCR, which
-              <a href="https://firecrawl.dev/parse">Firecrawl Parse</a> adds on
-              top of this same conversion.
+              >. Scanned pages need OCR: this page loads the models on demand
+              (12 MB, only when you drop a scan). The package ships an optional
+              <code>ocr</code> feature that reads them in the browser, and
+              <a href="https://firecrawl.dev/parse">Firecrawl Parse</a> adds it
+              on top of this same conversion as a hosted API.
             </dd>
 
             <dt>This page</dt>
@@ -770,6 +772,9 @@
         <a href="https://github.com/firecrawl/anydoc">Source</a>
         <a href="https://github.com/firecrawl/anydoc/issues">Issues</a>
         <a href="https://firecrawl.dev">Built by Firecrawl</a>
+        <a href="https://github.com/robertknight/ocrs-models"
+          >ocrs models by Robert Knight, CC-BY-SA-4.0</a
+        >
       </footer>
     </div>
 
@@ -779,6 +784,9 @@
         formatFromPath,
         toMarkdownBytes,
       } from './pkg/anydoc_wasm.js';
+      // Also as a namespace: only a build with the `ocr` feature exports
+      // Converter, and naming a missing export fails the whole import.
+      import * as anydoc from './pkg/anydoc_wasm.js';
 
       const $ = (id) => document.getElementById(id);
       const dropTitle = $('drop-title');
@@ -787,6 +795,18 @@
 
       let markdown = '';
       let baseName = 'document';
+
+      const hasOcr = 'Converter' in anydoc;
+      // 12 MB of models, so they are fetched the first time a document
+      // actually needs them and kept for the rest of the session. The sizes
+      // are pinned: a truncated or wrong file fails here, saying so, instead
+      // of somewhere inside the engine.
+      const OCR_MODELS = [
+        ['detectionModel', 'models/text-detection.rten', 2510284],
+        ['recognitionModel', 'models/text-recognition.rten', 9716568],
+      ];
+      const OCR_BYTES = 12226852;
+      let converterReady;
 
       function showResult(name, format, stats, text, isError) {
         $('result').hidden = false;
@@ -800,29 +820,103 @@
         $('result').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
 
+      // Progress reuses the error layout — one line, no buttons — without
+      // the error color.
+      function showStatus(name, text) {
+        showResult(name, '', '', text, true);
+        output.classList.remove('error');
+      }
+
+      function showFailure(name, format, error) {
+        showResult(
+          name,
+          format,
+          '',
+          `Could not convert this file: ${error.message ?? error}`,
+          true,
+        );
+      }
+
+      // The one render path: time the conversion and put the Markdown in the
+      // preview with its stats. Scans reach it through the OCR converter,
+      // every other document through the module functions.
+      function show(name, format, run) {
+        const started = performance.now();
+        markdown = run();
+        const ms = Math.max(1, Math.round(performance.now() - started));
+        const chars = markdown.length.toLocaleString('en-US');
+        showResult(name, format, `${chars} chars · ${ms} ms`, markdown, false);
+      }
+
+      // A scanned PDF reports 'unsupported' and says OCR is required; an
+      // image has no text layer to fall back on in the first place.
+      const needsOcr = (error, format) =>
+        format === 'image' ||
+        (error?.code === 'unsupported' &&
+          String(error.message ?? '').includes('OCR is required'));
+
       function convert(name, bytes) {
         const format = formatFromBytes(bytes) ?? formatFromPath(name);
         baseName = name.replace(/\.[^.]*$/, '') || 'document';
         try {
-          const started = performance.now();
-          markdown = toMarkdownBytes(bytes, format);
-          const ms = Math.max(1, Math.round(performance.now() - started));
-          const chars = markdown.length.toLocaleString('en-US');
-          showResult(
-            name,
-            format,
-            `${chars} chars · ${ms} ms`,
-            markdown,
-            false,
-          );
+          show(name, format, () => toMarkdownBytes(bytes, format));
         } catch (error) {
+          if (hasOcr && needsOcr(error, format)) recognize(name, bytes, format);
+          else showFailure(name, format, error);
+        }
+      }
+
+      async function loadModels(onProgress) {
+        onProgress('Loading OCR models (12 MB)…');
+        const models = {};
+        let loaded = 0;
+        for (const [key, path, size] of OCR_MODELS) {
+          const response = await fetch(path);
+          if (!response.ok) {
+            throw new Error(`${path} responded ${response.status}`);
+          }
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          if (bytes.length !== size) {
+            throw new Error(`${path} is ${bytes.length} bytes, not ${size}`);
+          }
+          models[key] = bytes;
+          loaded += size;
+          const percent = Math.round((loaded / OCR_BYTES) * 100);
+          onProgress(`Loading OCR models (12 MB)… ${percent}%`);
+        }
+        return new anydoc.Converter(models);
+      }
+
+      // Recognition is CPU-bound and runs on the UI thread here, which one
+      // dropped document can afford. An app should keep it off the thread:
+      // wasm/examples/worker is that setup.
+      async function recognize(name, bytes, format) {
+        let converter;
+        try {
+          converterReady ??= loadModels((text) => showStatus(name, text));
+          converter = await converterReady;
+        } catch (error) {
+          converterReady = undefined;
           showResult(
             name,
             format,
             '',
-            `Could not convert this file: ${error.message ?? error}`,
+            `Could not load the OCR models: ${error.message ?? error}\n` +
+              'This page reads them from its models/ directory, which needs ' +
+              'text-detection.rten and text-recognition.rten in it.',
             true,
           );
+          return;
+        }
+        showStatus(name, 'Reading the page with OCR…');
+        // Let that paint: the recognition below blocks the thread.
+        await new Promise((resolve) =>
+          requestAnimationFrame(() => setTimeout(resolve, 0)),
+        );
+        try {
+          show(name, format, () => converter.toMarkdownBytes(bytes, format));
+        } catch (error) {
+          showFailure(name, format, error);
         }
       }
 
