@@ -44,12 +44,23 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     // still publication content, and unusable parts degrade at parse time.
     // Intra-book links target these; links to any other resource stay
     // Relative.
-    let spine_hrefs: Vec<&str> = opf
-        .descendants_any("itemref")
-        .filter_map(|ir| ir.attr_any("idref"))
-        .filter_map(|idref| manifest.get(idref))
-        .map(|(href, _)| href.as_str())
-        .collect();
+    let mut spine_hrefs: Vec<&str> = Vec::new();
+    let mut spine_item_count = 0usize;
+    let mut failed = 0usize;
+    for itemref in opf.descendants_any("itemref") {
+        spine_item_count += 1;
+        let Some(idref) = itemref.attr_any("idref") else {
+            log::warn!("skipping spine item with no idref");
+            failed += 1;
+            continue;
+        };
+        let Some((href, _)) = manifest.get(idref) else {
+            log::warn!("skipping spine item whose idref {idref:?} is absent from the manifest");
+            failed += 1;
+            continue;
+        };
+        spine_hrefs.push(href);
+    }
     let spine_parts: HashSet<String> = spine_hrefs
         .iter()
         .filter_map(|href| path::resolve(&opf_path, href).ok().map(|t| t.path))
@@ -57,7 +68,6 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
 
     let assets = RefCell::new(AssetSink::new());
     let mut css_cache: HashMap<String, Option<String>> = HashMap::new();
-    let mut failed = 0usize;
     for href in &spine_hrefs {
         let chapter_path = match path::resolve(&opf_path, href) {
             Ok(t) => t.path,
@@ -92,7 +102,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         doc.blocks.push(Block::Paragraph(vec![Inline::Anchor(chapter_path.clone())]));
         doc.blocks.extend(crate::shared::html::to_blocks(body, &css, &ctx)?);
     }
-    if !spine_hrefs.is_empty() && failed == spine_hrefs.len() {
+    if spine_item_count > 0 && failed == spine_item_count {
         return Err(ConvertError::malformed("no chapter in the book could be read"));
     }
 
@@ -204,5 +214,35 @@ fn scoped(chapter_path: &str, fragment: Option<&str>) -> AnchorId {
     match fragment {
         Some(f) if !f.is_empty() => format!("{chapter_path}#{f}"),
         _ => chapter_path.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    fn epub(opf: &str) -> Vec<u8> {
+        let container = br#"<container><rootfiles>
+            <rootfile full-path="OEBPS/content.opf"/>
+            </rootfiles></container>"#;
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, bytes) in [
+            ("META-INF/container.xml", container.as_slice()),
+            ("OEBPS/content.opf", opf.as_bytes()),
+        ] {
+            writer.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(bytes).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn unresolved_spine_itemref_is_malformed() {
+        let opf = r#"<package><manifest></manifest><spine>
+            <itemref idref="missing"/>
+            </spine></package>"#;
+        let err = parse(&epub(opf)).unwrap_err();
+        assert!(matches!(err, ConvertError::Malformed { .. }), "unexpected error: {err}");
     }
 }
