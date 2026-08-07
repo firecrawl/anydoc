@@ -482,3 +482,9 @@ $RECYCLE.BIN/
 *.swp
 
 runtimes/
+
+# compiled WebAssembly engine (produced by build-wasm.sh)
+Firecrawl.Anydoc.Wasm/wwwroot/anydoc_wasm.js
+Firecrawl.Anydoc.Wasm/wwwroot/anydoc_wasm_bg.wasm
+Firecrawl.Anydoc.Wasm/wwwroot/anydoc_wasm.d.ts
+Firecrawl.Anydoc.Wasm/wwwroot/anydoc_wasm_bg.wasm.d.ts

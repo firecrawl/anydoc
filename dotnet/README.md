@@ -72,6 +72,49 @@ The document model (`Firecrawl.Anydoc.Model`) encodes every block, inline,
 list, table grid, note, and embedded asset, mirroring the Node and Python
 bindings exactly (`Kind` string discriminants, `NoteId`, `MediaType`, etc.).
 
+## Blazor WebAssembly: `Firecrawl.Anydoc.Wasm`
+
+For client-side Blazor there is a sibling package, `Firecrawl.Anydoc.Wasm`,
+that runs the same engine compiled to WebAssembly. No native library is
+loaded, so a `browser-wasm` publish needs no RID-specific runtime: the engine
+ships as static web assets next to the managed wrapper.
+
+```csharp
+using Firecrawl.Anydoc;
+using Microsoft.JSInterop;
+
+// Injected into a Blazor component or service:
+var anydoc = new AnydocConverter(jsRuntime);
+
+// A browser has no filesystem, so conversion always starts from bytes and
+// every call is async (Blazor WASM has no synchronous JS interop):
+byte[] bytes = await httpClient.GetByteArrayAsync("report.docx");
+string markdown = await anydoc.ToMarkdownBytesAsync(bytes);
+Document document = await anydoc.ToDocumentAsync(bytes);
+
+Format? format = await anydoc.DetectFormatAsync(bytes);
+```
+
+One converter instance is enough for the whole app: it instantiates the WASM
+module lazily and caches it. The API matches the native package — `Format`,
+`ConvertErrorKind`, `AnydocException`, and the `Firecrawl.Anydoc.Model` types
+are the same shared source — but the sync-named members (`ToMarkdownBytes`,
+`ToDocument`, `DetectFormat`, ...) throw `PlatformNotSupportedException`
+because Blazor WASM cannot block on JavaScript interop.
+
+### Building the WebAssembly engine
+
+The compiled assets are gitignored and produced from the `wasm/` crate:
+
+```sh
+sh dotnet/build-wasm.sh   # needs the wasm32-unknown-unknown target and wasm-pack
+```
+
+This writes `anydoc_wasm.js` (wasm-bindgen glue) and `anydoc_wasm_bg.wasm`
+into `Firecrawl.Anydoc.Wasm/wwwroot/`, which the package ships as static web
+assets. `wwwroot/anydoc-wasm.js` — the small interop shim the managed wrapper
+loads via Blazor's `import` — is checked in and never regenerated.
+
 ## Building
 
 The C# wrapper is generated from the Rust FFI with

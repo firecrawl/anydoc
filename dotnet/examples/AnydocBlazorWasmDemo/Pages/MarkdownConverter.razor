@@ -1,0 +1,244 @@
+@page "/"
+@using Firecrawl.Anydoc
+
+<PageTitle>Document to Markdown</PageTitle>
+
+<FluentStack Orientation="Orientation.Vertical" Class="page-stack" Spacing="20">
+
+    <FluentCard Class="hero-card">
+        <FluentStack Orientation="Orientation.Horizontal" Spacing="16" Style="align-items: center;">
+            <FluentIcon Value="@(new Icons.Filled.Size48.DocumentText())" Color="Color.Accent" />
+            <FluentStack Orientation="Orientation.Vertical" Spacing="4">
+                <FluentLabel Typo="Typography.H1">Document → Markdown</FluentLabel>
+                <FluentLabel Typo="Typography.Body" Color="Color.Neutral">
+                    Convert documents to GitHub-Flavored Markdown right in your browser.
+                    Files never leave your machine.
+                </FluentLabel>
+            </FluentStack>
+        </FluentStack>
+    </FluentCard>
+
+    <FluentCard Class="control-card">
+        <FluentStack Orientation="Orientation.Vertical" Spacing="16">
+
+            <FluentInputFile Mode="InputFileMode.Buffer"
+                             Multiple="true"
+                             MaximumFileCount="@(10)"
+                             DragDropZoneVisible="true"
+                             Disabled="Busy"
+                             Accept=".doc,.docx,.odt,.pdf,.ppt,.pptx,.rtf,.epub,.xls,.xlsx,.ods,.odp,.csv"
+                             OnProgressChange="OnProgressChangeAsync"
+                             OnCompleted="OnCompletedAsync" />
+
+            <FluentDivider Role="@DividerRole.Separator" />
+
+            <FluentStack Orientation="Orientation.Horizontal" Spacing="8" Style="align-items: center;">
+                <FluentBadge Appearance="Appearance.Accent" Visible="Busy || _items.Any()">
+                    @BusyText
+                </FluentBadge>
+                <FluentStack Orientation="Orientation.Vertical" Spacing="2">
+                    <FluentLabel Typo="Typography.Body" Color="Color.Neutral">@ProgressTitle</FluentLabel>
+                    @if (Busy)
+                    {
+                        <FluentProgress Min="0" Max="100" Value="ProgressPercent" Width="100%" />
+                    }
+                </FluentStack>
+                <FluentSpacer />
+                @if (_items.Any())
+                {
+                    <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Delete())"
+                                  OnClick="ClearAll" Title="Clear all">
+                        Clear
+                    </FluentButton>
+                }
+            </FluentStack>
+
+            <FluentStack Orientation="Orientation.Vertical" Spacing="4">
+                <FluentLabel Typo="Typography.Subject">Supported formats</FluentLabel>
+                <FluentStack Orientation="Orientation.Horizontal" Gap="8" Style="flex-wrap: wrap;">
+                    @foreach (var f in SupportedFormats)
+                    {
+                        <FluentBadge Appearance="Appearance.Lightweight">@f</FluentBadge>
+                    }
+                </FluentStack>
+            </FluentStack>
+        </FluentStack>
+    </FluentCard>
+
+    @if (_items.Any())
+    {
+        <FluentStack Orientation="Orientation.Vertical" Spacing="16">
+            @foreach (var item in _items)
+            {
+                <FluentCard Class="result-card">
+                    <FluentStack Orientation="Orientation.Vertical" Spacing="12">
+                        <FluentStack Orientation="Orientation.Horizontal" Spacing="8" Style="align-items: center;">
+                            <FluentIcon Value="@((Icon)item.ItemIcon())" Color="@(item.Success ? Color.Success : Color.Error)" />
+                            <FluentLabel Typo="Typography.Subject">@item.Name</FluentLabel>
+                            @if (item.Format is not null)
+                            {
+                                <FluentBadge Appearance="Appearance.Accent">@item.Format</FluentBadge>
+                            }
+                            <FluentLabel Typo="Typography.Body" Color="Color.Neutral">@item.SizeLabel</FluentLabel>
+                            <FluentSpacer />
+                            @if (item.Success)
+                            {
+                                <FluentButton Appearance="Appearance.Stealth" IconStart="@(new Icons.Regular.Size20.Copy())"
+                                              Title="Copy Markdown" OnClick="() => CopyAsync(item)">Copy</FluentButton>
+                            }
+                        </FluentStack>
+
+                        @if (item.Success && !string.IsNullOrEmpty(item.Markdown))
+                        {
+                            <FluentTextArea ReadOnly="true"
+                                            Value="@item.Markdown"
+                                            AutoHeight="false"
+                                            Rows="10"
+                                            Class="md-output" />
+                        }
+                        else if (!item.Success)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error" Title="Conversion failed">
+                                @item.Error
+                            </FluentMessageBar>
+                        }
+                    </FluentStack>
+                </FluentCard>
+            }
+        </FluentStack>
+    }
+
+</FluentStack>
+
+@code {
+    private bool Busy { get; set; }
+    public string BusyText => Busy ? "Converting…" : "Ready";
+    public string ProgressTitle { get; private set; } = string.Empty;
+    private int ProgressPercent { get; set; }
+
+    private readonly List<FileItem> _items = new();
+    private readonly Dictionary<int, MemoryStream> _uploads = new();
+
+    private static readonly string[] SupportedFormats =
+    {
+        ".docx", ".doc", ".pdf", ".pptx", ".ppt", ".xlsx", ".xls",
+        ".odt", ".ods", ".odp", ".rtf", ".epub", ".csv",
+    };
+
+    [Inject] private AnydocConverter Anydoc { get; set; } = default!;
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private async Task OnProgressChangeAsync(FluentInputFileEventArgs e)
+    {
+        ProgressTitle = e.ProgressTitle;
+        ProgressPercent = e.ProgressPercent;
+
+        if (!_uploads.TryGetValue(e.Index, out var stream))
+        {
+            stream = new MemoryStream();
+            _uploads[e.Index] = stream;
+        }
+
+        await stream.WriteAsync(e.Buffer.Data.AsMemory(0, e.Buffer.BytesRead));
+    }
+
+    private async Task OnCompletedAsync(IEnumerable<FluentInputFileEventArgs> files)
+    {
+        Busy = true;
+        try
+        {
+            foreach (var e in files)
+            {
+                if (_uploads.Remove(e.Index, out var stream))
+                {
+                    await using (stream)
+                    {
+                        await ConvertAsync(new FileItem { Name = e.Name, Size = e.Size }, stream.ToArray());
+                    }
+                }
+            }
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task ConvertAsync(FileItem item, byte[] data)
+    {
+        try
+        {
+            var format = await ResolveFormatAsync(item.Name, data);
+            item.Format = format?.ToString();
+            item.Markdown = format is null
+                ? await Anydoc.ToMarkdownBytesAsync(data)
+                : await Anydoc.ToMarkdownBytesAsync(data, format.Value);
+            item.Success = true;
+        }
+        catch (AnydocException ex)
+        {
+            item.Error = $"{ex.Code}: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            item.Error = ex.Message;
+        }
+
+        _items.Insert(0, item);
+    }
+
+    private async Task<Format?> ResolveFormatAsync(string fileName, byte[] data)
+    {
+        var ext = Path.GetExtension(fileName);
+        if (!string.IsNullOrEmpty(ext))
+        {
+            var byExt = await Anydoc.DetectFormatByExtensionAsync(ext);
+            if (byExt is not null)
+            {
+                return byExt;
+            }
+        }
+
+        return await Anydoc.DetectFormatAsync(data);
+    }
+
+    private void ClearAll()
+    {
+        if (!Busy)
+        {
+            _items.Clear();
+        }
+    }
+
+    private async Task CopyAsync(FileItem item)
+    {
+        if (string.IsNullOrEmpty(item.Markdown)) return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", item.Markdown);
+    }
+
+    private sealed class FileItem
+    {
+        public string Name { get; init; } = "";
+        public long Size { get; init; }
+        public bool Success { get; set; }
+        public string? Format { get; set; }
+        public string? Markdown { get; set; }
+        public string? Error { get; set; }
+
+        public string SizeLabel => Size < 1024
+            ? $"{Size} bytes"
+            : $"{Size / 1024.0:N1} KB";
+
+        public Icon ItemIcon()
+        {
+            if (!Success)
+            {
+                return new Icons.Filled.Size20.DocumentError();
+            }
+
+            return string.IsNullOrEmpty(Markdown)
+                ? (Icon)new Icons.Filled.Size20.Clock()
+                : (Icon)new Icons.Filled.Size20.DocumentCheckmark();
+        }
+    }
+}
