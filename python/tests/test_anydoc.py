@@ -14,6 +14,7 @@ RICH = FIXTURES / "docx" / "handmade-rich.docx"
 CSV = FIXTURES / "csv" / "sheet.csv"
 ENCRYPTED = FIXTURES / "malformed" / "encrypted--errors.odt"
 ZIPBOMB = FIXTURES / "abuse" / "zipbomb--errors.docx"
+HTML = b"<!doctype html><html><body><h1>HTML input</h1></body></html>"
 
 
 class AnydocTest(unittest.TestCase):
@@ -32,6 +33,7 @@ class AnydocTest(unittest.TestCase):
         with self.assertRaisesRegex(anydoc.ConvertError, "unrecognized file content"):
             anydoc.to_markdown_bytes(CSV.read_bytes())
         self.assertIn("| --- |", anydoc.to_markdown_bytes(CSV.read_bytes(), "csv"))
+        self.assertRegex(anydoc.to_markdown_bytes(HTML), r"(?m)^# HTML input")
 
     def test_to_document_exposes_the_document_model(self):
         document = anydoc.to_document(OUTLINE.read_bytes(), "docx")
@@ -50,10 +52,12 @@ class AnydocTest(unittest.TestCase):
 
     def test_format_detection_reads_content_extension_and_path(self):
         self.assertEqual(anydoc.format_from_bytes(RICH.read_bytes()), "docx")
+        self.assertEqual(anydoc.format_from_bytes(HTML), "html")
         # CSV carries no signature: only the extension names it.
         self.assertIsNone(anydoc.format_from_bytes(CSV.read_bytes()))
         self.assertEqual(anydoc.format_from_extension(".pptm"), "pptx")
         self.assertEqual(anydoc.format_from_extension("xls"), "xlsx")
+        self.assertEqual(anydoc.format_from_extension("htm"), "html")
         self.assertEqual(anydoc.format_from_path("report.odt"), "odt")
         self.assertIsNone(anydoc.format_from_path("report.unknown"))
 

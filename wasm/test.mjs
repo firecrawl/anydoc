@@ -23,6 +23,7 @@ const RICH = await readFile(fixture('docx/handmade-rich.docx'))
 const CSV = await readFile(fixture('csv/sheet.csv'))
 const PDF = await readFile(fixture('pdf/text.pdf'))
 const ENCRYPTED = await readFile(fixture('malformed/encrypted--errors.odt'))
+const HTML = new TextEncoder().encode('<!doctype html><html><body><h1>HTML input</h1></body></html>')
 
 test('toMarkdownBytes converts in memory', () => {
   const markdown = toMarkdownBytes(RICH, 'docx')
@@ -34,6 +35,7 @@ test('toMarkdownBytes detects the format when none is named', () => {
   // CSV carries no signature, so it has to be named.
   assert.throws(() => toMarkdownBytes(CSV), /unrecognized file content/)
   assert.match(toMarkdownBytes(CSV, 'csv'), /\| --- \|/)
+  assert.match(toMarkdownBytes(HTML), /^# HTML input/m)
 })
 
 test('pdf converts to Markdown but has no document model', () => {
@@ -60,10 +62,12 @@ test('toDocument carries embedded assets as Uint8Arrays', () => {
 
 test('format detection reads content, extension, and path', () => {
   assert.equal(formatFromBytes(RICH), 'docx')
+  assert.equal(formatFromBytes(HTML), 'html')
   // CSV carries no signature: only the extension names it.
   assert.equal(formatFromBytes(CSV), undefined)
   assert.equal(formatFromExtension('.pptm'), 'pptx')
   assert.equal(formatFromExtension('xls'), 'xlsx')
+  assert.equal(formatFromExtension('htm'), 'html')
   assert.equal(formatFromPath('/tmp/report.odt'), 'odt')
   assert.equal(formatFromPath('/tmp/report.unknown'), undefined)
 })
