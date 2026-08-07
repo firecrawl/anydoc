@@ -140,9 +140,9 @@ let document = anydoc::to_document(&bytes, None)?;
 
 | Format           | Extensions                                                 |
 | ---------------- | ---------------------------------------------------------- |
-| Word             | `.doc`, `.docx`, `.docm`                                   |
+| Word             | `.doc`, `.docx`, `.docm`, `.wps`                           |
 | PowerPoint       | `.ppt`, `.pps`, `.pot`, `.pptx`, `.pptm`, `.ppsx`, `.ppsm` |
-| Excel            | `.xls`, `.xlsx`, `.xlsm`, `.xlsb`                          |
+| Excel            | `.xls`, `.xlsx`, `.xlsm`, `.xlsb`, `.et`                   |
 | OpenDocument     | `.odt`, `.ods`, `.odp`                                     |
 | Rich Text Format | `.rtf`                                                     |
 | EPUB             | `.epub`                                                    |
