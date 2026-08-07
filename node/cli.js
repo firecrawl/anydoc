@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict'
 
-const { readFile, writeFile } = require('node:fs/promises')
+const { readFile, stat, writeFile } = require('node:fs/promises')
+const { resolve } = require('node:path')
 
 const FORMATS = 'doc, docx, odt, pdf, ppt, pptx, rtf, epub, xlsx, ods, odp, csv'
 
@@ -113,10 +114,32 @@ async function readStdin() {
   return Buffer.concat(chunks)
 }
 
+async function referToSameFile(input, output) {
+  if (resolve(input) === resolve(output)) return true
+  try {
+    const [input_stats, output_stats] = await Promise.all([stat(input), stat(output)])
+    return input_stats.dev === output_stats.dev && input_stats.ino === output_stats.ino
+  } catch (error) {
+    if (error.code === 'ENOENT') return false
+    throw error
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   if (args.input === null) {
     fail(USAGE_ERROR, 'missing input: pass a document path, or - for stdin (see anydoc --help)')
+  }
+  if (args.input !== '-' && args.output !== null) {
+    let same_file
+    try {
+      same_file = await referToSameFile(args.input, args.output)
+    } catch (error) {
+      fail(CONVERSION_ERROR, error.message)
+    }
+    if (same_file) {
+      fail(USAGE_ERROR, 'output path must differ from the input path')
+    }
   }
 
   // Loaded after argument handling so --help and --version work even where
