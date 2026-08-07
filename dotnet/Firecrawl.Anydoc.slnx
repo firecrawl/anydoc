@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/Firecrawl.Anydoc/">
+    <Project Path="Firecrawl.Anydoc/Firecrawl.Anydoc.csproj" />
+  </Folder>
+  <Folder Name="/Firecrawl.Anydoc.Tests/">
+    <Project Path="Firecrawl.Anydoc.Tests/Firecrawl.Anydoc.Tests.csproj" />
+  </Folder>
+</Solution>

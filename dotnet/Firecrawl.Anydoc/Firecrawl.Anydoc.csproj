@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+
+    <AssemblyName>Firecrawl.Anydoc</AssemblyName>
+    <RootNamespace>Firecrawl.Anydoc</RootNamespace>
+
+    <Version>0.1.7</Version>
+    <Description>Convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown, backed by the anydoc Rust engine.</Description>
+    <PackageId>Firecrawl.Anydoc</PackageId>
+    <Authors>Firecrawl;Junian Triajianto</Authors>
+    <Owners>Firecrawl;junian</Owners>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/firecrawl/anydoc</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/firecrawl/anydoc</RepositoryUrl>
+    <PackageTags>markdown; docx; pptx; xlsx; epub; pdf; converter; document</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <!-- NativeMethods.g.cs (csbindgen-emitted DllImport surface) is compiled via
+       the default *.cs globs; regenerate it with `cargo build -p anydoc-dotnet`. -->
+
+  <!--
+    Native binaries laid out per NuGet's runtimes/{rid}/native convention so the
+    package ships osx-x64, osx-arm64, win-x64, win-arm64, linux-x64 and
+    linux-arm64. Packed into the package and copied into the build output so a
+    project reference (or a referenced consumer) resolves them at run time too.
+  -->
+  <ItemGroup>
+    <None Include="runtimes/**/*"
+          Pack="true"
+          PackagePath="runtimes/"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
