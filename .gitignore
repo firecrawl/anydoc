@@ -12,3 +12,5 @@ __pycache__/
 # wasm-pack build output: pkg/ is the npm package, www/pkg/ the demo site copy
 /wasm/pkg/
 /wasm/www/pkg/
+# OCR models for a local run of the demo: CI fetches them at deploy time
+/wasm/www/models/
