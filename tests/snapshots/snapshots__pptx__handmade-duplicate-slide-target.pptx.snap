@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+<a id="slide-1"></a>
+
+[Link to the first part](#slide-1)
+
+---
+
+Middle slide
+
+---
+
+[Link to the first part](#slide-1)

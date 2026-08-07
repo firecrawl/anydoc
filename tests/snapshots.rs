@@ -174,6 +174,22 @@ fn pptx_slide_links_still_target_the_sequential_anchor() {
     assert!(has_slide_link(&doc, "slide-2"));
 }
 
+#[test]
+fn pptx_duplicate_slide_targets_keep_positional_anchors() {
+    let path = fixture_root().join("pptx").join("handmade-duplicate-slide-target.pptx");
+    let bytes = std::fs::read(path).unwrap();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Pptx).unwrap();
+    assert_eq!(
+        slide_anchor_ids(&doc),
+        ["slide-1", "slide-2", "slide-3"],
+        "duplicate sldIdLst targets must retain sequential, unique anchors"
+    );
+    assert!(
+        has_slide_link(&doc, "slide-1"),
+        "a link to the duplicated part must resolve to its first occurrence"
+    );
+}
+
 /// Embedded object payloads land in `Document::assets` with their identity
 /// and media type (the Markdown output shows only the alt text).
 #[test]

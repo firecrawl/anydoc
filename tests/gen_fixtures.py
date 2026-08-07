@@ -1156,6 +1156,68 @@ def links_pptx():
 
 
 # ---------------------------------------------------------------------------
+# S22: duplicate slide parts in sldIdLst retain positional identities while
+# internal links resolve to the first occurrence of their target part.
+
+def duplicate_slide_target_pptx():
+    presentation = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation {PPTX_NS}>
+<p:sldIdLst><p:sldId id="256" r:id="rId1"/><p:sldId id="257" r:id="rId2"/>
+<p:sldId id="258" r:id="rId3"/></p:sldIdLst>
+</p:presentation>"""
+    pres_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/>
+<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>"""
+
+    def slide(body):
+        return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld {PPTX_NS}>
+<p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+{body}
+</p:spTree></p:cSld></p:sld>"""
+
+    slide1 = slide(
+        '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Body"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+        '<p:spPr/><p:txBody><a:bodyPr/>'
+        '<a:p><a:r><a:rPr><a:hlinkClick r:id="rId5"/></a:rPr><a:t>Link to the first part</a:t></a:r></a:p>'
+        '</p:txBody></p:sp>'
+    )
+    slide1_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slide1.xml"/>
+</Relationships>"""
+    slide2 = slide(
+        '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Body"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+        '<p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>Middle slide</a:t></a:r></a:p></p:txBody></p:sp>'
+    )
+    ct = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+<Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>"""
+    root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>"""
+    write_zip(OUT / "pptx" / "handmade-duplicate-slide-target.pptx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", root_rels),
+        ("ppt/presentation.xml", presentation),
+        ("ppt/_rels/presentation.xml.rels", pres_rels),
+        ("ppt/slides/slide1.xml", slide1),
+        ("ppt/slides/_rels/slide1.xml.rels", slide1_rels),
+        ("ppt/slides/slide2.xml", slide2),
+    ])
+
+
+# ---------------------------------------------------------------------------
 # S21: every presentation slide keeps its identity, including untitled and
 # empty slides, without relying on an internal link targeting it.
 
@@ -2067,6 +2129,7 @@ def main():
     gaps_ods()
     encoded_docs()
     order_pptx()
+    duplicate_slide_target_pptx()
     slide_identity_pptx()
     slide_identity_odp()
     css_links_epub()

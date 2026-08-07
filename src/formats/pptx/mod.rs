@@ -91,13 +91,16 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let mut blocks: Vec<Block> = Vec::new();
     let mut failed = 0usize;
     let instance_counter = StdCell::new(0u64);
-    // Every slide has a start anchor id so internal slide-to-slide links
-    // resolve after concatenation.
-    let slide_anchors: HashMap<String, String> = slide_paths
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (p.clone(), format!("slide-{}", i + 1)))
-        .collect();
+    // Slide identity is positional in `sldIdLst`, so this path-keyed map is
+    // only for resolving internal slide-to-slide links. If a malformed deck
+    // lists one part more than once, links keep the first occurrence's
+    // identity instead of being retargeted by a later map insertion.
+    let mut slide_anchors: HashMap<String, String> = HashMap::new();
+    for (slide_index, slide_path) in slide_paths.iter().enumerate() {
+        slide_anchors
+            .entry(slide_path.clone())
+            .or_insert_with(|| format!("slide-{}", slide_index + 1));
+    }
     let mut all_rels: Vec<Relationships> = Vec::with_capacity(slide_paths.len());
     for p in &slide_paths {
         all_rels.push(read_rels(&mut pkg.borrow_mut(), &rels_part_for(p))?);
@@ -105,11 +108,10 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let mut emitted_content_slide = false;
 
     for (slide_index, slide_path) in slide_paths.iter().enumerate() {
-        let anchor = slide_anchors
-            .get(slide_path)
-            .expect("every slide path has a corresponding anchor")
-            .clone();
-        let mut slide_blocks = vec![Block::Paragraph(vec![Inline::Anchor(anchor)])];
+        // Unlike link resolution above, emission must preserve every
+        // positional occurrence, including duplicate paths.
+        let mut slide_blocks =
+            vec![Block::Paragraph(vec![Inline::Anchor(format!("slide-{}", slide_index + 1))])];
 
         let tree = match pkg.borrow_mut().optional_xml_part(slide_path)? {
             Some(t) => t,
