@@ -166,6 +166,26 @@ fn sourceless_image_renders_alt_text() {
 }
 
 #[test]
+fn embedded_asset_image_emits_asset_href() {
+    use crate::model::AssetId;
+    let md = doc(vec![Block::Paragraph(vec![Inline::Image {
+        alt: "photo".into(),
+        source: ImageSource::Asset(AssetId(0)),
+    }])]);
+    assert_eq!(md, "![photo](asset:0)\n");
+}
+
+#[test]
+fn embedded_asset_empty_alt_keeps_positional_marker() {
+    use crate::model::AssetId;
+    let md = doc(vec![Block::Paragraph(vec![Inline::Image {
+        alt: "".into(),
+        source: ImageSource::Asset(AssetId(3)),
+    }])]);
+    assert_eq!(md, "![](asset:3)\n");
+}
+
+#[test]
 fn composite_marker_labels_are_escaped() {
     // M15: source-derived labels must not alter Markdown structure.
     let list = crate::model::List {
