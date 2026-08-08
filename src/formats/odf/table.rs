@@ -410,7 +410,17 @@ pub fn parse_spreadsheet(sheet: &Element, ctx: &Ctx) -> Result<Vec<Block>, Conve
         if multi_sheet {
             blocks.push(Block::heading(2, vec![Inline::plain(name)]));
         }
-        blocks.extend(content);
+        for block in content {
+            match block {
+                Block::Table(mut t) => {
+                    if !name.is_empty() {
+                        t.sheet_name = Some(name.to_string());
+                    }
+                    blocks.push(Block::Table(t));
+                }
+                other => blocks.push(other),
+            }
+        }
     }
     Ok(blocks)
 }
