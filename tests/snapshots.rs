@@ -166,8 +166,8 @@ fn doc_inline_picture_is_retained() {
     );
 }
 
-/// The RTF `\pict` payload is retained as an asset (the Markdown output
-/// shows only the alt text, which is empty for pictures without one).
+/// The RTF `\pict` payload is retained as an asset (Markdown references it
+/// as `asset:N` when the picture appears as an image inline).
 #[test]
 fn rtf_inline_picture_is_retained() {
     let bytes = std::fs::read(fixture_root().join("rtf").join("text.rtf")).unwrap();
