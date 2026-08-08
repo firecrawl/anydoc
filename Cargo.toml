@@ -30,6 +30,7 @@ encoding_rs = "0.8.35"
 log = "0.4"
 pdf-inspector = "0.1.7"
 quick-xml = "0.41.0"
+ssfmt = { version = "0.1.2", default-features = false }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [profile.release]
