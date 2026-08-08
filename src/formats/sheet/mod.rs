@@ -1,5 +1,8 @@
 //! Excel spreadsheets (xlsx, xlsm, xlsb, xls) via calamine.
 
+mod numfmt;
+mod styles;
+
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, TableKind};
 use crate::shared::header::resolve_header_rows;
