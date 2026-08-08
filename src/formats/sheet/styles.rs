@@ -11,8 +11,8 @@
 use crate::error::ConvertError;
 use crate::package::archive::Package;
 use crate::package::relationships::{read_rels, rels_part_for};
-use crate::package::xml::ns::{PKG_RELS, R};
-use crate::package::xml::{parse_xml, Element};
+use crate::package::xml::ns::R;
+use crate::package::xml::parse_xml;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -40,7 +40,9 @@ impl CellFormats {
             None => return Ok(None),
         };
         let Some(style_codes) = parse_styles(&styles) else {
-            log::warn!("spreadsheet: unreadable styles.xml; rendering cells without number formats");
+            log::warn!(
+                "spreadsheet: unreadable styles.xml; rendering cells without number formats"
+            );
             return Ok(None);
         };
 
@@ -56,10 +58,9 @@ impl CellFormats {
                 log::warn!("spreadsheet: sheet part {path} missing; skipping its formats");
                 continue;
             };
-            if let Some(cells) = parse_sheet_formats(&part, &style_codes) {
-                if !cells.is_empty() {
-                    by_sheet.insert(name, cells);
-                }
+            if let Some(cells) = parse_sheet_formats(&part, &style_codes).filter(|c| !c.is_empty())
+            {
+                by_sheet.insert(name, cells);
             }
         }
         Ok(Some(CellFormats { by_sheet }))
@@ -87,16 +88,21 @@ fn parse_styles(bytes: &Rc<[u8]>) -> Option<Vec<Option<String>>> {
         }
     }
     let mut xfs = Vec::new();
-    for xf in root.descendants(X, "xf") {
-        let id: u32 = xf.attr_unqualified("numFmtId").and_then(|v| v.parse().ok()).unwrap_or(0);
-        // `applyNumberFormat="0"` means the declared numFmtId is not applied;
-        // the cell shows raw.
-        let applied = xf
-            .attr_unqualified("applyNumberFormat")
-            .map(|v| v != "0" && v != "false")
-            .unwrap_or(true);
-        let code = if applied { super::numfmt::code_for_style(id, &custom) } else { None };
-        xfs.push(code);
+    // Cells reference the `cellXfs` table; `cellStyleXfs` carries the same
+    // element name and must not be mistaken for it.
+    let cell_xfs = root.descendants(X, "cellXfs").next();
+    if let Some(cell_xfs) = cell_xfs {
+        for xf in cell_xfs.child_elems().filter(|e| e.is(X, "xf")) {
+            let id: u32 = xf.attr_unqualified("numFmtId").and_then(|v| v.parse().ok()).unwrap_or(0);
+            // `applyNumberFormat="0"` means the declared numFmtId is not
+            // applied; the cell shows raw.
+            let applied = xf
+                .attr_unqualified("applyNumberFormat")
+                .map(|v| v != "0" && v != "false")
+                .unwrap_or(true);
+            let code = if applied { super::numfmt::code_for_style(id, &custom) } else { None };
+            xfs.push(code);
+        }
     }
     // A workbook whose styles part carries no style table has no format
     // metadata to apply (this also rejects leniently-repaired garbage).
@@ -164,17 +170,18 @@ fn parse_sheet_formats(
         };
         let mut last_col = 0u32;
         for cell in row.child_elems().filter(|e| e.is(X, "c")) {
-            let col = match cell.attr_unqualified("r").and_then(|r| parse_cell_ref(r).map(|(_, c)| c)) {
-                Some(c) => {
-                    last_col = c + 1;
-                    c
-                }
-                None => {
-                    let c = last_col;
-                    last_col += 1;
-                    c
-                }
-            };
+            let col =
+                match cell.attr_unqualified("r").and_then(|r| parse_cell_ref(r).map(|(_, c)| c)) {
+                    Some(c) => {
+                        last_col = c + 1;
+                        c
+                    }
+                    None => {
+                        let c = last_col;
+                        last_col += 1;
+                        c
+                    }
+                };
             let style: u32 = cell.attr_unqualified("s").and_then(|v| v.parse().ok()).unwrap_or(0);
             if let Some(Some(code)) = style_codes.get(style as usize) {
                 out.insert((row_idx, col), code.clone());

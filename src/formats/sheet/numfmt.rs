@@ -73,7 +73,7 @@ fn renderable_code(code: &str) -> bool {
             ('a' | 'A', _, _) => after_ampm = true,
             ('p' | 'P', _, _) if after_ampm => return false,
             ('d' | 'm' | 'h' | 'y' | 's' | 'D' | 'M' | 'H' | 'Y' | 'S', _, _) if brackets == 0 => {
-                return false
+                return false;
             }
             _ => {}
         }
