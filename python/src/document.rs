@@ -267,6 +267,12 @@ pub struct Table {
     /// data (a real data table) or layout (layout scaffolding: text boxes,
     /// positioning tables).
     kind: &'static str,
+    /// Spreadsheet worksheet name when known.
+    sheet_name: Option<String>,
+    /// Zero-based absolute row of the used-range origin in the source sheet.
+    source_row: Option<u32>,
+    /// Zero-based absolute column of the used-range origin in the source sheet.
+    source_col: Option<u32>,
 }
 
 fn table(py: Python<'_>, table: model::Table) -> PyResult<Table> {
@@ -281,6 +287,9 @@ fn table(py: Python<'_>, table: model::Table) -> PyResult<Table> {
             model::TableKind::Data => "data",
             model::TableKind::Layout => "layout",
         },
+        sheet_name: table.sheet_name,
+        source_row: table.source_row,
+        source_col: table.source_col,
     })
 }
 

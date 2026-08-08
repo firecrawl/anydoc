@@ -355,6 +355,15 @@ pub struct Table {
     /// Number of leading rows that are header rows (0 = no header).
     pub header_rows: u32,
     pub kind: TableKind,
+    /// Spreadsheet worksheet name when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sheet_name: Option<String>,
+    /// Zero-based absolute row of the used-range origin in the source sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_row: Option<u32>,
+    /// Zero-based absolute column of the used-range origin in the source sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_col: Option<u32>,
 }
 
 impl From<model::Table> for Table {
@@ -370,6 +379,9 @@ impl From<model::Table> for Table {
                 model::TableKind::Data => TableKind::Data,
                 model::TableKind::Layout => TableKind::Layout,
             },
+            sheet_name: table.sheet_name,
+            source_row: table.source_row,
+            source_col: table.source_col,
         }
     }
 }
