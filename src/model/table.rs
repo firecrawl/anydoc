@@ -16,6 +16,15 @@ pub struct Table {
     pub header_rows: usize,
     /// Whether the source used this table for data or for layout.
     pub kind: TableKind,
+    /// Spreadsheet worksheet name when the table came from a workbook sheet.
+    /// Always set for Excel/ODS sheets (including single-sheet workbooks).
+    pub sheet_name: Option<String>,
+    /// Zero-based absolute row of the used-range origin in the source sheet
+    /// (e.g. Excel `C3` → `source_row = 2`). Grid index `(r, c)` maps back
+    /// with `(source_row + r, source_col + c)`.
+    pub source_row: Option<u32>,
+    /// Zero-based absolute column of the used-range origin in the source sheet.
+    pub source_col: Option<u32>,
 }
 
 /// What a table is for.
@@ -265,7 +274,14 @@ impl GridBuilder {
                 }
             }
         }
-        Table { grid: self.grid, header_rows: 0, kind }
+        Table {
+            grid: self.grid,
+            header_rows: 0,
+            kind,
+            sheet_name: None,
+            source_row: None,
+            source_col: None,
+        }
     }
 }
 
