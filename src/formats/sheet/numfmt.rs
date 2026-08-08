@@ -23,24 +23,22 @@ pub fn render(value: f64, code: &str) -> Option<String> {
 /// Resolve the format code for a style's `numFmtId`.
 ///
 /// Custom ids resolve from the workbook's `numFmts` table. Builtin ids
-/// resolve through KTD5: numeric/percent/scientific/fraction/accounting
-/// ids render; date, time, locale-date, undefined, and text ids map to
-/// `None` (the caller keeps today's behavior for those cell kinds).
+/// resolve through ssfmt's ECMA-376 table, filtered by the same
+/// renderability guard as custom codes, so date, text, and General ids
+/// fall through to `None` (the caller keeps today's behavior for those
+/// cell kinds) without a hand-maintained id list. Locale-currency
+/// builtins (41-44) carry a locale-dependent symbol and stay raw until
+/// locale support lands.
 pub fn code_for_style(num_fmt_id: u32, custom: &HashMap<u32, String>) -> Option<String> {
     if let Some(code) = custom.get(&num_fmt_id) {
         return renderable_code(code).then(|| code.clone());
     }
-    match num_fmt_id {
-        // General: raw rendering stays.
-        0 => None,
-        // Date/time ids calamine already converts to DateTime, plus locale
-        // date ids calamine does not classify and text id 49.
-        14..=22 | 27..=36 | 45..=47 | 49 => None,
-        // Accounting ids 37-40 render via ssfmt; 41-44 carry a locale
-        // currency symbol and stay raw until locale support lands.
-        41..=44 => None,
-        _ => ssfmt::builtin_formats::format_code_from_id(num_fmt_id).map(str::to_owned),
+    if (41..=44).contains(&num_fmt_id) {
+        return None;
     }
+    ssfmt::builtin_formats::format_code_from_id(num_fmt_id)
+        .filter(|code| renderable_code(code))
+        .map(str::to_owned)
 }
 
 /// Whether a code is eligible for numeric rendering.

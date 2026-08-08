@@ -225,19 +225,17 @@ fn format_duration_days(days: f64) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod test_util {
     use std::io::Write;
 
-    /// Minimal xlsx with a used range at D11:E12 and the given merged region.
-    fn xlsx_with_merge(merge_ref: &str) -> Vec<u8> {
-        let sheet = format!(
-            r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="11"><c r="D11" t="inlineStr"><is><t>x</t></is></c><c r="E11" t="inlineStr"><is><t>y</t></is></c></row><row r="12"><c r="D12" t="inlineStr"><is><t>z</t></is></c><c r="E12" t="inlineStr"><is><t>w</t></is></c></row></sheetData><mergeCells count="1"><mergeCell ref="{merge_ref}"/></mergeCells></worksheet>"#
-        );
-        let parts: &[(&str, &str)] = &[
+    /// Minimal xlsx package: workbook/rels/sheet parts, plus `styles.xml`
+    /// when `styles` is `Some`. Deterministic ZIP timestamps (pattern: the
+    /// `xlsx_with_merge` helper in this module).
+    pub fn xlsx_with(styles: Option<&str>, sheet: &str) -> Vec<u8> {
+        let mut parts: Vec<(&str, &str)> = vec![
             (
                 "[Content_Types].xml",
-                r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#,
+                r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#,
             ),
             (
                 "_rels/.rels",
@@ -251,15 +249,30 @@ mod tests {
                 "xl/_rels/workbook.xml.rels",
                 r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
             ),
+            ("xl/worksheets/sheet1.xml", sheet),
         ];
+        if let Some(styles) = styles {
+            parts.push(("xl/styles.xml", styles));
+        }
         let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         for (name, body) in parts {
-            w.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            w.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
             w.write_all(body.as_bytes()).unwrap();
         }
-        w.start_file("xl/worksheets/sheet1.xml", zip::write::SimpleFileOptions::default()).unwrap();
-        w.write_all(sheet.as_bytes()).unwrap();
         w.finish().unwrap().into_inner()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal xlsx with a used range at D11:E12 and the given merged region.
+    fn xlsx_with_merge(merge_ref: &str) -> Vec<u8> {
+        let sheet = format!(
+            r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="11"><c r="D11" t="inlineStr"><is><t>x</t></is></c><c r="E11" t="inlineStr"><is><t>y</t></is></c></row><row r="12"><c r="D12" t="inlineStr"><is><t>z</t></is></c><c r="E12" t="inlineStr"><is><t>w</t></is></c></row></sheetData><mergeCells count="1"><mergeCell ref="{merge_ref}"/></mergeCells></worksheet>"#
+        );
+        super::test_util::xlsx_with(None, &sheet)
     }
 
     fn covered_count(doc: &Document) -> usize {
@@ -326,39 +339,6 @@ mod tests {
         assert_eq!(format_duration_days(-0.5), "-12:00:00");
     }
 
-    /// Minimal xlsx with the given styles.xml (`None` omits the part) and
-    /// sheet XML (pattern: `xlsx_with_merge` above).
-    fn xlsx_with_styles(styles: Option<&str>, sheet: &str) -> Vec<u8> {
-        let mut parts: Vec<(&str, &str)> = vec![
-            (
-                "[Content_Types].xml",
-                r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#,
-            ),
-            (
-                "_rels/.rels",
-                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
-            ),
-            (
-                "xl/workbook.xml",
-                r#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
-            ),
-            (
-                "xl/_rels/workbook.xml.rels",
-                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
-            ),
-            ("xl/worksheets/sheet1.xml", sheet),
-        ];
-        if let Some(styles) = styles {
-            parts.push(("xl/styles.xml", styles));
-        }
-        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        for (name, body) in parts {
-            w.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
-            w.write_all(body.as_bytes()).unwrap();
-        }
-        w.finish().unwrap().into_inner()
-    }
-
     fn first_table_text(doc: &Document) -> Vec<String> {
         let Block::Table(t) = doc.blocks.first().unwrap() else {
             panic!("expected a table");
@@ -388,7 +368,7 @@ mod tests {
     fn formatted_numeric_cells_render_their_display_value() {
         let styles = r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0.00%"/></numFmts><cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="164"/><xf numFmtId="4"/></cellXfs></styleSheet>"#;
         let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1"><v>0.65</v></c><c r="B1" s="2"><v>1234.5</v></c><c r="C1"><v>0.075</v></c></row></sheetData></worksheet>"#;
-        let doc = parse(&xlsx_with_styles(Some(styles), sheet)).unwrap();
+        let doc = parse(&super::test_util::xlsx_with(Some(styles), sheet)).unwrap();
         assert_eq!(first_table_text(&doc), vec!["65.00%", "1,234.50", "0.075"]);
     }
 
@@ -396,14 +376,14 @@ mod tests {
     fn formatted_int_cells_group_digits() {
         let styles = r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="3"/></cellXfs></styleSheet>"#;
         let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1"><v>1234567</v></c></row></sheetData></worksheet>"#;
-        let doc = parse(&xlsx_with_styles(Some(styles), sheet)).unwrap();
+        let doc = parse(&super::test_util::xlsx_with(Some(styles), sheet)).unwrap();
         assert_eq!(first_table_text(&doc), vec!["1,234,567"]);
     }
 
     #[test]
     fn workbook_without_styles_keeps_raw_rendering() {
         let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>0.65</v></c></row></sheetData></worksheet>"#;
-        let doc = parse(&xlsx_with_styles(None, sheet)).unwrap();
+        let doc = parse(&super::test_util::xlsx_with(None, sheet)).unwrap();
         assert_eq!(first_table_text(&doc), vec!["0.65"]);
     }
 
@@ -411,7 +391,7 @@ mod tests {
     fn general_formatted_float_keeps_raw_rendering() {
         let styles = r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs count="1"><xf numFmtId="0"/></cellXfs></styleSheet>"#;
         let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="0"><v>0.65</v></c></row></sheetData></worksheet>"#;
-        let doc = parse(&xlsx_with_styles(Some(styles), sheet)).unwrap();
+        let doc = parse(&super::test_util::xlsx_with(Some(styles), sheet)).unwrap();
         assert_eq!(first_table_text(&doc), vec!["0.65"]);
     }
 
@@ -421,7 +401,7 @@ mod tests {
         // DateTime and the numeric pipeline must not double-format it.
         let styles = r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>"#;
         let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1"><v>46031</v></c></row></sheetData></worksheet>"#;
-        let doc = parse(&xlsx_with_styles(Some(styles), sheet)).unwrap();
+        let doc = parse(&super::test_util::xlsx_with(Some(styles), sheet)).unwrap();
         let text = first_table_text(&doc);
         assert_eq!(text, vec!["2026-01-09"], "date serial must render as a date, got {text:?}");
     }
@@ -430,7 +410,7 @@ mod tests {
     fn string_cells_ignore_format_codes() {
         let styles = r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="164"/></cellXfs></styleSheet>"#;
         let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1" t="inlineStr"><is><t>5.75%</t></is></c></row></sheetData></worksheet>"#;
-        let doc = parse(&xlsx_with_styles(Some(styles), sheet)).unwrap();
+        let doc = parse(&super::test_util::xlsx_with(Some(styles), sheet)).unwrap();
         assert_eq!(first_table_text(&doc), vec!["5.75%"]);
     }
 

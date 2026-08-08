@@ -34,10 +34,18 @@ impl CellFormats {
     /// swallowed; resource-limit errors propagate per the crate's limits
     /// policy.
     pub fn from_ooxml(bytes: &[u8]) -> Result<Option<Self>, ConvertError> {
-        let mut pkg = Package::open(bytes)?;
-        let styles = match pkg.part("xl/styles.xml")? {
-            Some(s) => s,
-            None => return Ok(None),
+        let mut pkg = match Package::open(bytes) {
+            Ok(p) => p,
+            Err(e) if e.is_fatal() => return Err(e),
+            Err(e) => {
+                log::warn!(
+                    "spreadsheet: unreadable package ({e}); rendering cells without number formats"
+                );
+                return Ok(None);
+            }
+        };
+        let Some(styles) = pkg.optional_part("xl/styles.xml")? else {
+            return Ok(None);
         };
         let Some(style_codes) = parse_styles(&styles) else {
             log::warn!(
@@ -50,11 +58,11 @@ impl CellFormats {
             log::warn!(
                 "spreadsheet: unreadable workbook/relationships; rendering cells without number formats"
             );
-            return Ok(Some(CellFormats { by_sheet: HashMap::new() }));
+            return Ok(None);
         };
         let mut by_sheet = HashMap::new();
         for (name, path) in parts {
-            let Some(part) = pkg.part(&path)? else {
+            let Some(part) = pkg.optional_part(&path)? else {
                 log::warn!("spreadsheet: sheet part {path} missing; skipping its formats");
                 continue;
             };
@@ -221,39 +229,6 @@ fn parse_cell_ref(ref_: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-
-    /// Minimal xlsx package with the given styles XML and sheet XML,
-    /// assembled with deterministic parts (pattern: `xlsx_with_merge` in
-    /// `sheet/mod.rs`).
-    fn xlsx_with(styles: &str, sheet: &str) -> Vec<u8> {
-        let parts: &[(&str, &str)] = &[
-            (
-                "[Content_Types].xml",
-                r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#,
-            ),
-            (
-                "_rels/.rels",
-                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
-            ),
-            (
-                "xl/workbook.xml",
-                r#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
-            ),
-            (
-                "xl/_rels/workbook.xml.rels",
-                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
-            ),
-            ("xl/styles.xml", styles),
-            ("xl/worksheets/sheet1.xml", sheet),
-        ];
-        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        for (part, body) in parts {
-            w.start_file(*part, zip::write::SimpleFileOptions::default()).unwrap();
-            w.write_all(body.as_bytes()).unwrap();
-        }
-        w.finish().unwrap().into_inner()
-    }
 
     fn style_sheet() -> &'static str {
         r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0.00%"/></numFmts><cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="164" applyNumberFormat="1"/><xf numFmtId="164" applyNumberFormat="0"/></cellXfs></styleSheet>"#
@@ -265,7 +240,7 @@ mod tests {
 
     #[test]
     fn reads_custom_format_by_style_index() {
-        let bytes = xlsx_with(style_sheet(), sheet_a1_s1());
+        let bytes = super::super::test_util::xlsx_with(Some(style_sheet()), sheet_a1_s1());
         let cf = CellFormats::from_ooxml(&bytes).unwrap().unwrap();
         assert_eq!(cf.code("S", 0, 0), Some("0.00%"));
     }
@@ -273,15 +248,15 @@ mod tests {
     #[test]
     fn builtin_id_resolves_without_custom_entry() {
         let styles = r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="9"/></cellXfs></styleSheet>"#;
-        let bytes = xlsx_with(styles, sheet_a1_s1());
+        let bytes = super::super::test_util::xlsx_with(Some(styles), sheet_a1_s1());
         let cf = CellFormats::from_ooxml(&bytes).unwrap().unwrap();
         assert_eq!(cf.code("S", 0, 0), Some("0%"));
     }
 
     #[test]
     fn apply_number_format_zero_treats_style_as_general() {
-        let bytes = xlsx_with(
-            style_sheet(),
+        let bytes = super::super::test_util::xlsx_with(
+            Some(style_sheet()),
             r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="2"><v>0.65</v></c></row></sheetData></worksheet>"#,
         );
         let cf = CellFormats::from_ooxml(&bytes).unwrap().unwrap();
@@ -290,8 +265,8 @@ mod tests {
 
     #[test]
     fn cells_without_style_attr_map_to_style_zero() {
-        let bytes = xlsx_with(
-            style_sheet(),
+        let bytes = super::super::test_util::xlsx_with(
+            Some(style_sheet()),
             r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>0.65</v></c></row></sheetData></worksheet>"#,
         );
         let cf = CellFormats::from_ooxml(&bytes).unwrap().unwrap();
@@ -300,8 +275,8 @@ mod tests {
 
     #[test]
     fn cells_without_r_resolve_positionally() {
-        let bytes = xlsx_with(
-            style_sheet(),
+        let bytes = super::super::test_util::xlsx_with(
+            Some(style_sheet()),
             r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c s="1"><v>0.65</v></c><c><v>2</v></c></row></sheetData></worksheet>"#,
         );
         let cf = CellFormats::from_ooxml(&bytes).unwrap().unwrap();
@@ -312,22 +287,22 @@ mod tests {
     #[test]
     fn no_styles_part_returns_none() {
         // The styles part is empty (unusable) -> Ok(None).
-        let bytes = xlsx_with("", sheet_a1_s1());
+        let bytes = super::super::test_util::xlsx_with(None, sheet_a1_s1());
         let cf = CellFormats::from_ooxml(&bytes).unwrap();
         assert!(cf.is_none());
     }
 
     #[test]
     fn malformed_styles_degrades_to_none() {
-        let bytes = xlsx_with("not xml at all {{{", sheet_a1_s1());
+        let bytes = super::super::test_util::xlsx_with(Some("not xml at all {{{"), sheet_a1_s1());
         let cf = CellFormats::from_ooxml(&bytes).unwrap();
         assert!(cf.is_none());
     }
 
     #[test]
     fn style_index_out_of_range_degrades() {
-        let bytes = xlsx_with(
-            style_sheet(),
+        let bytes = super::super::test_util::xlsx_with(
+            Some(style_sheet()),
             r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="99"><v>0.65</v></c></row></sheetData></worksheet>"#,
         );
         let cf = CellFormats::from_ooxml(&bytes).unwrap().unwrap();
@@ -336,7 +311,7 @@ mod tests {
 
     #[test]
     fn missing_sheet_name_has_no_formats() {
-        let bytes = xlsx_with(style_sheet(), sheet_a1_s1());
+        let bytes = super::super::test_util::xlsx_with(Some(style_sheet()), sheet_a1_s1());
         let cf = CellFormats::from_ooxml(&bytes).unwrap().unwrap();
         assert_eq!(cf.code("Nope", 0, 0), None);
     }
