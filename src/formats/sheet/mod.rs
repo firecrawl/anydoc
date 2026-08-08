@@ -176,7 +176,13 @@ fn format_data(data: &Data, code: Option<&str>) -> String {
             Some(rendered) => rendered,
             None => format_float(*f),
         },
-        Data::Int(i) => match code.and_then(|c| numfmt::render(*i as f64, c)) {
+        Data::Int(i) => match code.and_then(|c| {
+            // Integers beyond f64's exact range must keep their exact
+            // digits; the format path only applies when the round trip is
+            // lossless (Excel itself displays 15 significant digits).
+            let f = *i as f64;
+            (f as i64 == *i).then(|| numfmt::render(f, c)).flatten()
+        }) {
             Some(rendered) => rendered,
             None => i.to_string(),
         },
@@ -228,35 +234,80 @@ fn format_duration_days(days: f64) -> String {
 pub(crate) mod test_util {
     use std::io::Write;
 
-    /// Minimal xlsx package: workbook/rels/sheet parts, plus `styles.xml`
-    /// when `styles` is `Some`. Deterministic ZIP timestamps (pattern: the
-    /// `xlsx_with_merge` helper in this module).
+    /// Minimal xlsx package with one sheet named `S`: workbook/rels/sheet
+    /// parts, plus `styles.xml` when `styles` is `Some`. Deterministic ZIP
+    /// timestamps (pattern: the `xlsx_with_merge` helper in this module).
     pub fn xlsx_with(styles: Option<&str>, sheet: &str) -> Vec<u8> {
-        let mut parts: Vec<(&str, &str)> = vec![
+        xlsx_with_sheets(styles, &[("S", sheet)])
+    }
+
+    /// Minimal xlsx package with `(sheet name, sheet XML)` pairs; the sheet
+    /// parts are `xl/worksheets/sheet1.xml`, `sheet2.xml`, ... in order.
+    pub fn xlsx_with_sheets(styles: Option<&str>, sheets: &[(&str, &str)]) -> Vec<u8> {
+        let sheets_xml: Vec<String> = sheets
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| {
+                format!(r#"<sheet name="{name}" sheetId="{}" r:id="rId{}"/>"#, i + 1, i + 1)
+            })
+            .collect();
+        let rels_xml: Vec<String> = sheets
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                format!(
+                    r#"<Relationship Id="rId{}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{}.xml"/>"#,
+                    i + 1,
+                    i + 1
+                )
+            })
+            .collect();
+        let content_overrides: String = sheets
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                format!(
+                    r#"<Override PartName="/xl/worksheets/sheet{}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>"#,
+                    i + 1
+                )
+            })
+            .collect();
+        let mut parts: Vec<(String, String)> = vec![
             (
-                "[Content_Types].xml",
-                r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#,
+                "[Content_Types].xml".to_string(),
+                format!(
+                    r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>{content_overrides}</Types>"#
+                ),
             ),
             (
-                "_rels/.rels",
-                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
+                "_rels/.rels".to_string(),
+                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#
+                    .to_string(),
             ),
             (
-                "xl/workbook.xml",
-                r#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+                "xl/workbook.xml".to_string(),
+                format!(
+                    r#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>{}</sheets></workbook>"#,
+                    sheets_xml.join("")
+                ),
             ),
             (
-                "xl/_rels/workbook.xml.rels",
-                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+                "xl/_rels/workbook.xml.rels".to_string(),
+                format!(
+                    r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{}</Relationships>"#,
+                    rels_xml.join("")
+                ),
             ),
-            ("xl/worksheets/sheet1.xml", sheet),
         ];
+        for (i, (_, sheet)) in sheets.iter().enumerate() {
+            parts.push((format!("xl/worksheets/sheet{}.xml", i + 1), sheet.to_string()));
+        }
         if let Some(styles) = styles {
-            parts.push(("xl/styles.xml", styles));
+            parts.push(("xl/styles.xml".to_string(), styles.to_string()));
         }
         let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         for (name, body) in parts {
-            w.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            w.start_file(&name, zip::write::SimpleFileOptions::default()).unwrap();
             w.write_all(body.as_bytes()).unwrap();
         }
         w.finish().unwrap().into_inner()
@@ -415,10 +466,40 @@ mod tests {
     }
 
     #[test]
+    fn formatted_cells_align_when_the_used_range_does_not_start_at_a1() {
+        // Data starting at D11: the absolute coordinate from the cell ref
+        // (D11 -> (10, 3)) must match calamine's range start offset.
+        let styles = r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="9"/></cellXfs></styleSheet>"#;
+        let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="11"><c r="D11" s="1"><v>0.5</v></c><c r="E11" t="inlineStr"><is><t>y</t></is></c></row><row r="12"><c r="D12" t="inlineStr"><is><t>z</t></is></c><c r="E12" t="inlineStr"><is><t>w</t></is></c></row></sheetData></worksheet>"#;
+        let doc = parse(&super::test_util::xlsx_with(Some(styles), sheet)).unwrap();
+        let cells = first_table_text(&doc);
+        assert_eq!(cells[0], "50%", "D11 must render its format, got {cells:?}");
+        assert_eq!(cells[1], "y");
+        assert_eq!(cells[2], "z");
+        assert_eq!(cells[3], "w");
+    }
+
+    #[test]
+    fn large_integers_follow_calamine_precision() {
+        // calamine parses values beyond f64's exact range as Float, so the
+        // 15-significant-digit display (Excel parity) applies; a format code
+        // renders that value rather than failing. The Data::Int path keeps
+        // its own exactness guard (see format_data_uses_the_format_code).
+        let styles = r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="3"/></cellXfs></styleSheet>"#;
+        let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1"><v>9007199254740993</v></c><c r="B1" s="0"><v>9007199254740993</v></c></row></sheetData></worksheet>"#;
+        let doc = parse(&super::test_util::xlsx_with(Some(styles), sheet)).unwrap();
+        assert_eq!(first_table_text(&doc), vec!["9,007,199,254,740,992", "9007199254740990"]);
+    }
+
+    #[test]
     fn format_data_uses_the_format_code_when_present() {
         assert_eq!(format_data(&Data::Float(0.653035934239184), Some("0%")), "65%");
         assert_eq!(format_data(&Data::Float(0.653035934239184), None), "0.653035934239184");
         assert_eq!(format_data(&Data::Int(1234567), Some("#,##0")), "1,234,567");
         assert_eq!(format_data(&Data::Int(1234567), None), "1234567");
+        // Integers beyond f64's exact range keep their exact digits: the
+        // format path only applies when the i64 -> f64 round trip is lossless.
+        let big = 9_007_199_254_740_993i64;
+        assert_eq!(format_data(&Data::Int(big), Some("#,##0")), "9007199254740993");
     }
 }

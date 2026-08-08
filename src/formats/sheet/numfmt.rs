@@ -12,10 +12,15 @@ use std::collections::HashMap;
 /// Returns `None` when the code is not renderable by this pipeline:
 /// `General`, empty, date/time-like, text (`@`), or rejected by the
 /// renderer. `None` means the caller falls back to its raw rendering; a
-/// rendering attempt never fails the conversion.
+/// rendering attempt never fails the conversion. A present-but-empty
+/// selected section renders as blank (`Some("")`), matching Excel's
+/// display for `0.00;` and `0.00;;`.
 pub fn render(value: f64, code: &str) -> Option<String> {
     if !renderable_code(code) {
         return None;
+    }
+    if selected_section(code, value).is_some_and(|s| s.trim().is_empty()) {
+        return Some(String::new());
     }
     ssfmt::format(value, code, &ssfmt::FormatOptions::default()).ok()
 }
@@ -24,17 +29,13 @@ pub fn render(value: f64, code: &str) -> Option<String> {
 ///
 /// Custom ids resolve from the workbook's `numFmts` table. Builtin ids
 /// resolve through ssfmt's ECMA-376 table, filtered by the same
-/// renderability guard as custom codes, so date, text, and General ids
-/// fall through to `None` (the caller keeps today's behavior for those
-/// cell kinds) without a hand-maintained id list. Locale-currency
-/// builtins (41-44) carry a locale-dependent symbol and stay raw until
-/// locale support lands.
+/// renderability guard as custom codes, so date, text, General, and
+/// locale-currency ids (41-44, absent from ssfmt's table) fall through to
+/// `None` (the caller keeps today's behavior for those cell kinds)
+/// without a hand-maintained id list.
 pub fn code_for_style(num_fmt_id: u32, custom: &HashMap<u32, String>) -> Option<String> {
     if let Some(code) = custom.get(&num_fmt_id) {
         return renderable_code(code).then(|| code.clone());
-    }
-    if (41..=44).contains(&num_fmt_id) {
-        return None;
     }
     ssfmt::builtin_formats::format_code_from_id(num_fmt_id)
         .filter(|code| renderable_code(code))
@@ -43,12 +44,15 @@ pub fn code_for_style(num_fmt_id: u32, custom: &HashMap<u32, String>) -> Option<
 
 /// Whether a code is eligible for numeric rendering.
 ///
-/// Guards `General`, empty codes, and date/time-like codes. The date guard
-/// mirrors calamine's classifier (see `detect_custom_number_format` in
-/// calamine `formats.rs`): date letters flag only outside quoted literals,
-/// escapes, and bracket contents, so `[Red]`, `[$-409]`, and `"mm"` stay
-/// renderable while `dd/mm/yyyy` and `[h]:mm:ss` fall back to the caller
-/// (calamine already converts those cells; this guard is defensive).
+/// Guards `General`, empty codes, and date/time-like codes. Only the first
+/// `;`-separated section is scanned, mirroring calamine's classifier (see
+/// `detect_custom_number_format` in calamine `formats.rs`), which stops at
+/// the first section and converts cells only when the first section is
+/// date-like. Date letters flag only outside quoted literals, escapes, and
+/// bracket contents, so `[Red]`, `[$-409]`, and `"mm"` stay renderable
+/// while `dd/mm/yyyy` and `[h]:mm:ss` fall back to the caller (calamine
+/// already converts those cells; this guard is defensive). A fourth-section
+/// text placeholder (`0.00%;0.00%;0.00%;@`) therefore stays renderable.
 fn renderable_code(code: &str) -> bool {
     if code.is_empty() || code.eq_ignore_ascii_case("general") {
         return false;
@@ -64,7 +68,9 @@ fn renderable_code(code: &str) -> bool {
             ('"', _, true) => quoted = false,
             (_, _, true) => {}
             ('"', _, false) => quoted = true,
-            // Text placeholder: never rendered for numeric cells.
+            // Only the first section decides renderability.
+            (';', false, false) if brackets == 0 => return true,
+            // Text placeholder in the first section: never rendered.
             ('@', _, false) => return false,
             ('[', _, _) => brackets += 1,
             (']', _, _) => brackets = brackets.saturating_sub(1),
@@ -77,6 +83,41 @@ fn renderable_code(code: &str) -> bool {
         }
     }
     true
+}
+
+/// The format section Excel applies to `value`: the first for positives,
+/// the second for negatives when present, the third for zeros when present.
+fn selected_section(code: &str, value: f64) -> Option<&str> {
+    let mut sections = Vec::new();
+    let mut start = 0;
+    let mut escaped = false;
+    let mut quoted = false;
+    let mut brackets = 0u8;
+    for (i, s) in code.char_indices() {
+        match (s, escaped, quoted) {
+            (_, true, _) => escaped = false,
+            ('\\' | '_' | '*', false, false) => escaped = true,
+            ('"', _, true) => quoted = false,
+            (_, _, true) => {}
+            ('"', _, false) => quoted = true,
+            ('[', _, _) => brackets += 1,
+            (']', _, _) => brackets = brackets.saturating_sub(1),
+            (';', false, false) if brackets == 0 => {
+                sections.push(&code[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    sections.push(&code[start..]);
+    let idx = if value < 0.0 && sections.len() > 1 {
+        1
+    } else if value == 0.0 && sections.len() > 2 {
+        2
+    } else {
+        0
+    };
+    sections.get(idx).copied()
 }
 
 #[cfg(test)]
@@ -105,8 +146,8 @@ mod tests {
         assert_eq!(render(1234.5, "#,##0.00"), Some("1,234.50".to_string()));
         assert_eq!(render(1234567.0, "#,##0"), Some("1,234,567".to_string()));
         assert_eq!(render(1000.0, "#,##0"), Some("1,000".to_string()));
-        // Trailing-comma scaling: ssfmt rounds the scaled integer digits; a
-        // half-way fractional part truncates (documented renderer quirk).
+        // Trailing-comma scaling: ssfmt rounds the scaled digits; its
+        // integer fast path truncates the exact half (documented quirk).
         assert_eq!(render(1234567.9, "#,##0,"), Some("1,235".to_string()));
         assert_eq!(render(1234567.0, "#,##0,"), Some("1,234".to_string()));
     }
@@ -117,6 +158,10 @@ mod tests {
         assert_eq!(render(-1.5, "0.00"), Some("-1.50".to_string()));
         // Color brackets in the negative section render without color.
         assert_eq!(render(-1.5, "#,##0 ;[Red](#,##0)"), Some("(2)".to_string()));
+        // A present-but-empty selected section displays blank, like Excel.
+        assert_eq!(render(-1.5, "0.00;"), Some(String::new()));
+        assert_eq!(render(0.0, "0.00;;"), Some(String::new()));
+        assert_eq!(render(0.0, "0.00;0.00"), Some("0.00".to_string()));
     }
 
     #[test]
@@ -161,6 +206,13 @@ mod tests {
     #[test]
     fn text_format_falls_back() {
         assert_eq!(render(3.5, "@"), None);
+    }
+
+    #[test]
+    fn text_placeholder_in_later_sections_stays_renderable() {
+        // Only the first section decides renderability, like Excel/calamine.
+        assert_eq!(render(0.653, "0.00%;0.00%;0.00%;@"), Some("65.30%".to_string()));
+        assert_eq!(render(0.653, "0.00%;\"x\";0.00%;@"), Some("65.30%".to_string()));
     }
 
     #[test]

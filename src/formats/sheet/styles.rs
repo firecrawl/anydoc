@@ -19,6 +19,9 @@ use std::rc::Rc;
 /// SpreadsheetML main namespace.
 const X: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
+/// Per-sheet cell maps: absolute `(row, col)` -> format code.
+type CellMap = HashMap<(u32, u32), String>;
+
 /// Per-cell format codes, keyed by sheet name then absolute (row, col).
 #[derive(Debug, Default)]
 pub struct CellFormats {
@@ -47,7 +50,7 @@ impl CellFormats {
         let Some(styles) = pkg.optional_part("xl/styles.xml")? else {
             return Ok(None);
         };
-        let Some(style_codes) = parse_styles(&styles) else {
+        let Some(style_codes) = parse_styles(&styles)? else {
             log::warn!(
                 "spreadsheet: unreadable styles.xml; rendering cells without number formats"
             );
@@ -66,9 +69,14 @@ impl CellFormats {
                 log::warn!("spreadsheet: sheet part {path} missing; skipping its formats");
                 continue;
             };
-            if let Some(cells) = parse_sheet_formats(&part, &style_codes).filter(|c| !c.is_empty())
-            {
-                by_sheet.insert(name, cells);
+            match parse_sheet_formats(&part, &style_codes)? {
+                Some(cells) if !cells.is_empty() => {
+                    by_sheet.insert(name, cells);
+                }
+                None => {
+                    log::warn!("spreadsheet: unreadable sheet part {path}; skipping its formats")
+                }
+                _ => {}
             }
         }
         Ok(Some(CellFormats { by_sheet }))
@@ -82,8 +90,12 @@ impl CellFormats {
 
 /// `style_index -> format code` from `styles.xml`, or `None` when the part
 /// is structurally unusable.
-fn parse_styles(bytes: &Rc<[u8]>) -> Option<Vec<Option<String>>> {
-    let root = parse_xml(bytes).ok()?;
+fn parse_styles(bytes: &Rc<[u8]>) -> Result<Option<Vec<Option<String>>>, ConvertError> {
+    let root = match parse_xml(bytes) {
+        Ok(root) => root,
+        Err(e) if e.is_fatal() => return Err(e),
+        Err(_) => return Ok(None),
+    };
     let mut custom: HashMap<u32, String> = HashMap::new();
     for num_fmt in root.descendants(X, "numFmt") {
         let (Some(id), Some(code)) =
@@ -115,15 +127,15 @@ fn parse_styles(bytes: &Rc<[u8]>) -> Option<Vec<Option<String>>> {
     // A workbook whose styles part carries no style table has no format
     // metadata to apply (this also rejects leniently-repaired garbage).
     if xfs.is_empty() {
-        return None;
+        return Ok(None);
     }
-    Some(xfs)
+    Ok(Some(xfs))
 }
 
 /// `sheet name -> part path` from workbook.xml and its relationships, or
 /// `None` when the parts are unusable.
 fn sheet_parts(pkg: &mut Package<'_>) -> Result<Option<Vec<(String, String)>>, ConvertError> {
-    let Some(wb) = pkg.part("xl/workbook.xml")? else {
+    let Some(wb) = pkg.optional_part("xl/workbook.xml")? else {
         return Ok(None);
     };
     let Ok(root) = parse_xml(&wb) else {
@@ -158,9 +170,13 @@ fn sheet_parts(pkg: &mut Package<'_>) -> Result<Option<Vec<(String, String)>>, C
 fn parse_sheet_formats(
     bytes: &Rc<[u8]>,
     style_codes: &[Option<String>],
-) -> Option<HashMap<(u32, u32), String>> {
-    let root = parse_xml(bytes).ok()?;
-    let mut out = HashMap::new();
+) -> Result<Option<CellMap>, ConvertError> {
+    let root = match parse_xml(bytes) {
+        Ok(root) => root,
+        Err(e) if e.is_fatal() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let mut out = CellMap::new();
     // Rows are 1-based in the XML and 0-based in the caller's coordinates.
     let mut next_row = 0u32;
     for row in root.descendants(X, "row") {
@@ -196,7 +212,7 @@ fn parse_sheet_formats(
             }
         }
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 /// Parse an absolute cell reference like `A1` or `$B$12` into 0-based
@@ -210,7 +226,9 @@ fn parse_cell_ref(ref_: &str) -> Option<(u32, u32)> {
         match ch {
             '$' => {}
             'A'..='Z' | 'a'..='z' if !seen_digit => {
-                col = col * 26 + (ch.to_ascii_uppercase() as u32 - 'A' as u32 + 1);
+                col = col
+                    .checked_mul(26)
+                    .and_then(|c| c.checked_add(ch.to_ascii_uppercase() as u32 - 'A' as u32 + 1))?;
             }
             '0'..='9' => {
                 seen_digit = true;
@@ -220,7 +238,9 @@ fn parse_cell_ref(ref_: &str) -> Option<(u32, u32)> {
         }
     }
     let row: u32 = digits.parse().ok()?;
-    if col == 0 || row == 0 {
+    // Excel's largest column is XFD (16,384); anything larger is malformed
+    // and must degrade, not overflow the accumulator.
+    if col == 0 || col > 16_384 || row == 0 {
         return None;
     }
     Some((row - 1, col - 1))
@@ -314,6 +334,41 @@ mod tests {
         let bytes = super::super::test_util::xlsx_with(Some(style_sheet()), sheet_a1_s1());
         let cf = CellFormats::from_ooxml(&bytes).unwrap().unwrap();
         assert_eq!(cf.code("Nope", 0, 0), None);
+    }
+
+    #[test]
+    fn multi_sheet_workbook_maps_each_sheet_independently() {
+        let styles = r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="0.00%"/><numFmt numFmtId="165" formatCode="0.0%"/></numFmts><cellXfs count="2"><xf numFmtId="164"/><xf numFmtId="165"/></cellXfs></styleSheet>"#;
+        let sheet_a = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1"><v>0.5</v></c></row></sheetData></worksheet>"#;
+        let sheet_b = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="0"><v>0.5</v></c></row></sheetData></worksheet>"#;
+        let bytes = super::super::test_util::xlsx_with_sheets(
+            Some(styles),
+            &[("A", sheet_a), ("B", sheet_b)],
+        );
+        let cf = CellFormats::from_ooxml(&bytes).unwrap().unwrap();
+        assert_eq!(cf.code("A", 0, 0), Some("0.0%"));
+        assert_eq!(cf.code("B", 0, 0), Some("0.00%"));
+    }
+
+    #[test]
+    fn oversized_styles_part_propagates_resource_limit() {
+        // A styles.xml beyond the XML node cap is a hard error per the
+        // crate's limits policy (R9a), not a silent degrade.
+        let xfs = "<xf/>".repeat(crate::package::limits::MAX_XML_NODES + 1);
+        let styles = format!(
+            r#"<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs>{xfs}</cellXfs></styleSheet>"#
+        );
+        let bytes = super::super::test_util::xlsx_with(Some(&styles), sheet_a1_s1());
+        let err = CellFormats::from_ooxml(&bytes).unwrap_err();
+        assert!(matches!(err, ConvertError::ResourceLimit { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn absurd_cell_refs_degrade_without_overflow() {
+        assert_eq!(parse_cell_ref("ZZZZZZZ1"), None);
+        assert_eq!(parse_cell_ref("XFE1"), None);
+        assert_eq!(parse_cell_ref("XFD1"), Some((0, 16383)));
+        assert_eq!(parse_cell_ref("A4294967300"), None);
     }
 
     #[test]
