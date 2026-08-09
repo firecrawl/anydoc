@@ -1,6 +1,7 @@
 // The math frontends claim to emit LaTeX inside the subset KaTeX implements.
 // Nothing measured that claim, so this renders every equation the fixture
-// corpus produces and fails on the first one KaTeX will not accept.
+// corpus produces and fails on the first one KaTeX will not accept. Strict
+// mode is on: a construct KaTeX renders while warning is still not LaTeX.
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { extname, join } from 'node:path'
@@ -65,7 +66,7 @@ test('every equation the corpus produces renders in KaTeX', async () => {
     }
     for (const { latex, display } of equations) {
       assert.doesNotThrow(
-        () => katex.renderToString(latex, { throwOnError: true, displayMode: display }),
+        () => katex.renderToString(latex, { throwOnError: true, strict: 'error', displayMode: display }),
         `${path}: ${latex}`,
       )
       counts.set(path, (counts.get(path) ?? 0) + 1)

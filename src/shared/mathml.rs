@@ -36,7 +36,9 @@ pub(crate) fn to_inline(math: &Element, display: bool) -> Option<Inline> {
 }
 
 /// The LaTeX a `<semantics>` may carry alongside the presentation tree. It is
-/// what the author wrote, so it wins over anything derived from the layout.
+/// what the author wrote, so it wins over anything derived from the layout --
+/// but only while it can still parse, because the presentation tree beside it
+/// is a better answer than LaTeX that renders as an error message.
 fn tex_annotation(math: &Element) -> Option<String> {
     let text = math
         .descendant_elems()
@@ -46,7 +48,43 @@ fn tex_annotation(math: &Element) -> Option<String> {
         })?
         .text();
     let text = text.trim();
-    if text.is_empty() { None } else { Some(text.replace(['\n', '\r'], " ")) }
+    if text.is_empty() {
+        return None;
+    }
+    if !is_well_formed(text) {
+        log::debug!("TeX annotation cannot parse; translating the presentation tree instead");
+        return None;
+    }
+    Some(text.replace(['\n', '\r'], " "))
+}
+
+/// Not a TeX parser: the three ways an annotation can be certainly broken.
+/// Unbalanced braces and a dangling command cannot render, and a bare `$` is a
+/// delimiter inside a body that is already delimited, which ends the span
+/// early and hands the rest of the document to the Markdown parser.
+fn is_well_formed(text: &str) -> bool {
+    let mut depth = 0i32;
+    let mut escaped = false;
+    for chr in text.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match chr {
+            '\\' => escaped = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            '$' => return false,
+            _ => {}
+        }
+    }
+    // A trailing escape, script marker or open group has no argument to take.
+    depth == 0 && !escaped && !text.ends_with(['^', '_'])
 }
 
 fn emit_children(parent: &Element, out: &mut String, depth: usize) {
@@ -525,6 +563,26 @@ mod tests {
         let xml = r#"<semantics><mfrac><mn>1</mn><mn>2</mn></mfrac>
                      <annotation encoding="application/x-tex">\tfrac12</annotation></semantics>"#;
         assert_eq!(latex(xml), r"\tfrac12");
+    }
+
+    #[test]
+    fn an_annotation_that_cannot_parse_yields_to_the_presentation_tree() {
+        // Unbalanced braces, a dangling script marker, and a bare `$` -- which
+        // would close the span and hand the rest of the document away.
+        for broken in [r"\\frac{a}{b", "x^", "a$$b", "a$b", "}{"] {
+            let xml = format!(
+                r#"<semantics><mfrac><mn>1</mn><mn>2</mn></mfrac>
+                   <annotation encoding="application/x-tex">{broken}</annotation></semantics>"#
+            );
+            assert_eq!(latex(&xml), r"\frac{1}{2}", "annotation: {broken}");
+        }
+    }
+
+    #[test]
+    fn an_escaped_brace_or_dollar_does_not_count_against_the_annotation() {
+        let xml = r#"<semantics><mn>1</mn>
+                     <annotation encoding="application/x-tex">\text{\$5 \{a\}}</annotation></semantics>"#;
+        assert_eq!(latex(xml), r"\text{\$5 \{a\}}");
     }
 
     #[test]

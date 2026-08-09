@@ -28,8 +28,10 @@ pub(crate) fn push_text(text: &str, out: &mut String) {
             '#' => out.push_str("\\#"),
             '%' => out.push_str("\\%"),
             '_' => out.push_str("\\_"),
-            '^' => out.push_str("\\^{}"),
-            '~' => out.push_str("\\~{}"),
+            // `\^` and `\~` are text-mode accents; in math mode LaTeX rejects
+            // them, so a literal one is spelled as the text it is.
+            '^' => out.push_str("\\text{\\^{}}"),
+            '~' => out.push_str("\\text{\\~{}}"),
             '\n' | '\r' => out.push(' '),
             c => out.push(c),
         }
