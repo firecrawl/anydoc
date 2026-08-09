@@ -428,6 +428,12 @@ pub(super) fn walk_frame(
         .or_else(|| frame.first_descendant(ns::SVG_COMPAT, "desc").map(|d| d.text()))
         .unwrap_or_default();
     let alt = clean_text(alt.trim());
+    if let Some(object) = frame.find(ns::DRAW, "object")
+        && let Some(math) = load_formula(ctx, object)?
+    {
+        out.push(math);
+        return Ok(());
+    }
     if let Some(image) = frame.first_descendant(ns::DRAW, "image") {
         let href = image.attr(ns::XLINK, "href").unwrap_or("");
         let source = load_image(ctx, href)?;
@@ -440,6 +446,38 @@ pub(super) fn walk_frame(
         out.push(Inline::Image { alt, source: ImageSource::Unavailable });
     }
     Ok(())
+}
+
+/// A `draw:object` is a whole sub-document. When it is a formula its content
+/// is MathML, either inline in the element or in its own package directory.
+fn load_formula(ctx: &Ctx, object: &Element) -> Result<Option<Inline>, ConvertError> {
+    if let Some(math) = object.first_descendant(ns::MATHML, "math") {
+        return Ok(crate::shared::mathml::to_inline(math, false));
+    }
+    let Some(href) = object.attr(ns::XLINK, "href") else {
+        return Ok(None);
+    };
+    if href.is_empty() || crate::shared::uri::is_absolute_uri(href) {
+        return Ok(None);
+    }
+    let inner = format!("{}/content.xml", href.trim_end_matches('/'));
+    let target = match crate::package::path::resolve("content.xml", &inner) {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!("skipping unresolvable object reference {href:?}: {e}");
+            return Ok(None);
+        }
+    };
+    let Some(root) = ctx.pkg.borrow_mut().optional_xml_part(&target.path)? else {
+        log::debug!("object part {} is missing or not XML", target.path);
+        return Ok(None);
+    };
+    let math = if root.is(ns::MATHML, "math") {
+        Some(&root)
+    } else {
+        root.first_descendant(ns::MATHML, "math")
+    };
+    Ok(math.and_then(|m| crate::shared::mathml::to_inline(m, false)))
 }
 
 /// Failures degrade (log + `None`) per the unified policy; resource-limit

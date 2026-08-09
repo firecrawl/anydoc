@@ -19,5 +19,6 @@ pub mod mathml;
 pub mod mc;
 pub mod numbering;
 pub mod officeart;
+pub mod omml;
 pub mod text;
 pub mod uri;

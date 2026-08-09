@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Einstein said $E=mc^{2}$ and stopped.
+
+Inline $\sqrt{x}$ here.
+
+Missing the quadratic formula there.

@@ -2,7 +2,6 @@
 
 use crate::error::ConvertError;
 use crate::formats::docx::numbering::{Counters, Numbering};
-use crate::formats::docx::omml;
 use crate::formats::docx::styles::{Styles, on_off, rpr_delta};
 use crate::model::{
     Block, Cell, GridBuilder, ImageSource, Inline, LinkTarget, Style, TableKind, inlines_are_empty,
@@ -15,6 +14,7 @@ use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
 use crate::shared::header::resolve_header_rows;
 use crate::shared::list::{ListEntry, ListKey, flush_list};
+use crate::shared::omml;
 use crate::shared::text::{clean_text, is_xml_space};
 use std::cell::RefCell;
 use std::collections::HashMap;

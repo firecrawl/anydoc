@@ -456,10 +456,6 @@ impl Builder<'_> {
     /// tree is not; without one the characters are kept but the shape is lost.
     fn walk_math(&mut self, elem: &Element, delta: StyleDelta) -> Result<(), ConvertError> {
         let display = elem.attr_any("display") == Some("block");
-        if let Some(latex) = tex_annotation(elem) {
-            self.inlines.push(Inline::Math { latex, display });
-            return Ok(());
-        }
         if let Some(math) = mathml::to_inline(elem, display) {
             self.inlines.push(math);
             return Ok(());
@@ -701,19 +697,6 @@ impl Builder<'_> {
         table.header_rows = resolve_header_rows(&table, header_rows);
         Ok(Some(Block::Table(table)))
     }
-}
-
-/// The LaTeX an `annotation` carries, if the MathML supplies one.
-fn tex_annotation(math: &Element) -> Option<String> {
-    let text = math
-        .descendant_elems()
-        .filter(|e| e.local == "annotation")
-        .find(|e| {
-            matches!(e.attr_any("encoding"), Some("application/x-tex" | "application/x-latex"))
-        })?
-        .text();
-    let text = text.trim();
-    if text.is_empty() { None } else { Some(text.replace(['\n', '\r'], " ")) }
 }
 
 fn merge_inline_tag(elem: &Element, mut delta: StyleDelta) -> StyleDelta {

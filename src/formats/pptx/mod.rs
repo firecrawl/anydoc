@@ -20,6 +20,7 @@ use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::classify_rel_target;
 use crate::shared::header::resolve_header_rows;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
+use crate::shared::omml;
 use crate::shared::text::clean_text;
 use cascade::{Bullet, LevelStyle, Placeholder, TextProps, TitleClass};
 use std::cell::{Cell as StdCell, RefCell};
@@ -35,7 +36,7 @@ const SLIDE_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/r
 
 /// Namespaces whose markup this frontend understands; `mc:Choice` branches
 /// requiring anything else fall back to `mc:Fallback`.
-const SUPPORTED_NS: &[&str] = &[ns::P, ns::A, ns::R, ns::MC];
+const SUPPORTED_NS: &[&str] = &[ns::P, ns::A, ns::R, ns::MC, ns::A14, ns::M];
 
 struct LayoutInfo {
     placeholders: Vec<Placeholder>,
@@ -510,7 +511,28 @@ fn parse_text_body(
 
 fn parse_para_inlines(p: &Element, ctx: &SlideCtx, base: Style) -> Vec<Inline> {
     let mut out: Vec<Inline> = Vec::new();
+    push_para_inlines(p, ctx, base, &mut out);
+    out
+}
+
+fn push_para_inlines(p: &Element, ctx: &SlideCtx, base: Style, out: &mut Vec<Inline>) {
     for child in p.child_elems() {
+        // An equation arrives as a14:m, which PowerPoint wraps in an
+        // AlternateContent whose fallback is a picture of it.
+        if child.is(ns::MC, "AlternateContent") {
+            if let Some(branch) = crate::shared::mc::alternate_branch(child, SUPPORTED_NS) {
+                push_para_inlines(branch, ctx, base, out);
+            }
+            continue;
+        }
+        if child.is(ns::A14, "m") || child.is(ns::M, "oMath") {
+            let math =
+                if child.is(ns::M, "oMath") { Some(child) } else { child.find(ns::M, "oMath") };
+            if let Some(inline) = math.and_then(|m| omml::to_inline(m, false)) {
+                out.push(inline);
+            }
+            continue;
+        }
         if child.ns.as_deref().is_none_or(|n| n != ns::A) {
             continue;
         }
@@ -541,7 +563,6 @@ fn parse_para_inlines(p: &Element, ctx: &SlideCtx, base: Style) -> Vec<Inline> {
             _ => {}
         }
     }
-    out
 }
 
 fn parse_graphic_frame(

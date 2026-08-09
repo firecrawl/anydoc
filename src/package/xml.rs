@@ -23,6 +23,9 @@ pub mod ns {
     pub const WP: &str = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
     pub const MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
     pub const M: &str = "http://schemas.openxmlformats.org/officeDocument/2006/math";
+    /// DrawingML 2010 extensions, whose `a14:m` carries OMML in a shape.
+    pub const A14: &str = "http://schemas.microsoft.com/office/drawing/2010/main";
+    pub const MATHML: &str = "http://www.w3.org/1998/Math/MathML";
     pub const CHART: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
     pub const DGM: &str = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
     pub const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";

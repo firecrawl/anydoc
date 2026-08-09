@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Energy: $E=mc^{2}$ exactly.
+
+$\frac{a}{b}$

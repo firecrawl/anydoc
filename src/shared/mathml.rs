@@ -23,6 +23,9 @@ const MAX_TABLE_CELLS: usize = 10_000;
 const BIG_OPERATORS: &str = "∑∏∐∫∬∭∮∯∰⋀⋁⋂⋃⨀⨁⨂⨄⨆";
 
 pub(crate) fn to_inline(math: &Element, display: bool) -> Option<Inline> {
+    if let Some(latex) = tex_annotation(math) {
+        return Some(Inline::Math { latex, display });
+    }
     let mut out = String::new();
     emit_children(math, &mut out, 0);
     let latex = out.trim().to_string();
@@ -30,6 +33,20 @@ pub(crate) fn to_inline(math: &Element, display: bool) -> Option<Inline> {
         return None;
     }
     Some(Inline::Math { latex, display })
+}
+
+/// The LaTeX a `<semantics>` may carry alongside the presentation tree. It is
+/// what the author wrote, so it wins over anything derived from the layout.
+fn tex_annotation(math: &Element) -> Option<String> {
+    let text = math
+        .descendant_elems()
+        .filter(|e| e.local == "annotation")
+        .find(|e| {
+            matches!(e.attr_any("encoding"), Some("application/x-tex" | "application/x-latex"))
+        })?
+        .text();
+    let text = text.trim();
+    if text.is_empty() { None } else { Some(text.replace(['\n', '\r'], " ")) }
 }
 
 fn emit_children(parent: &Element, out: &mut String, depth: usize) {
@@ -504,10 +521,18 @@ mod tests {
     }
 
     #[test]
-    fn an_annotation_never_reaches_the_body() {
-        let xml = "<semantics><mn>1</mn>\
-                   <annotation encoding=\"application/x-tex\">1</annotation></semantics>";
-        assert_eq!(latex(xml), "1");
+    fn the_authors_own_latex_wins_over_the_presentation_tree() {
+        let xml = r#"<semantics><mfrac><mn>1</mn><mn>2</mn></mfrac>
+                     <annotation encoding="application/x-tex">\tfrac12</annotation></semantics>"#;
+        assert_eq!(latex(xml), r"\tfrac12");
+    }
+
+    #[test]
+    fn an_annotation_in_another_encoding_is_not_latex() {
+        // ODF writes StarMath here, which would be nonsense as LaTeX.
+        let xml = r#"<semantics><mfrac><mn>1</mn><mn>2</mn></mfrac>
+                     <annotation encoding="StarMath 5.0">1 over 2</annotation></semantics>"#;
+        assert_eq!(latex(xml), r"\frac{1}{2}");
     }
 
     #[test]

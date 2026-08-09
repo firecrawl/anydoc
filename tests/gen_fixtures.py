@@ -1081,6 +1081,71 @@ def defaults_odf():
 # what Word writes when every property takes its default and it is the shape a
 # converter is most likely to mishandle.
 
+def math_pptx():
+    """A slide whose equation is an a14:m inside an mc:AlternateContent, which
+    is how PowerPoint writes one, alongside a bare a14:m."""
+    a14 = 'xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main"'
+    mc = 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"'
+    sup = ("<m:sSup><m:e><m:r><m:t>c</m:t></m:r></m:e>"
+           "<m:sup><m:r><m:t>2</m:t></m:r></m:sup></m:sSup>")
+    frac = ("<m:f><m:num><m:r><m:t>a</m:t></m:r></m:num>"
+            "<m:den><m:r><m:t>b</m:t></m:r></m:den></m:f>")
+    slide = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld {PPTX_NS} {mc} {a14} {M}>
+<p:cSld><p:spTree><p:sp><p:txBody><a:bodyPr/>
+<a:p><a:r><a:t>Energy: </a:t></a:r>
+<mc:AlternateContent><mc:Choice Requires="a14"><a14:m><m:oMath>
+<m:r><m:t>E=m</m:t></m:r>{sup}</m:oMath></a14:m></mc:Choice>
+<mc:Fallback><a:r><a:t>[image of the equation]</a:t></a:r></mc:Fallback>
+</mc:AlternateContent><a:r><a:t> exactly.</a:t></a:r></a:p>
+<a:p><a14:m><m:oMath>{frac}</m:oMath></a14:m></a:p>
+</p:txBody></p:sp></p:spTree></p:cSld></p:sld>"""
+    presentation = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation {PPTX_NS}><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>"""
+    pres_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>"""
+    ct = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>"""
+    write_zip(OUT / "pptx" / "handmade-math.pptx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", ROOT_RELS.replace("word/document.xml", "ppt/presentation.xml")),
+        ("ppt/presentation.xml", presentation),
+        ("ppt/_rels/presentation.xml.rels", pres_rels),
+        ("ppt/slides/slide1.xml", slide),
+    ])
+
+
+def math_odt():
+    """ODF keeps a formula in a sub-document of its own: one frame references
+    it, one carries the MathML inline, and one points at a part that is not
+    there, so its alternative text has to carry the meaning."""
+    mathml = ('<?xml version="1.0" encoding="UTF-8"?>'
+              '<math xmlns="http://www.w3.org/1998/Math/MathML"><semantics>'
+              "<mrow><mi>E</mi><mo>=</mo><mi>m</mi><msup><mi>c</mi><mn>2</mn></msup></mrow>"
+              '<annotation encoding="StarMath 5.0">E = m c^2</annotation></semantics></math>')
+    content = """<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+ xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+<office:body><office:text>
+<text:p>Einstein said <draw:frame><draw:object xlink:href="./Object 1"/></draw:frame> and stopped.</text:p>
+<text:p>Inline <draw:frame><draw:object><math xmlns="http://www.w3.org/1998/Math/MathML"><msqrt><mi>x</mi></msqrt></math></draw:object></draw:frame> here.</text:p>
+<text:p>Missing <draw:frame><svg:title>the quadratic formula</svg:title><draw:object xlink:href="./Object 9"/></draw:frame> there.</text:p>
+</office:text></office:body></office:document-content>"""
+    write_zip(OUT / "odt" / "handmade-math.odt",
+              [("content.xml", content), ("Object 1/content.xml", mathml)],
+              mimetype_first="application/vnd.oasis.opendocument.text")
+
+
 def math_docx():
     def r(text):
         return f'<m:r><m:t>{text}</m:t></m:r>'
@@ -2123,6 +2188,8 @@ def main():
     script_ppt()
     tables_docx()
     math_docx()
+    math_pptx()
+    math_odt()
     outline_docx()
     blockstyle_docx()
     blockstyle_odt()
