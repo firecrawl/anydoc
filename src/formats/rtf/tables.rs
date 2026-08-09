@@ -2,6 +2,7 @@
 //! per-font charsets), the style sheet, and the list/list-override tables.
 
 use crate::formats::rtf::lexer::{Lexer, Token, destination_groups};
+use crate::model::VertAlign;
 use crate::shared::blockstyle::{self, BlockStyle};
 use crate::shared::delta::StyleDelta;
 use crate::shared::list::MarkerKind;
@@ -212,6 +213,15 @@ fn parse_stylesheet(
                 "i" => {
                     if let Some((_, def, _)) = current.as_mut() {
                         def.delta.italic = Some(param != Some(0));
+                    }
+                }
+                "super" | "sub" | "nosupersub" => {
+                    if let Some((_, def, _)) = current.as_mut() {
+                        def.delta.vert_align = Some(match (word, param) {
+                            (_, Some(0)) | ("nosupersub", _) => VertAlign::Baseline,
+                            ("super", _) => VertAlign::Superscript,
+                            _ => VertAlign::Subscript,
+                        });
                     }
                 }
                 _ => {}

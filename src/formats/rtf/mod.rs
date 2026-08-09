@@ -8,7 +8,7 @@ mod table;
 mod tables;
 
 use crate::error::ConvertError;
-use crate::model::{Block, Document, Inline, Note, NoteKind, Style, inlines_are_empty};
+use crate::model::{Block, Document, Inline, Note, NoteKind, Style, VertAlign, inlines_are_empty};
 use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::field_result;
@@ -549,6 +549,23 @@ impl<'a> Parser<'a> {
             "b" => self.set_style(|s| s.bold = on),
             "i" => self.set_style(|s| s.italic = on),
             "strike" | "striked" => self.set_style(|s| s.strike = on),
+            "super" => {
+                self.set_vert_align(if on { VertAlign::Superscript } else { VertAlign::Baseline })
+            }
+            "sub" => {
+                self.set_vert_align(if on { VertAlign::Subscript } else { VertAlign::Baseline })
+            }
+            "nosupersub" => self.set_vert_align(VertAlign::Baseline),
+            // \upN and \dnN carry an offset in half-points rather than a
+            // toggle, and the spec's default of 6 applies when it is absent.
+            "up" | "dn" => {
+                let raised = word == "up";
+                self.set_vert_align(match param.unwrap_or(6) {
+                    0 => VertAlign::Baseline,
+                    _ if raised => VertAlign::Superscript,
+                    _ => VertAlign::Subscript,
+                })
+            }
             "plain" => {
                 self.flush_pending();
                 let font = self.state.font;
@@ -819,6 +836,10 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn set_vert_align(&mut self, vert_align: VertAlign) {
+        self.set_style(|s| s.vert_align = vert_align);
+    }
+
     fn set_style(&mut self, f: impl FnOnce(&mut Style)) {
         self.flush_pending();
         f(&mut self.state.style);
@@ -1047,6 +1068,28 @@ mod tests {
         let Block::List(list) = &doc.blocks[0] else { panic!("{:?}", doc.blocks) };
         assert_eq!(list.items[0].marker_label.as_deref(), Some("1."));
         assert_eq!(list.items[1].marker_label.as_deref(), Some("2."));
+    }
+
+    #[test]
+    fn scripts_survive_as_scripts() {
+        let src = r"{\rtf1 H\sub 2\nosupersub O and 10\super -3\nosupersub  mol\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(markdown, "H<sub>2</sub>O and 10<sup>-3</sup> mol\n");
+    }
+
+    #[test]
+    fn a_half_point_offset_says_which_way_and_zero_says_neither() {
+        // \upN and \dnN carry an offset, not a toggle: only 0 is the baseline.
+        let src = r"{\rtf1 a\up6 b\up0 c\dn4 d\plain e\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(markdown, "a<sup>b</sup>c<sub>d</sub>e\n");
+    }
+
+    #[test]
+    fn a_paragraph_style_can_carry_the_script() {
+        let src = r"{\rtf1{\stylesheet{\s15\super Raised;}}\pard\s15 note\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(markdown, "<sup>note</sup>\n");
     }
 
     #[test]
