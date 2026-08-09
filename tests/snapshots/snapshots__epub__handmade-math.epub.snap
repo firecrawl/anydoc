@@ -8,7 +8,7 @@ expression: output
 
 Annotated: $\frac{a}{b} + x^2$ follows.
 
-Bare presentation: x2 follows.
+Bare presentation: $x^{2}$ follows.
 
 Block: $$E = mc^2$$
 

@@ -14,6 +14,7 @@ use crate::model::{
 use crate::package::xml::{Element, Node};
 use crate::shared::delta::{StyleDelta, rebase_emphasis};
 use crate::shared::header::resolve_header_rows;
+use crate::shared::mathml;
 use crate::shared::text::{clean_text, collapse_ws};
 use std::collections::HashMap;
 
@@ -459,7 +460,10 @@ impl Builder<'_> {
             self.inlines.push(Inline::Math { latex, display });
             return Ok(());
         }
-        log::debug!("MathML without a TeX annotation; keeping its characters only");
+        if let Some(math) = mathml::to_inline(elem, display) {
+            self.inlines.push(math);
+            return Ok(());
+        }
         self.walk_children(elem, delta)
     }
 
