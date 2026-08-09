@@ -46,6 +46,17 @@ fn lone_syntax_chars_left_alone() {
 }
 
 #[test]
+fn paired_dollars_escaped_lone_dollar_kept() {
+    // A pair delimits math for renderers that support it, so document text that
+    // happens to hold two dollars would be read as an equation.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("costs $100 and $80 total")])]);
+    assert_eq!(md, "costs \\$100 and $80 total\n");
+    // One dollar opens nothing; the common currency case stays literal.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("costs $100 total")])]);
+    assert_eq!(md, "costs $100 total\n");
+}
+
+#[test]
 fn intraword_underscores_unescaped() {
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("snake_case_name vs _lead_")])]);
     assert_eq!(md, "snake_case_name vs \\_lead_\n");

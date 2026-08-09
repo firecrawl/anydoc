@@ -33,7 +33,7 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
     let EscapeOpts { at_line_start, styled, trailing_active, in_label } = opts;
     let chars: Vec<char> = text.chars().collect();
     // Last position of each pairable delimiter; a lone one is inert.
-    let mut last: [Option<usize>; 5] = [None; 5]; // * _ ~ ` ]
+    let mut last: [Option<usize>; 6] = [None; 6]; // * _ ~ ` ] $
     for (j, &c) in chars.iter().enumerate() {
         match c {
             '*' => last[0] = Some(j),
@@ -41,6 +41,7 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
             '~' => last[2] = Some(j),
             '`' => last[3] = Some(j),
             ']' => last[4] = Some(j),
+            '$' => last[5] = Some(j),
             _ => {}
         }
     }
@@ -76,6 +77,10 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
                 styled || (next_nonspace && !(prev_alnum && next_alnum) && paired(1))
             }
             '~' => styled || (next_nonspace && paired(2)),
+            // A dollar pair delimits math for every renderer that supports it, so document
+            // text like `$5 and $10` is otherwise read as an equation. A lone `$` opens
+            // nothing and stays literal, which keeps the common currency case unescaped.
+            '$' => paired(5),
             '[' => in_label || paired(4),
             '<' => next.is_some_and(|n| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?')),
             '!' => next.is_none() && trailing_active,
