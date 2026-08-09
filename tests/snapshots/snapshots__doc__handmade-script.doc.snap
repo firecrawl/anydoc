@@ -1,0 +1,5 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+H<sub>2</sub>O and 10<sup>-3</sup> mol and x<sup>2</sup>.

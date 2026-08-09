@@ -2,7 +2,7 @@
 //! character toggles resolve against the style-chain base (0 = off, 1 = on,
 //! 0x80 = style's value, 0x81 = style's value inverted).
 
-use crate::model::Style;
+use crate::model::{Style, VertAlign};
 use crate::shared::binary::{get_u16, get_u32};
 
 fn sprm_operand_len(sprm: u16, operand: &[u8]) -> usize {
@@ -33,6 +33,10 @@ pub fn walk_sprms(grpprl: &[u8], mut f: impl FnMut(u16, &[u8])) {
         f(sprm, operand);
         pos += len;
     }
+}
+
+fn get_i16(operand: &[u8], at: usize) -> Option<i16> {
+    operand.get(at..at + 2).map(|b| i16::from_le_bytes([b[0], b[1]]))
 }
 
 /// Resolve a toggle operand against the style-chain base value.
@@ -88,6 +92,28 @@ pub fn apply_chpx(grpprl: &[u8], current: Style, style_base: Style) -> Style {
         0x0837 => {
             if let Some(v) = toggle(operand, style_base.strike) {
                 style.strike = v;
+            }
+        }
+        // sprmCIss: 0 none, 1 superscript, 2 subscript. Not a toggle, so it
+        // resolves against nothing and simply sets.
+        0x2A48 => {
+            if let Some(&iss) = operand.first() {
+                style.vert_align = match iss {
+                    1 => VertAlign::Superscript,
+                    2 => VertAlign::Subscript,
+                    _ => VertAlign::Baseline,
+                };
+            }
+        }
+        // sprmCHpsPos: a signed half-point offset from the baseline, which is
+        // how Word records "raised/lowered by" rather than the checkbox.
+        0x4845 => {
+            if let Some(pos) = get_i16(operand, 0) {
+                style.vert_align = match pos {
+                    0 => VertAlign::Baseline,
+                    pos if pos > 0 => VertAlign::Superscript,
+                    _ => VertAlign::Subscript,
+                };
             }
         }
         _ => {}
@@ -248,4 +274,50 @@ fn parse_tdef_table(operand: &[u8]) -> Option<Tap> {
 /// parent's value is the base for its toggles.
 pub fn apply_style_chpx(grpprl: &[u8], parent: Style) -> Style {
     apply_chpx(grpprl, parent, parent)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chpx(sprm: u16, operand: &[u8]) -> Vec<u8> {
+        let mut out = sprm.to_le_bytes().to_vec();
+        out.extend_from_slice(operand);
+        out
+    }
+
+    #[test]
+    fn sprm_ciss_says_which_way_and_zero_says_neither() {
+        for (iss, expected) in
+            [(0u8, VertAlign::Baseline), (1, VertAlign::Superscript), (2, VertAlign::Subscript)]
+        {
+            let style = apply_chpx(&chpx(0x2A48, &[iss]), Style::PLAIN, Style::PLAIN);
+            assert_eq!(style.vert_align, expected, "iss {iss}");
+        }
+    }
+
+    #[test]
+    fn sprm_chpspos_reads_the_sign_of_the_offset() {
+        for (offset, expected) in
+            [(0i16, VertAlign::Baseline), (6, VertAlign::Superscript), (-6, VertAlign::Subscript)]
+        {
+            let style =
+                apply_chpx(&chpx(0x4845, &offset.to_le_bytes()), Style::PLAIN, Style::PLAIN);
+            assert_eq!(style.vert_align, expected, "offset {offset}");
+        }
+    }
+
+    #[test]
+    fn a_script_sprm_leaves_the_other_properties_alone() {
+        let base = Style { bold: true, ..Style::PLAIN };
+        let style = apply_chpx(&chpx(0x2A48, &[1]), base, base);
+        assert!(style.bold);
+        assert_eq!(style.vert_align, VertAlign::Superscript);
+    }
+
+    #[test]
+    fn a_truncated_operand_changes_nothing() {
+        let style = apply_chpx(&[0x45, 0x48, 0x06], Style::PLAIN, Style::PLAIN);
+        assert_eq!(style.vert_align, VertAlign::Baseline);
+    }
 }

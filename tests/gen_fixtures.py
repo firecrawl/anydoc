@@ -1455,6 +1455,61 @@ def blockstyle_doc():
               [("0Table", stsh + plcf), ("WordDocument", bytes(word_doc))])
 
 
+def script_doc():
+    """Binary .doc whose CHPX FKP page carries sprmCIss and sprmCHpsPos."""
+    text = "H2O and 10-3 mol and x2.\r".encode("cp1252")
+
+    def chpx(*sprms):
+        out = b""
+        for sprm, operand in sprms:
+            out += struct.pack("<H", sprm) + operand
+        return out
+
+    SUPER = chpx((0x2A48, b"\x01"))          # sprmCIss: superscript
+    SUB = chpx((0x2A48, b"\x02"))            # sprmCIss: subscript
+    RAISED = chpx((0x4845, struct.pack("<h", 6)))   # sprmCHpsPos: +3pt
+    NONE = chpx((0x2A48, b"\x00"))
+
+    # (character count, chpx) in text order: the 2 of H2O, the -3 of 10-3, and
+    # the 2 of x2 -- the last raised by offset rather than by the property.
+    runs = [(1, NONE), (1, SUB), (8, NONE), (2, SUPER), (10, NONE), (1, RAISED), (2, NONE)]
+    assert sum(count for count, _ in runs) == len(text)
+
+    fkp = bytearray(512)
+    fc = 0x400
+    bounds = [fc]
+    for count, _ in runs:
+        fc += count
+        bounds.append(fc)
+    for i, b in enumerate(bounds):
+        struct.pack_into("<I", fkp, i * 4, b)
+    count = len(runs)
+    # Each CHPX blob is a cb byte then the grpprl, addressed in words.
+    off = (count + 1) * 4 + count
+    off += off % 2
+    blob_at = {}
+    for _, grpprl in runs:
+        if grpprl in blob_at:
+            continue
+        fkp[off] = len(grpprl)
+        fkp[off + 1 : off + 1 + len(grpprl)] = grpprl
+        blob_at[grpprl] = off // 2
+        off += 2 * ((1 + len(grpprl) + 1) // 2)
+    for k, (_, grpprl) in enumerate(runs):
+        fkp[(count + 1) * 4 + k] = blob_at[grpprl]
+    fkp[511] = count
+
+    PN = 3
+    word_doc = bytearray(word_doc_stream(0x0409, text))
+    word_doc += b"\x00" * (PN * 512 - len(word_doc))
+    word_doc += fkp
+    plcf = struct.pack("<II", 0x400, bounds[-1]) + struct.pack("<I", PN)
+    struct.pack_into("<II", word_doc, 0xFA, 0, len(plcf))   # fcPlcfbteChpx
+
+    write_cfb(OUT / "doc" / "handmade-script.doc",
+              [("0Table", plcf), ("WordDocument", bytes(word_doc))])
+
+
 def blockstyle_docx():
     def p(text, style, runs=None):
         body = runs or f'<w:r><w:t xml:space="preserve">{text}</w:t></w:r>'
@@ -1560,6 +1615,58 @@ def multimaster_ppt():
 # S20: notes pages pair to slides via NotesAtom.slideIdRef, not list order -
 # this deck has notes only on the SECOND slide, which order-based zipping
 # would misattribute to the first.
+
+def script_ppt():
+    """Deck whose StyleTextPropAtom carries the position field: the run's
+    baseline offset as a signed percentage of the font size."""
+    text = "H2O and 10-3 mol\r"
+
+    def para_run(count):
+        return struct.pack("<IHI", count, 0, 0)          # count, depth, empty PF mask
+
+    def char_run(count, position=None):
+        if position is None:
+            return struct.pack("<II", count, 0)
+        return struct.pack("<II", count, 0x0008_0000) + struct.pack("<h", position)
+
+    # Runs cover the text plus the implicit final paragraph mark.
+    style = para_run(len(text) + 1) + b"".join([
+        char_run(1),
+        char_run(1, -25),        # the 2 of H2O
+        char_run(8),
+        char_run(2, 30),         # the -3 of 10-3
+        char_run(6),
+    ])
+
+    def slide():
+        slide_atom = ppt_rec(2, 0x03EF, struct.pack("<I", 0) + b"\x00" * 8
+                             + struct.pack("<IIHH", 0, 0, 0, 0))
+        th = ppt_rec(0, 0x0F9F, struct.pack("<I", 1))
+        tb = ppt_rec(0, 0x0FA8, text.encode("ascii"))
+        st = ppt_rec(0, 0x0FA1, style)
+        return ppt_container(0, 0x03EE, slide_atom + th + tb + st)
+
+    def persist_atom(persist_ref, sid):
+        return ppt_rec(0, 0x03F3, struct.pack("<IIIII", persist_ref, 0, 0, sid, 0))
+
+    doc = ppt_container(0, 0x03E8, ppt_container(0, 0x0FF0, persist_atom(2, 256)))
+    stream = b""
+    offsets = {}
+    for pid, blob in [(1, doc), (2, slide())]:
+        offsets[pid] = len(stream)
+        stream += blob
+    entries = struct.pack("<I", 1 | (2 << 20)) + struct.pack(
+        "<2I", *(offsets[i] for i in range(1, 3)))
+    off_dir = len(stream)
+    stream += ppt_rec(0, 0x1772, entries)
+    off_edit = len(stream)
+    stream += ppt_rec(0, 0x0FF5, struct.pack("<IIIIIIHH", 0, 0, 0, off_dir, 1, 3, 0, 0))
+    current_user = ppt_rec(0, 0x0FF6, struct.pack("<III", 20, 0xE391C05F, off_edit))
+    write_cfb(OUT / "ppt" / "handmade-script.ppt", [
+        ("Current User", current_user),
+        ("PowerPoint Document", stream),
+    ])
+
 
 def sparsenotes_ppt():
     def slide(text):
@@ -2013,6 +2120,7 @@ def main():
     merge_rtf()
     multimaster_ppt()
     sparsenotes_ppt()
+    script_ppt()
     tables_docx()
     math_docx()
     outline_docx()
@@ -2020,6 +2128,7 @@ def main():
     blockstyle_odt()
     blockstyle_rtf()
     blockstyle_doc()
+    script_doc()
     ole_docx()
     links_pptx()
     manyrefs_docx()

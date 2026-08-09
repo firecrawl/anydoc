@@ -552,7 +552,7 @@ impl Extractor {
                 italic: char_run.and_then(|r| r.italic).or(d.italic).unwrap_or(false),
                 strike: false,
                 code: false,
-                vert_align: VertAlign::Baseline,
+                vert_align: char_run.and_then(|r| r.vert_align).unwrap_or(VertAlign::Baseline),
             };
             if c == '\r' {
                 if !run_text.is_empty() {

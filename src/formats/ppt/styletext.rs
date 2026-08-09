@@ -3,6 +3,7 @@
 //! TextPFException / TextCFException layouts. Parsing is defensive - a
 //! malformed exception aborts styling for that atom (logged), never the text.
 
+use crate::model::VertAlign;
 use crate::shared::binary::{get_u16, get_u32};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -20,6 +21,7 @@ pub struct CharProps {
     pub count: usize,
     pub bold: Option<bool>,
     pub italic: Option<bool>,
+    pub vert_align: Option<VertAlign>,
 }
 
 /// One indent level's defaults from a `TxMasterStyleAtom`, tri-state.
@@ -72,7 +74,12 @@ pub fn parse_style_text(body: &[u8], text_len: usize) -> StyleRuns {
             break;
         };
         pos = next;
-        runs.chars.push(CharProps { count, bold: cf.bold, italic: cf.italic });
+        runs.chars.push(CharProps {
+            count,
+            bold: cf.bold,
+            italic: cf.italic,
+            vert_align: cf.vert_align,
+        });
         covered += count;
         if count == 0 {
             break;
@@ -156,6 +163,7 @@ fn parse_pf_exception(body: &[u8], mut pos: usize) -> Option<(Option<bool>, usiz
 struct CfStyle {
     bold: Option<bool>,
     italic: Option<bool>,
+    vert_align: Option<VertAlign>,
 }
 
 /// TextCFException: mask (+ optional style bitfield) + sized fields. Each
@@ -194,13 +202,20 @@ fn parse_cf_exception(body: &[u8], mut pos: usize) -> Option<(CfStyle, usize)> {
     if mask & 0x0004_0000 != 0 {
         pos += 4; // color
     }
+    // position: the baseline offset as a signed percentage of the font size.
+    let mut vert_align = None;
     if mask & 0x0008_0000 != 0 {
-        pos += 2; // position
+        vert_align = Some(match get_u16(body, pos)? as i16 {
+            0 => VertAlign::Baseline,
+            offset if offset > 0 => VertAlign::Superscript,
+            _ => VertAlign::Subscript,
+        });
+        pos += 2;
     }
     if pos > body.len() {
         return None;
     }
-    Some((CfStyle { bold, italic }, pos))
+    Some((CfStyle { bold, italic, vert_align }, pos))
 }
 
 /// A `TxMasterStyleAtom`: per-indent-level tri-state defaults
@@ -228,4 +243,33 @@ pub fn parse_master_style(body: &[u8], instance: u16) -> Vec<MasterLevel> {
         out.push(MasterLevel { bullet, bold: cf.bold, italic: cf.italic });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A TextCFException carrying only the position field.
+    fn exception(position: i16) -> Vec<u8> {
+        let mut out = 0x0008_0000u32.to_le_bytes().to_vec();
+        out.extend_from_slice(&position.to_le_bytes());
+        out
+    }
+
+    #[test]
+    fn the_position_percentage_says_which_side_of_the_baseline() {
+        for (position, expected) in
+            [(0i16, VertAlign::Baseline), (30, VertAlign::Superscript), (-25, VertAlign::Subscript)]
+        {
+            let (style, pos) = parse_cf_exception(&exception(position), 0).unwrap();
+            assert_eq!(style.vert_align, Some(expected), "position {position}");
+            assert_eq!(pos, 6);
+        }
+    }
+
+    #[test]
+    fn an_absent_position_leaves_the_run_where_the_master_put_it() {
+        let (style, _) = parse_cf_exception(&0u32.to_le_bytes(), 0).unwrap();
+        assert_eq!(style.vert_align, None);
+    }
 }
