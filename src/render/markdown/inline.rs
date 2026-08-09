@@ -1,6 +1,6 @@
 //! Inline run normalization and rendering.
 
-use crate::model::{ImageSource, Inline, LinkTarget, Style, inlines_are_empty};
+use crate::model::{ImageSource, Inline, LinkTarget, Style, VertAlign, inlines_are_empty};
 use crate::render::markdown::Ctx;
 use crate::render::markdown::escape::{
     EscapeOpts, InlineContext, backtick_fence, escape_text, escape_url_as_text, format_url,
@@ -14,6 +14,7 @@ pub(crate) enum Norm<'a> {
     Image { alt: &'a str, source: &'a ImageSource },
     Anchor(&'a str),
     NoteRef(&'a str),
+    Math { latex: &'a str, display: bool },
     LineBreak,
 }
 
@@ -72,6 +73,7 @@ pub(crate) fn normalize<'a>(inlines: &'a [Inline], rc: &Ctx) -> Vec<Norm<'a>> {
             Inline::Anchor(id) if rc.anchors.html_id(id).is_none() => continue,
             Inline::Anchor(id) => out.push(Norm::Anchor(id)),
             Inline::NoteRef(id) => out.push(Norm::NoteRef(id)),
+            Inline::Math { latex, display } => out.push(Norm::Math { latex, display: *display }),
             Inline::LineBreak => out.push(Norm::LineBreak),
         }
     }
@@ -90,7 +92,12 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
             Norm::Text { text, style } => {
                 let next_active = matches!(
                     runs.get(idx + 1),
-                    Some(Norm::Link { .. } | Norm::Image { .. } | Norm::NoteRef(_))
+                    Some(
+                        Norm::Link { .. }
+                            | Norm::Image { .. }
+                            | Norm::NoteRef(_)
+                            | Norm::Math { .. }
+                    )
                 ) || matches!(
                     runs.get(idx + 1),
                     Some(Norm::Text { style, .. }) if *style != Style::PLAIN
@@ -108,6 +115,14 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
                 if let Some(html_id) = rc.anchors.html_id(id) {
                     let _ = write!(out, "<a id=\"{html_id}\"></a>");
                 }
+            }
+            // The only payload that reaches the output unescaped: `escape_text`
+            // would destroy every command. The producer keeps the body newline-free.
+            Norm::Math { latex, display } => {
+                // Markdown math parsers ignore `\$` when scanning for the close,
+                // so a body holding a dollar needs the longer fence.
+                let fence = if *display || latex.contains('$') { "$$" } else { "$" };
+                let _ = write!(out, "{fence}{latex}{fence}");
             }
             Norm::LineBreak => match ctx {
                 InlineContext::Block => out.push_str("\\\n"),
@@ -204,6 +219,14 @@ fn render_text_run(
         out.push_str(lead);
     }
     if !core.is_empty() {
+        // Markdown has no super/subscript syntax; GFM inline HTML is the only
+        // way to say it, and dropping it changes a value (`10-3` for `10⁻³`).
+        let (raise_open, raise_close) = match style.vert_align {
+            VertAlign::Superscript => ("<sup>", "</sup>"),
+            VertAlign::Subscript => ("<sub>", "</sub>"),
+            VertAlign::Baseline => ("", ""),
+        };
+        out.push_str(raise_open);
         if style.code {
             push_code_span(core, out);
         } else {
@@ -222,10 +245,13 @@ fn render_text_run(
             out.push_str(&escape_text(
                 core,
                 ctx,
-                EscapeOpts { styled: true, in_label, ..Default::default() },
+                // `styled` means "inside emphasis delimiters", which a raised
+                // but otherwise plain run has none of.
+                EscapeOpts { styled: !open.is_empty(), in_label, ..Default::default() },
             ));
             out.push_str(&close);
         }
+        out.push_str(raise_close);
     }
     if !trail.is_empty() {
         out.push_str(trail);

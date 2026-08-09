@@ -173,6 +173,7 @@ def write_zip(path, entries, mimetype_first=None):
 
 W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 R = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+M = 'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"'
 
 CONTENT_TYPES_BASE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -1033,6 +1034,65 @@ def defaults_odf():
 
 # ---------------------------------------------------------------------------
 # R15: DOCX gridBefore/gridAfter, legacy hMerge, ST_OnOff tblHeader
+
+# ---------------------------------------------------------------------------
+# Office Math: the OMML constructs Word's equation editor emits, plus the
+# w:vertAlign runs that carry super/subscript outside an equation. Property
+# elements are omitted wherever the spec makes them optional, because that is
+# what Word writes when every property takes its default and it is the shape a
+# converter is most likely to mishandle.
+
+def math_docx():
+    def r(text):
+        return f'<m:r><m:t>{text}</m:t></m:r>'
+
+    def arg(name, text):
+        return f'<m:{name}>{r(text)}</m:{name}>'
+
+    inline = (
+        # No m:fPr: the fraction takes its default bar form.
+        '<m:f><m:num>' + r("a") + '</m:num><m:den>' + r("b") + '</m:den></m:f>'
+        + r("+")
+        # A script whose base is itself a script must brace, or LaTeX reads a
+        # double superscript.
+        + '<m:sSup><m:e><m:sSup><m:e>' + r("y") + '</m:e>' + arg("sup", "2")
+        + '</m:sSup></m:e>' + arg("sup", "3") + '</m:sSup>'
+        # No m:dPr: the delimiter takes its default parentheses.
+        + '<m:d><m:e>' + r("x,y") + '</m:e></m:d>'
+        + '<m:rad><m:deg/><m:e>' + r("z") + '</m:e></m:rad>'
+    )
+    # No m:naryPr: the n-ary operator defaults to the integral, not the sum.
+    display = (
+        '<m:oMathPara><m:oMath>'
+        '<m:nary><m:naryPr><m:chr m:val="&#8721;"/></m:naryPr>'
+        + arg("sub", "i=1") + arg("sup", "n")
+        + '<m:e><m:sSub><m:e>' + r("x") + '</m:e>' + arg("sub", "i") + '</m:sSub></m:e>'
+        '</m:nary></m:oMath></m:oMathPara>'
+    )
+
+    def raised(text, val):
+        return (f'<w:r><w:rPr><w:vertAlign w:val="{val}"/></w:rPr>'
+                f'<w:t xml:space="preserve">{text}</w:t></w:r>')
+
+    document = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document {W} {M}><w:body>
+<w:p><w:r><w:t xml:space="preserve">Inline </w:t></w:r><m:oMath>{inline}</m:oMath>
+<w:r><w:t xml:space="preserve"> done.</w:t></w:r></w:p>
+{display}
+<w:p><w:r><w:t xml:space="preserve">Concentration 10</w:t></w:r>{raised("-3", "superscript")}
+<w:r><w:t xml:space="preserve"> mol/L of H</w:t></w:r>{raised("2", "subscript")}
+<w:r><w:t xml:space="preserve">O costs $100 and $80.</w:t></w:r></w:p>
+</w:body></w:document>"""
+    styles = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              f'<w:styles {W}>'
+              '<w:docDefaults><w:rPrDefault><w:rPr/></w:rPrDefault></w:docDefaults></w:styles>')
+    write_zip(OUT / "docx" / "handmade-math.docx", [
+        ("[Content_Types].xml", CONTENT_TYPES_BASE.format(extra="")),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/document.xml", document),
+        ("word/styles.xml", styles),
+    ])
+
 
 def tables_docx():
     def tc(text, extra=""):
@@ -1915,6 +1975,7 @@ def main():
     multimaster_ppt()
     sparsenotes_ppt()
     tables_docx()
+    math_docx()
     outline_docx()
     blockstyle_docx()
     blockstyle_odt()

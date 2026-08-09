@@ -100,6 +100,7 @@ pub enum InlineKind {
     anchor,
     noteRef,
     lineBreak,
+    math,
 }
 
 #[napi(object)]
@@ -121,6 +122,10 @@ pub struct Inline {
     pub anchor: Option<String>,
     /// noteRef: the id of the note in `Document.notes`.
     pub note_id: Option<String>,
+    /// math: the expression as LaTeX, without delimiters.
+    pub latex: Option<String>,
+    /// math: true for an equation that stands on its own line.
+    pub display: Option<bool>,
 }
 
 impl Inline {
@@ -135,6 +140,8 @@ impl Inline {
             source: None,
             anchor: None,
             note_id: None,
+            latex: None,
+            display: None,
         }
     }
 }
@@ -163,6 +170,11 @@ impl From<model::Inline> for Inline {
             model::Inline::NoteRef(id) => {
                 Inline { note_id: Some(id), ..Inline::of(InlineKind::noteRef) }
             }
+            model::Inline::Math { latex, display } => Inline {
+                latex: Some(latex),
+                display: Some(display),
+                ..Inline::of(InlineKind::math)
+            },
             model::Inline::LineBreak => Inline::of(InlineKind::lineBreak),
         }
     }
@@ -175,11 +187,19 @@ pub struct Style {
     pub italic: bool,
     pub strike: bool,
     pub code: bool,
+    /// `baseline`, `superscript` or `subscript`.
+    pub vert_align: String,
 }
 
 impl From<model::Style> for Style {
     fn from(style: model::Style) -> Self {
-        Style { bold: style.bold, italic: style.italic, strike: style.strike, code: style.code }
+        Style {
+            bold: style.bold,
+            italic: style.italic,
+            strike: style.strike,
+            code: style.code,
+            vert_align: style.vert_align.as_str().into(),
+        }
     }
 }
 

@@ -20,8 +20,8 @@ fn table_from(rows: Vec<Vec<Cell>>, header_rows: usize) -> Block {
     Block::Table(Table::from_rows(rows, header_rows, TableKind::Data))
 }
 
-const BOLD: Style = Style { bold: true, italic: false, strike: false, code: false };
-const ITALIC: Style = Style { bold: false, italic: true, strike: false, code: false };
+const BOLD: Style = Style { bold: true, ..Style::PLAIN };
+const ITALIC: Style = Style { italic: true, ..Style::PLAIN };
 
 #[test]
 fn heading_and_paragraph() {
@@ -47,13 +47,27 @@ fn lone_syntax_chars_left_alone() {
 
 #[test]
 fn paired_dollars_escaped_lone_dollar_kept() {
-    // A pair delimits math for renderers that support it, so document text that
-    // happens to hold two dollars would be read as an equation.
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("costs $100 and $80 total")])]);
     assert_eq!(md, "costs \\$100 and $80 total\n");
-    // One dollar opens nothing; the common currency case stays literal.
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("costs $100 total")])]);
     assert_eq!(md, "costs $100 total\n");
+}
+
+#[test]
+fn math_renders_between_dollars_without_escaping() {
+    let math = |latex: &str, display| Inline::Math { latex: latex.into(), display };
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("see "), math(r"\frac{a}{b}", false)])]);
+    assert_eq!(md, "see $\\frac{a}{b}$\n");
+    let md = doc(vec![Block::Paragraph(vec![math(r"\sum_{i=1}^{n}", true)])]);
+    assert_eq!(md, "$$\\sum_{i=1}^{n}$$\n");
+}
+
+#[test]
+fn math_holding_a_dollar_takes_the_longer_fence() {
+    // Markdown math parsers end the span at a backslash-escaped dollar.
+    let md =
+        doc(vec![Block::Paragraph(vec![Inline::Math { latex: r"a\$b".into(), display: false }])]);
+    assert_eq!(md, "$$a\\$b$$\n");
 }
 
 #[test]
@@ -120,7 +134,7 @@ fn adjacent_same_style_runs_merged() {
 fn bold_italic_combo() {
     let md = doc(vec![Block::Paragraph(vec![styled(
         "both",
-        Style { bold: true, italic: true, strike: false, code: false },
+        Style { bold: true, italic: true, ..Style::PLAIN },
     )])]);
     assert_eq!(md, "***both***\n");
 }

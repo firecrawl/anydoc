@@ -18,7 +18,7 @@ pub use block::Block;
 pub use inline::{Inline, inlines_are_empty, inlines_to_plain_text};
 pub use link::{AnchorId, ImageSource, LinkTarget};
 pub use list::{List, ListItem, MarkerKind};
-pub use style::Style;
+pub use style::{Style, VertAlign};
 pub use table::{Cell, CellSlot, Table, TableKind};
 
 /// Frontends build grids; consumers read them off [`Table::grid`].

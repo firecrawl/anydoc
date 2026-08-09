@@ -9,7 +9,7 @@
 mod styletext;
 
 use crate::error::ConvertError;
-use crate::model::{Block, Document, Inline, Style, inlines_are_empty};
+use crate::model::{Block, Document, Inline, Style, VertAlign, inlines_are_empty};
 use crate::package::limits;
 use crate::shared::binary::{get_u32, read_ole_stream};
 use crate::shared::delta::{StyleDelta, rebase_emphasis};
@@ -552,6 +552,7 @@ impl Extractor {
                 italic: char_run.and_then(|r| r.italic).or(d.italic).unwrap_or(false),
                 strike: false,
                 code: false,
+                vert_align: VertAlign::Baseline,
             };
             if c == '\r' {
                 if !run_text.is_empty() {

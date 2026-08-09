@@ -32,6 +32,17 @@ pub enum Inline {
     NoteRef(String),
     /// A line break inside a block, not a new block.
     LineBreak,
+    /// A mathematical expression, already translated to LaTeX.
+    ///
+    /// The only inline whose payload reaches the output unescaped, so the
+    /// producer owns making it safe: no bare `$`, which would close the span,
+    /// and no newline, which would end the construct.
+    Math {
+        /// LaTeX body, without delimiters.
+        latex: String,
+        /// Set for an equation that stands on its own line.
+        display: bool,
+    },
 }
 
 impl Inline {
@@ -57,6 +68,7 @@ fn collect_plain_text(inlines: &[Inline], out: &mut String) {
             Inline::Link { content, .. } => collect_plain_text(content, out),
             Inline::Image { alt, .. } => out.push_str(alt),
             Inline::Anchor(_) | Inline::NoteRef(_) => {}
+            Inline::Math { latex, .. } => out.push_str(latex),
             Inline::LineBreak => out.push('\n'),
         }
     }
@@ -69,7 +81,7 @@ pub fn inlines_are_empty(inlines: &[Inline]) -> bool {
     inlines.iter().all(|i| match i {
         Inline::Text { text, .. } => text.trim().is_empty(),
         Inline::Link { content, target } => target.is_empty() && inlines_are_empty(content),
-        Inline::Image { .. } | Inline::NoteRef(_) => false,
+        Inline::Image { .. } | Inline::NoteRef(_) | Inline::Math { .. } => false,
         Inline::Anchor(_) | Inline::LineBreak => true,
     })
 }

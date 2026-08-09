@@ -77,9 +77,7 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
                 styled || (next_nonspace && !(prev_alnum && next_alnum) && paired(1))
             }
             '~' => styled || (next_nonspace && paired(2)),
-            // A dollar pair delimits math for every renderer that supports it, so document
-            // text like `$5 and $10` is otherwise read as an equation. A lone `$` opens
-            // nothing and stays literal, which keeps the common currency case unescaped.
+            // A pair delimits math; a lone `$` opens nothing, so currency stays literal.
             '$' => paired(5),
             '[' => in_label || paired(4),
             '<' => next.is_some_and(|n| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?')),

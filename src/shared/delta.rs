@@ -2,7 +2,7 @@
 //! either explicitly on, explicitly off, or unset (inherit); only after the
 //! full cascade is a delta collapsed into the model's resolved [`Style`].
 
-use crate::model::{Inline, Style};
+use crate::model::{Inline, Style, VertAlign};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StyleDelta {
@@ -10,6 +10,7 @@ pub struct StyleDelta {
     pub italic: Option<bool>,
     pub strike: Option<bool>,
     pub code: Option<bool>,
+    pub vert_align: Option<VertAlign>,
 }
 
 impl StyleDelta {
@@ -21,6 +22,7 @@ impl StyleDelta {
             italic: child.italic.or(self.italic),
             strike: child.strike.or(self.strike),
             code: child.code.or(self.code),
+            vert_align: child.vert_align.or(self.vert_align),
         }
     }
 
@@ -30,6 +32,7 @@ impl StyleDelta {
             italic: self.italic.unwrap_or(base.italic),
             strike: self.strike.unwrap_or(base.strike),
             code: self.code.unwrap_or(base.code),
+            vert_align: self.vert_align.unwrap_or(base.vert_align),
         }
     }
 

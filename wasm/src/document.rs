@@ -108,6 +108,7 @@ pub enum InlineKind {
     Anchor,
     NoteRef,
     LineBreak,
+    Math,
 }
 
 #[derive(Serialize)]
@@ -138,6 +139,12 @@ pub struct Inline {
     /// noteRef: the id of the note in `Document.notes`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note_id: Option<String>,
+    /// math: the expression as LaTeX, without delimiters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latex: Option<String>,
+    /// math: true for an equation that stands on its own line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<bool>,
 }
 
 impl Inline {
@@ -152,6 +159,8 @@ impl Inline {
             source: None,
             anchor: None,
             note_id: None,
+            latex: None,
+            display: None,
         }
     }
 }
@@ -180,6 +189,11 @@ impl From<model::Inline> for Inline {
             model::Inline::NoteRef(id) => {
                 Inline { note_id: Some(id), ..Inline::of(InlineKind::NoteRef) }
             }
+            model::Inline::Math { latex, display } => Inline {
+                latex: Some(latex),
+                display: Some(display),
+                ..Inline::of(InlineKind::Math)
+            },
             model::Inline::LineBreak => Inline::of(InlineKind::LineBreak),
         }
     }
@@ -192,11 +206,19 @@ pub struct Style {
     pub italic: bool,
     pub strike: bool,
     pub code: bool,
+    /// `baseline`, `superscript` or `subscript`.
+    pub vert_align: String,
 }
 
 impl From<model::Style> for Style {
     fn from(style: model::Style) -> Self {
-        Style { bold: style.bold, italic: style.italic, strike: style.strike, code: style.code }
+        Style {
+            bold: style.bold,
+            italic: style.italic,
+            strike: style.strike,
+            code: style.code,
+            vert_align: style.vert_align.as_str().into(),
+        }
     }
 }
 

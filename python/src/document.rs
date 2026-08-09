@@ -87,7 +87,7 @@ fn block(py: Python<'_>, block: model::Block) -> PyResult<Block> {
 #[pyclass(frozen, get_all, module = "anydoc")]
 pub struct Inline {
     /// text, link, image, anchor (a zero-width marker for an internal link
-    /// target at this position), note_ref, or line_break.
+    /// target at this position), note_ref, math, or line_break.
     kind: &'static str,
     /// text.
     text: Option<String>,
@@ -105,6 +105,10 @@ pub struct Inline {
     anchor: Option<String>,
     /// note_ref: the id of the note in `Document.notes`.
     note_id: Option<String>,
+    /// math: the expression as LaTeX, without delimiters.
+    latex: Option<String>,
+    /// math: True for an equation that stands on its own line.
+    display: Option<bool>,
 }
 
 impl Inline {
@@ -119,6 +123,8 @@ impl Inline {
             source: None,
             anchor: None,
             note_id: None,
+            latex: None,
+            display: None,
         }
     }
 }
@@ -142,6 +148,9 @@ fn inline(py: Python<'_>, inline: model::Inline) -> PyResult<Inline> {
         },
         model::Inline::Anchor(id) => Inline { anchor: Some(id), ..Inline::of("anchor") },
         model::Inline::NoteRef(id) => Inline { note_id: Some(id), ..Inline::of("note_ref") },
+        model::Inline::Math { latex, display } => {
+            Inline { latex: Some(latex), display: Some(display), ..Inline::of("math") }
+        }
         model::Inline::LineBreak => Inline::of("line_break"),
     })
 }
@@ -153,11 +162,19 @@ pub struct Style {
     italic: bool,
     strike: bool,
     code: bool,
+    /// `baseline`, `superscript` or `subscript`.
+    vert_align: &'static str,
 }
 
 impl From<model::Style> for Style {
     fn from(style: model::Style) -> Self {
-        Style { bold: style.bold, italic: style.italic, strike: style.strike, code: style.code }
+        Style {
+            bold: style.bold,
+            italic: style.italic,
+            strike: style.strike,
+            code: style.code,
+            vert_align: style.vert_align.as_str(),
+        }
     }
 }
 

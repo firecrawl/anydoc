@@ -5,6 +5,7 @@
 
 mod content;
 mod numbering;
+mod omml;
 mod styles;
 
 use crate::error::ConvertError;

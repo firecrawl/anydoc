@@ -2,6 +2,7 @@
 
 use crate::error::ConvertError;
 use crate::formats::docx::numbering::{Counters, Numbering};
+use crate::formats::docx::omml;
 use crate::formats::docx::styles::{Styles, on_off, rpr_delta};
 use crate::model::{
     Block, Cell, GridBuilder, ImageSource, Inline, LinkTarget, Style, TableKind, inlines_are_empty,
@@ -22,6 +23,7 @@ use std::collections::HashMap;
 /// requiring anything else fall back to `mc:Fallback`.
 const SUPPORTED_NS: &[&str] = &[
     ns::W,
+    ns::M,
     ns::A,
     ns::PIC,
     ns::WP,
@@ -145,6 +147,13 @@ fn collect_blocks(
         if child.is(ns::MC, "AlternateContent") {
             if let Some(branch) = ctx.alternate_branch(child) {
                 collect_blocks(branch, ctx, blocks, runs)?;
+            }
+            continue;
+        }
+        if child.is(ns::M, "oMathPara") {
+            runs.flush(blocks);
+            if let Some(math) = omml::to_inline(child, true) {
+                blocks.push(Block::Paragraph(vec![math]));
             }
             continue;
         }
@@ -380,6 +389,19 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
                 }
                 continue;
             }
+            if child.is(ns::M, "oMath") {
+                if let Some(math) = omml::to_inline(child, false) {
+                    self.push(math);
+                }
+                continue;
+            }
+            // A display equation inside the paragraph splits the run, as a text box does.
+            if child.is(ns::M, "oMathPara") {
+                if let Some(math) = omml::to_inline(child, true) {
+                    self.push_blocks(vec![Block::Paragraph(vec![math])]);
+                }
+                continue;
+            }
             if child.ns.as_deref().is_none_or(|n| n != ns::W) {
                 continue;
             }
@@ -466,6 +488,12 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
             if child.is(ns::MC, "AlternateContent") {
                 if let Some(branch) = self.ctx.alternate_branch(child) {
                     self.walk_run_content(branch, style)?;
+                }
+                continue;
+            }
+            if child.is(ns::M, "oMath") {
+                if let Some(math) = omml::to_inline(child, false) {
+                    self.push(math);
                 }
                 continue;
             }

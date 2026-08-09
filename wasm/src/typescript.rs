@@ -72,6 +72,7 @@ export type InlineKind =
   | 'anchor'
   | 'noteRef'
   | 'lineBreak'
+  | 'math'
 
 export interface Inline {
   kind: InlineKind
@@ -91,6 +92,10 @@ export interface Inline {
   anchor?: string
   /** noteRef: the id of the note in `Document.notes`. */
   noteId?: string
+  /** math: the expression as LaTeX, without delimiters. */
+  latex?: string
+  /** math: true for an equation that stands on its own line. */
+  display?: boolean
 }
 
 /** Fully resolved character style. */
@@ -99,6 +104,8 @@ export interface Style {
   italic: boolean
   strike: boolean
   code: boolean
+  /** `baseline`, `superscript` or `subscript`. */
+  vertAlign: string
 }
 
 export type LinkTargetKind =

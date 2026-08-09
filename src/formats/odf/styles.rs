@@ -6,6 +6,7 @@
 //! from two separately parsed trees (`styles.xml` and `content.xml`).
 
 use crate::error::ConvertError;
+use crate::model::VertAlign;
 use crate::package::xml::{Element, ns};
 use crate::shared::blockstyle::{self, BlockStyle};
 use crate::shared::delta::StyleDelta;
@@ -222,6 +223,26 @@ fn parse_list_style(style: &Element) -> [ListLevel; LIST_LEVELS] {
     levels
 }
 
+/// `style:text-position` is a raise followed by an optional font size, where
+/// the raise is `super`, `sub`, or a signed percentage.
+fn text_position(value: &str) -> Option<VertAlign> {
+    let raise = value.split_whitespace().next()?;
+    match raise {
+        "super" => Some(VertAlign::Superscript),
+        "sub" => Some(VertAlign::Subscript),
+        _ => {
+            let percent: f32 = raise.trim_end_matches('%').parse().ok()?;
+            Some(if percent > 0.0 {
+                VertAlign::Superscript
+            } else if percent < 0.0 {
+                VertAlign::Subscript
+            } else {
+                VertAlign::Baseline
+            })
+        }
+    }
+}
+
 /// Delta carried by a style's `style:text-properties`.
 pub fn text_properties_delta(elem: &Element) -> StyleDelta {
     let Some(props) = elem.find(ns::STYLE, "text-properties") else {
@@ -234,5 +255,6 @@ pub fn text_properties_delta(elem: &Element) -> StyleDelta {
         italic: props.attr(ns::FO, "font-style").map(|s| s == "italic" || s == "oblique"),
         strike: props.attr(ns::STYLE, "text-line-through-style").map(|lt| lt != "none"),
         code: None,
+        vert_align: props.attr(ns::STYLE, "text-position").and_then(text_position),
     }
 }

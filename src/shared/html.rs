@@ -243,7 +243,7 @@ fn at_space_boundary(inlines: &[Inline], start: bool) -> bool {
                 }
                 return at_space_boundary(content, false);
             }
-            Inline::Image { .. } | Inline::NoteRef(_) => return false,
+            Inline::Image { .. } | Inline::NoteRef(_) | Inline::Math { .. } => return false,
         }
     }
     start

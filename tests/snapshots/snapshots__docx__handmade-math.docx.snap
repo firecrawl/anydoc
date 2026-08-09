@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Inline $\frac{a}{b}+{y^{2}}^{3}\left(x,y\right)\sqrt{z}$ done.
+
+$$\sum_{i=1}^{n}x_{i}$$
+
+Concentration 10<sup>-3</sup> mol/L of H<sub>2</sub>O costs \$100 and $80.

@@ -168,6 +168,10 @@ export interface Inline {
   anchor?: string
   /** noteRef: the id of the note in `Document.notes`. */
   noteId?: string
+  /** math: the expression as LaTeX, without delimiters. */
+  latex?: string
+  /** math: true for an equation that stands on its own line. */
+  display?: boolean
 }
 
 export declare const enum InlineKind {
@@ -177,7 +181,8 @@ export declare const enum InlineKind {
   /** Zero-width marker for an internal link target at this position. */
   anchor = 'anchor',
   noteRef = 'noteRef',
-  lineBreak = 'lineBreak'
+  lineBreak = 'lineBreak',
+  math = 'math'
 }
 
 export interface LinkTarget {
@@ -241,6 +246,8 @@ export interface Style {
   italic: boolean
   strike: boolean
   code: boolean
+  /** `baseline`, `superscript` or `subscript`. */
+  vertAlign: string
 }
 
 /**

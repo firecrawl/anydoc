@@ -94,6 +94,7 @@ fn block_bytes(blocks: &[Block]) -> u64 {
                 }
                 Inline::Image { alt, .. } => alt.len() as u64,
                 Inline::Anchor(id) | Inline::NoteRef(id) => id.len() as u64,
+                Inline::Math { latex, .. } => latex.len() as u64,
                 Inline::LineBreak => 1,
             })
             .sum()

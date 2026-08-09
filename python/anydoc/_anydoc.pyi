@@ -99,7 +99,7 @@ class Block:
 
 @final
 class Inline:
-    kind: Literal["text", "link", "image", "anchor", "note_ref", "line_break"]
+    kind: Literal["text", "link", "image", "anchor", "note_ref", "math", "line_break"]
     """`anchor` is a zero-width marker for an internal link target at this
     position."""
     text: str | None

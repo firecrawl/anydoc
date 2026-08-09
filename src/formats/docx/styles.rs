@@ -7,7 +7,7 @@
 //! formatting is absolute on/off.
 
 use crate::error::ConvertError;
-use crate::model::Style;
+use crate::model::{Style, VertAlign};
 use crate::package::xml::{Element, ns};
 use crate::shared::blockstyle::{self, BlockStyle};
 use crate::shared::chain::StyleChains;
@@ -36,6 +36,9 @@ impl Toggles {
             italic: base.italic ^ self.italic,
             strike: base.strike ^ self.strike,
             code: base.code,
+            // Not a toggle: ECMA-376 s17.7.3 closes the toggle set, and vertical
+            // alignment is an ordinary property whose nearest specification wins.
+            vert_align: base.vert_align,
         }
     }
 }
@@ -184,6 +187,18 @@ pub fn rpr_delta(rpr: &Element) -> StyleDelta {
             None
         },
         code: None,
+        vert_align: vert_align(rpr),
+    }
+}
+
+/// ST_VerticalAlignRun. Not `on_off`: that reads any value outside the
+/// false-set as `true`, which cannot tell `superscript` from `subscript`.
+pub fn vert_align(rpr: &Element) -> Option<VertAlign> {
+    match rpr.find(ns::W, "vertAlign")?.attr(ns::W, "val")? {
+        "superscript" => Some(VertAlign::Superscript),
+        "subscript" => Some(VertAlign::Subscript),
+        "baseline" => Some(VertAlign::Baseline),
+        _ => None,
     }
 }
 

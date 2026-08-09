@@ -3,6 +3,7 @@
 //! placeholder / `txStyles` -> presentation `defaultTextStyle`, with
 //! explicit-off states honored at every layer.
 
+use crate::model::VertAlign;
 use crate::package::xml::{Element, ns};
 use crate::shared::delta::StyleDelta;
 use crate::shared::list::MarkerKind;
@@ -129,6 +130,16 @@ pub fn paragraph_props(ppr: &Element) -> TextProps {
     TextProps { delta, bullet }
 }
 
+/// A DrawingML `baseline` percentage as a vertical alignment: positive raises,
+/// negative lowers, zero sits on the baseline.
+fn baseline(percent: i32) -> VertAlign {
+    match percent.signum() {
+        1 => VertAlign::Superscript,
+        -1 => VertAlign::Subscript,
+        _ => VertAlign::Baseline,
+    }
+}
+
 /// Delta from an `a:rPr`/`a:defRPr` element's attributes.
 pub fn rpr_delta(rpr: &Element) -> StyleDelta {
     let on_off = |name: &str| rpr.attr(ns::A, name).map(|v| matches!(v, "1" | "true" | "on"));
@@ -137,6 +148,8 @@ pub fn rpr_delta(rpr: &Element) -> StyleDelta {
         italic: on_off("i"),
         strike: rpr.attr(ns::A, "strike").map(|v| matches!(v, "sngStrike" | "dblStrike")),
         code: None,
+        // A signed percentage of the raise, not an enum.
+        vert_align: rpr.attr(ns::A, "baseline").and_then(|v| v.parse::<i32>().ok()).map(baseline),
     }
 }
 
