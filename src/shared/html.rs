@@ -9,7 +9,7 @@
 use crate::error::ConvertError;
 use crate::model::{
     AnchorId, Block, Cell, GridBuilder, ImageSource, Inline, LinkTarget, List, ListItem,
-    MarkerKind, TableKind, inlines_are_empty, inlines_to_plain_text,
+    MarkerKind, TableKind, VertAlign, inlines_are_empty, inlines_to_plain_text,
 };
 use crate::package::xml::{Element, Node};
 use crate::shared::delta::{StyleDelta, rebase_emphasis};
@@ -442,15 +442,32 @@ impl Builder<'_> {
                 }
             }
             "script" | "style" | "head" | "template" | "noscript" => {}
+            // MathML metadata, not content: an annotation holds a second
+            // encoding of the same expression.
+            "annotation" | "annotation-xml" => {}
             _ => self.walk_inline(elem, delta)?,
         }
         Ok(())
+    }
+
+    /// MathML. A `&lt;semantics&gt;` wrapper usually carries the source LaTeX in an
+    /// `annotation`, which is exact where re-deriving it from the presentation
+    /// tree is not; without one the characters are kept but the shape is lost.
+    fn walk_math(&mut self, elem: &Element, delta: StyleDelta) -> Result<(), ConvertError> {
+        let display = elem.attr_any("display") == Some("block");
+        if let Some(latex) = tex_annotation(elem) {
+            self.inlines.push(Inline::Math { latex, display });
+            return Ok(());
+        }
+        log::debug!("MathML without a TeX annotation; keeping its characters only");
+        self.walk_children(elem, delta)
     }
 
     fn walk_inline(&mut self, elem: &Element, delta: StyleDelta) -> Result<(), ConvertError> {
         self.push_anchor(elem);
         match elem.local.as_str() {
             "br" => self.inlines.push(Inline::LineBreak),
+            "math" => self.walk_math(elem, delta)?,
             "img" | "image" => {
                 let alt = clean_text(elem.attr_any("alt").unwrap_or(""));
                 let src = elem.attr_any("src").or_else(|| elem.attr_any("href")).unwrap_or("");
@@ -682,12 +699,27 @@ impl Builder<'_> {
     }
 }
 
+/// The LaTeX an `annotation` carries, if the MathML supplies one.
+fn tex_annotation(math: &Element) -> Option<String> {
+    let text = math
+        .descendant_elems()
+        .filter(|e| e.local == "annotation")
+        .find(|e| {
+            matches!(e.attr_any("encoding"), Some("application/x-tex" | "application/x-latex"))
+        })?
+        .text();
+    let text = text.trim();
+    if text.is_empty() { None } else { Some(text.replace(['\n', '\r'], " ")) }
+}
+
 fn merge_inline_tag(elem: &Element, mut delta: StyleDelta) -> StyleDelta {
     match elem.local.as_str() {
         "b" | "strong" => delta.bold = Some(true),
         "i" | "em" | "cite" | "dfn" | "var" => delta.italic = Some(true),
         "s" | "del" | "strike" => delta.strike = Some(true),
         "code" | "kbd" | "samp" | "tt" => delta.code = Some(true),
+        "sup" => delta.vert_align = Some(VertAlign::Superscript),
+        "sub" => delta.vert_align = Some(VertAlign::Subscript),
         _ => {}
     }
     delta

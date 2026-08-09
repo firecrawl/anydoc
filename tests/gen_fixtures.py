@@ -813,6 +813,45 @@ def strict_alt_ooxml():
 # ---------------------------------------------------------------------------
 # Handmade EPUB: rowspan, ol attrs, CSS display:none, non-heading anchors (M7, H13)
 
+# ---------------------------------------------------------------------------
+# EPUB mathematics: MathML with and without a TeX annotation, plus HTML
+# super/subscript, which must read the same as the DOCX fixture's.
+
+def math_epub():
+    ch1 = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+<head><title>Math</title></head><body>
+<h1>Math Chapter</h1>
+<p>Annotated: <m:math><m:semantics>
+<m:mfrac><m:mi>a</m:mi><m:mi>b</m:mi></m:mfrac>
+<m:annotation encoding="application/x-tex">\\frac{a}{b} + x^2</m:annotation>
+</m:semantics></m:math> follows.</p>
+<p>Bare presentation: <m:math><m:msup><m:mi>x</m:mi><m:mn>2</m:mn></m:msup></m:math> follows.</p>
+<p>Block: <m:math display="block"><m:semantics><m:mi>E</m:mi>
+<m:annotation encoding="application/x-tex">E = mc^2</m:annotation>
+</m:semantics></m:math></p>
+<p>Concentration 10<sup>-3</sup> mol/L of H<sub>2</sub>O.</p>
+</body></html>"""
+    opf = """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:identifier id="uid">urn:uuid:00000000-0000-0000-0000-0000000ma7h</dc:identifier>
+<dc:title>Math Book</dc:title><dc:language>en</dc:language>
+</metadata>
+<manifest><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml" properties="mathml"/></manifest>
+<spine><itemref idref="c1"/></spine>
+</package>"""
+    container = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"""
+    write_zip(OUT / "epub" / "handmade-math.epub", [
+        ("META-INF/container.xml", container),
+        ("OEBPS/content.opf", opf),
+        ("OEBPS/ch1.xhtml", ch1),
+    ], mimetype_first="application/epub+zip")
+
+
 def features_epub():
     css = "p.hidden { display: none; }\n.crossed { text-decoration: line-through; }\n"
     ch1 = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1987,6 +2026,7 @@ def main():
     defaults_odf()
     merged_xlsx()
     features_epub()
+    math_epub()
     bin_rtf()
     csvs()
     malformed()

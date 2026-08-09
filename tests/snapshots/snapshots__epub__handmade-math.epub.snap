@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Math Book
+
+# Math Chapter
+
+Annotated: $\frac{a}{b} + x^2$ follows.
+
+Bare presentation: x2 follows.
+
+Block: $$E = mc^2$$
+
+Concentration 10<sup>-3</sup> mol/L of H<sub>2</sub>O.

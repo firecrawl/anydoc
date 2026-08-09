@@ -152,16 +152,18 @@ fn boxed_arg(parent: &Element, name: &str, depth: usize) -> Box<Node> {
 /// Every child of `elem`, flattened into one sequence.
 fn parse_seq(elem: &Element, depth: usize) -> Node {
     if depth >= MAX_DEPTH {
+        log::warn!("OMML nesting deeper than {MAX_DEPTH} levels; keeping its text only");
         return Node::Run(elem.text());
     }
     let mut parts: Vec<Node> = Vec::new();
     for child in elem.child_elems() {
         if child.ns.as_deref() != Some(ns::M) {
             // Revision marks and bookmarks wrap runs that are part of the maths.
-            if child.ns.as_deref() == Some(ns::W)
-                && let Node::Seq(inner) = parse_seq(child, depth + 1)
-            {
-                parts.extend(inner);
+            if child.ns.as_deref() == Some(ns::W) {
+                match parse_seq(child, depth + 1) {
+                    Node::Seq(inner) => parts.extend(inner),
+                    node => parts.push(node),
+                }
             }
             continue;
         }
@@ -439,7 +441,7 @@ fn emit(node: &Node, out: &mut String, _in_group: bool) {
             }
         }
         Node::Nary { op, sub, sup, base, limits } => {
-            out.push_str(nary_command(*op));
+            out.push_str(&nary_command(*op));
             if *limits {
                 out.push_str("\\limits");
             }
@@ -465,20 +467,29 @@ fn emit(node: &Node, out: &mut String, _in_group: bool) {
             out.push_str("\\right");
             out.push_str(&delim_glyph(*close));
         }
-        Node::Accent { chr, base } => {
-            out.push_str(accent_command(*chr));
-            emit_group(base, out);
-        }
-        Node::Bar { top, base } => {
-            out.push_str(if *top { "\\overline" } else { "\\underline" });
-            emit_group(base, out);
-        }
-        Node::Group { chr, top, base } => match chr.map(group_command) {
+        Node::Accent { chr, base } => match accent_command(*chr) {
             Some(cmd) => {
                 out.push_str(cmd);
                 emit_group(base, out);
             }
-            // An explicitly blank group character draws nothing.
+            None => {
+                out.push_str("\\overset");
+                out.push('{');
+                out.push_str(&escaped(*chr));
+                out.push('}');
+                emit_group(base, out);
+            }
+        },
+        Node::Bar { top, base } => {
+            out.push_str(if *top { "\\overline" } else { "\\underline" });
+            emit_group(base, out);
+        }
+        // An explicitly blank, or unmapped, group character draws nothing.
+        Node::Group { chr, top, base } => match chr.and_then(group_command) {
+            Some(cmd) => {
+                out.push_str(cmd);
+                emit_group(base, out);
+            }
             None => {
                 let _ = top;
                 emit(base, out, false);
@@ -565,7 +576,7 @@ const KATEX_FUNCTIONS: &[&str] = &[
     "sec", "sin", "sinh", "sup", "tan", "tanh",
 ];
 
-fn nary_command(chr: char) -> &'static str {
+fn nary_command(chr: char) -> String {
     match chr {
         '∑' => "\\sum",
         '∏' => "\\prod",
@@ -585,15 +596,20 @@ fn nary_command(chr: char) -> &'static str {
         '⨂' => "\\bigotimes",
         '⨄' => "\\biguplus",
         '⨆' => "\\bigsqcup",
-        _ => "\\int",
+        // Passing the glyph through says what the document said; guessing a
+        // command would emit a different operator, well-formed and wrong.
+        _ => return escaped(chr),
     }
+    .into()
 }
 
-/// OMML gives a combining codepoint; KaTeX wants the accent command.
-fn accent_command(chr: char) -> &'static str {
+/// OMML gives a combining codepoint; KaTeX wants the accent command. An
+/// unmapped mark is stacked over the base rather than replaced by a guess.
+fn accent_command(chr: char) -> Option<&'static str> {
     match chr {
         '\u{0300}' => "\\grave",
         '\u{0301}' => "\\acute",
+        '\u{0302}' | '^' => "\\widehat",
         '\u{0303}' | '~' => "\\widetilde",
         '\u{0304}' => "\\bar",
         '\u{0305}' => "\\overline",
@@ -607,11 +623,12 @@ fn accent_command(chr: char) -> &'static str {
         '\u{20D7}' | '→' => "\\vec",
         '\u{20DB}' => "\\dddot",
         '\u{20E1}' => "\\overleftrightarrow",
-        _ => "\\widehat",
+        _ => return None,
     }
+    .into()
 }
 
-fn group_command(chr: char) -> &'static str {
+fn group_command(chr: char) -> Option<&'static str> {
     match chr {
         '\u{23DE}' | '\u{FE37}' => "\\overbrace",
         '\u{23B4}' => "\\overbracket",
@@ -620,8 +637,10 @@ fn group_command(chr: char) -> &'static str {
         '\u{23DD}' => "\\undergroup",
         '←' => "\\overleftarrow",
         '→' => "\\overrightarrow",
-        _ => "\\underbrace",
+        '\u{23DF}' | '\u{FE38}' => "\\underbrace",
+        _ => return None,
     }
+    .into()
 }
 
 /// A delimiter glyph in `\left`/`\right` position. An absent delimiter is a
@@ -639,8 +658,16 @@ fn delim_glyph(chr: Option<char>) -> String {
         Some('⌋') => "\\rfloor".into(),
         Some('⟨') => "\\langle".into(),
         Some('⟩') => "\\rangle".into(),
-        Some(c) => c.to_string(),
+        Some(c) => escaped(c),
     }
+}
+
+/// One author-supplied character, LaTeX-escaped. Delimiters and operators come
+/// from the document and reach the body outside `push_text`.
+fn escaped(chr: char) -> String {
+    let mut out = String::new();
+    push_text(&chr.to_string(), &mut out);
+    out
 }
 
 /// A separator between delimiter parts. A bare `|` would split a Markdown
@@ -649,7 +676,7 @@ fn delim_sep(chr: char) -> String {
     match chr {
         '|' => "\\mid ".into(),
         '‖' => "\\Vert ".into(),
-        c => c.to_string(),
+        c => escaped(c),
     }
 }
 
@@ -734,6 +761,45 @@ mod tests {
         // A raw pipe would split the row the equation sits in.
         let xml = format!("<m:d><m:e>{}</m:e><m:e>{}</m:e></m:d>", run("x"), run("y"));
         assert!(!latex(&xml).contains('|'));
+    }
+
+    #[test]
+    fn a_revision_wrapper_with_one_child_keeps_it() {
+        // `<w:ins>` around a single element is the ordinary tracked-changes
+        // shape, and the content is the whole equation.
+        let xml = format!(
+            "<w:ins><m:f><m:num>{}</m:num><m:den>{}</m:den></m:f></w:ins>",
+            run("a"),
+            run("b")
+        );
+        assert_eq!(latex(&xml), r"\frac{a}{b}");
+    }
+
+    #[test]
+    fn author_supplied_delimiters_are_escaped() {
+        // These reach the body outside `push_text`, so they need escaping of
+        // their own or the payload's no-bare-dollar contract is a lie.
+        let xml =
+            format!(r#"<m:d><m:dPr><m:begChr m:val="$"/></m:dPr><m:e>{}</m:e></m:d>"#, run("v"));
+        assert!(!latex(&xml).contains(r"left$"), "{}", latex(&xml));
+        let xml = format!(
+            r#"<m:d><m:dPr><m:sepChr m:val="$"/></m:dPr><m:e>{}</m:e><m:e>{}</m:e></m:d>"#,
+            run("x"),
+            run("y")
+        );
+        assert!(latex(&xml).contains(r"\$"), "{}", latex(&xml));
+    }
+
+    #[test]
+    fn an_unmapped_operator_is_passed_through_not_guessed() {
+        // Emitting `\int` for an unknown n-ary glyph is well-formed and wrong.
+        let xml = format!(
+            r#"<m:nary><m:naryPr><m:chr m:val="⨌"/></m:naryPr><m:e>{}</m:e></m:nary>"#,
+            run("f")
+        );
+        let out = latex(&xml);
+        assert!(out.contains('⨌'), "{out}");
+        assert!(!out.contains(r"\int"), "{out}");
     }
 
     #[test]
