@@ -440,54 +440,7 @@ fn resolve_entity(name: &str) -> Option<String> {
         };
         return char::from_u32(code).map(String::from);
     }
-    let ch = match name {
-        "amp" => '&',
-        "lt" => '<',
-        "gt" => '>',
-        "apos" => '\'',
-        "quot" => '"',
-        "nbsp" => '\u{a0}',
-        "shy" => '\u{ad}',
-        "mdash" => '\u{2014}',
-        "ndash" => '\u{2013}',
-        "lsquo" => '\u{2018}',
-        "rsquo" => '\u{2019}',
-        "ldquo" => '\u{201c}',
-        "rdquo" => '\u{201d}',
-        "hellip" => '\u{2026}',
-        "copy" => '\u{a9}',
-        "reg" => '\u{ae}',
-        "trade" => '\u{2122}',
-        "deg" => '\u{b0}',
-        "middot" => '\u{b7}',
-        "bull" => '\u{2022}',
-        "sect" => '\u{a7}',
-        "para" => '\u{b6}',
-        "laquo" => '\u{ab}',
-        "raquo" => '\u{bb}',
-        "times" => '\u{d7}',
-        "divide" => '\u{f7}',
-        "plusmn" => '\u{b1}',
-        "frac12" => '\u{bd}',
-        "frac14" => '\u{bc}',
-        "eacute" => '\u{e9}',
-        "egrave" => '\u{e8}',
-        "agrave" => '\u{e0}',
-        "ccedil" => '\u{e7}',
-        "uuml" => '\u{fc}',
-        "ouml" => '\u{f6}',
-        "auml" => '\u{e4}',
-        "szlig" => '\u{df}',
-        "aring" => '\u{e5}',
-        "oslash" => '\u{f8}',
-        "aelig" => '\u{e6}',
-        "euro" => '\u{20ac}',
-        "pound" => '\u{a3}',
-        "yen" => '\u{a5}',
-        "cent" => '\u{a2}',
-        _ => return None,
-    };
-    Some(ch.to_string())
+    super::entities::named(name).map(String::from)
 }
 
 #[cfg(test)]
