@@ -77,6 +77,9 @@ pub struct Prelude {
     pub fonts: HashMap<i32, &'static encoding_rs::Encoding>,
     /// Paragraph style id (`\sN`) -> definition.
     pub styles: HashMap<i32, StyleDef>,
+    /// Character-style id -> definition. RTF numbers `\csN` in a space of its
+    /// own, so a `\cs15` and a `\s15` are different styles.
+    pub char_styles: HashMap<i32, StyleDef>,
     /// `\lsN` -> resolved list definition (through the override table).
     pub lists: HashMap<i32, ListDef>,
 }
@@ -88,7 +91,7 @@ pub fn parse_prelude(bytes: &[u8], default_encoding: &'static encoding_rs::Encod
         parse_fonttbl(group, &mut prelude.fonts, default_encoding);
     }
     for group in destination_groups(bytes, "stylesheet") {
-        parse_stylesheet(group, &mut prelude.styles, default_encoding);
+        parse_stylesheet(group, &mut prelude.styles, &mut prelude.char_styles, default_encoding);
     }
     let mut by_list_id: HashMap<i32, ListDef> = HashMap::new();
     for group in destination_groups(bytes, "listtable") {
@@ -165,12 +168,15 @@ const NULL_STYLE: i32 = 222;
 fn parse_stylesheet(
     group: &[u8],
     styles: &mut HashMap<i32, StyleDef>,
+    char_styles: &mut HashMap<i32, StyleDef>,
     enc: &'static encoding_rs::Encoding,
 ) {
     let mut lexer = Lexer::new(group);
     let mut depth = 0usize;
     let mut current: Option<(i32, StyleDef, Option<i32>)> = None;
+    let mut character = false;
     let mut raw: HashMap<i32, (StyleDef, Option<i32>)> = HashMap::new();
+    let mut raw_chars: HashMap<i32, (StyleDef, Option<i32>)> = HashMap::new();
     // A style's name is the text at the end of its group, before the `;`.
     let mut name: Vec<u8> = Vec::new();
     while let Some(token) = lexer.next_token() {
@@ -180,16 +186,22 @@ fn parse_stylesheet(
                 if depth == 1
                     && let Some((id, mut def, base)) = current.take()
                 {
-                    let (text, _, _) = enc.decode(&name);
-                    def.block = blockstyle::from_style_name(text.trim_end_matches(';'));
-                    raw.insert(id, (def, base));
+                    if character {
+                        raw_chars.insert(id, (def, base));
+                    } else {
+                        let (text, _, _) = enc.decode(&name);
+                        def.block = blockstyle::from_style_name(text.trim_end_matches(';'));
+                        raw.insert(id, (def, base));
+                    }
                 }
+                character = false;
                 name.clear();
                 depth = depth.saturating_sub(1);
             }
             Token::Hex(b) | Token::Byte(b) if depth == 1 && current.is_some() => name.push(b),
             Token::Word { name: word, param } => match word {
-                "s" => {
+                "s" | "cs" => {
+                    character = word == "cs";
                     current = Some((param.unwrap_or(0), StyleDef::default(), None));
                     name.clear();
                 }
@@ -229,9 +241,17 @@ fn parse_stylesheet(
             _ => {}
         }
     }
-    // Resolve every \sbasedon chain root-to-leaf: the child's own settings
-    // win over inherited ones. A cycle is bounded by the visited set and
-    // resolves from the acyclic prefix.
+    resolve_inheritance(&raw, styles);
+    resolve_inheritance(&raw_chars, char_styles);
+}
+
+/// Resolve every `\sbasedon` chain root-to-leaf: the child's own settings win
+/// over inherited ones. A cycle is bounded by the visited set and resolves from
+/// the acyclic prefix.
+fn resolve_inheritance(
+    raw: &HashMap<i32, (StyleDef, Option<i32>)>,
+    out: &mut HashMap<i32, StyleDef>,
+) {
     for &id in raw.keys() {
         let mut chain: Vec<&StyleDef> = Vec::new();
         let mut seen: std::collections::HashSet<i32> = std::collections::HashSet::new();
@@ -251,7 +271,7 @@ fn parse_stylesheet(
             resolved.outline = def.outline.or(resolved.outline);
             resolved.block = def.block.or(resolved.block);
         }
-        styles.insert(id, resolved);
+        out.insert(id, resolved);
     }
 }
 

@@ -572,6 +572,16 @@ impl<'a> Parser<'a> {
                 self.state.style = Style::PLAIN;
                 self.state.font = font;
             }
+            // A character style applies over the run's own formatting; unlike
+            // \s it carries no paragraph properties.
+            "cs" => {
+                let def = param.and_then(|id| self.prelude.char_styles.get(&id));
+                if let Some(delta) = def.map(|d| d.delta) {
+                    self.flush_pending();
+                    self.state.style = delta.apply(self.state.style);
+                    self.state.style_base = self.state.style;
+                }
+            }
             "s" => {
                 // Paragraph style: outline level for headings plus its
                 // formatting delta as the new base.
@@ -1083,6 +1093,31 @@ mod tests {
         let src = r"{\rtf1 a\up6 b\up0 c\dn4 d\plain e\par}";
         let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
         assert_eq!(markdown, "a<sup>b</sup>c<sub>d</sub>e\n");
+    }
+
+    #[test]
+    fn a_character_style_applies_over_the_runs_own_formatting() {
+        let src = r"{\rtf1{\stylesheet{\*\cs15 \additive\super Sup;}\
+                   {\*\cs16 \additive\b\sbasedon15 BoldSup;}}\
+                   x{\cs15 2} and w{\cs16 3}.\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(markdown, "x<sup>2</sup> and w<sup>**3**</sup>.\n");
+    }
+
+    #[test]
+    fn character_and_paragraph_styles_are_numbered_apart() {
+        // \s15 and \cs15 are different styles, and the run keeps both.
+        let src = r"{\rtf1{\stylesheet{\s15\i Italic;}{\*\cs15 \additive\super Sup;}}\
+                   \pard\s15 para {\cs15 raised} back.\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(markdown, "*para* <sup>*raised*</sup> *back.*\n");
+    }
+
+    #[test]
+    fn an_undefined_character_style_leaves_the_run_alone() {
+        let src = r"{\rtf1{\stylesheet{\*\cs15\super Sup;}}a{\cs99 b}c\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(markdown, "abc\n");
     }
 
     #[test]
