@@ -11,3 +11,9 @@ __pycache__/
 # wasm-pack build output: pkg/ is the npm package, www/pkg/ the demo site copy
 /wasm/pkg/
 /wasm/www/pkg/
+
+# Local env (never commit secrets)
+.env
+.env.*
+!.env.example
+!**/.env.example
