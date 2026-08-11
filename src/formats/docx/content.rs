@@ -213,9 +213,6 @@ fn strip_list_num_prefix(
         _ => return,
     };
     let mut strip = num_text.len() + sep;
-    if strip == 0 {
-        return;
-    }
 
     // Drain the leading inlines and re-insert the survivors.
     let tail: Vec<Inline> = inlines.split_off(lead);
