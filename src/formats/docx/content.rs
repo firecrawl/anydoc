@@ -13,7 +13,7 @@ use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
 use crate::shared::header::resolve_header_rows;
-use crate::shared::list::{ListEntry, ListKey, flush_list};
+use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::text::{clean_text, is_xml_space};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -172,11 +172,93 @@ fn collect_blocks(
     Ok(())
 }
 
+fn strip_list_num_prefix(
+    blocks: &mut Vec<Block>,
+    marker: MarkerKind,
+    number: u64,
+    label: &Option<String>,
+) {
+    // Bullets don't carry hardened number prefixes in OOXML.
+    if !marker.ordered() {
+        return;
+    }
+
+    // The text the renderer will place before the paragraph.
+    let num_text = label.clone().unwrap_or_else(|| marker.label(number));
+    let Some(Block::Paragraph(inlines)) = blocks.first_mut() else {
+        return;
+    };
+
+    // Flatten enough leading text inlines to decide whether the prefix matches.
+    let mut flat = String::new();
+    let mut lead = 0usize;
+    for inv in inlines.iter() {
+        match inv {
+            Inline::Text { text, .. } => {
+                flat.push_str(text);
+                lead += 1;
+            }
+            Inline::LineBreak | Inline::Anchor(_) => lead += 1,
+            _ => break,
+        }
+        if flat.len() >= num_text.len() + 1 {
+            break;
+        }
+    }
+
+    // Must start with `num_text` followed by a separator or end-of-string.
+    let sep = match flat.strip_prefix(&num_text) {
+        Some("") => 0,
+        Some(r) if r.starts_with(' ') || r.starts_with('\t') => 1,
+        _ => return,
+    };
+    let mut strip = num_text.len() + sep;
+    if strip == 0 {
+        return;
+    }
+
+    // Drain the leading inlines and re-insert the survivors.
+    let tail: Vec<Inline> = inlines.split_off(lead);
+    let mut head = Vec::with_capacity(inlines.len());
+    for inv in std::mem::take(inlines) {
+        if strip == 0 {
+            head.push(inv);
+            continue;
+        }
+        match inv {
+            Inline::Text { text, style } => {
+                if text.len() <= strip {
+                    strip -= text.len();
+                } else {
+                    let t = text[strip..].trim_start().to_string();
+                    strip = 0;
+                    if !t.is_empty() {
+                        head.push(Inline::Text { text: t, style });
+                    }
+                }
+            }
+            Inline::LineBreak | Inline::Anchor(_) => {} // consume
+            other => {
+                strip = 0;
+                head.push(other);
+            }
+        }
+    }
+    head.extend(tail);
+    *inlines = head;
+
+    // Don't leave a ghost paragraph with no visible content.
+    if inlines.is_empty() {
+        blocks.remove(0);
+    }
+}
+
 fn emit_paragraph(kind: ParaKind, pieces: Vec<Piece>, blocks: &mut Vec<Block>, runs: &mut Runs) {
     match kind {
         ParaKind::ListItem { ilvl, key, number, label } => {
             runs.styled.flush(blocks);
-            let item = pieces_into_blocks(pieces);
+            let mut item = pieces_into_blocks(pieces);
+            strip_list_num_prefix(&mut item, key.marker, number, &label);
             runs.list.push(ListEntry { level: ilvl, key, number, label, blocks: item });
         }
         ParaKind::Styled(style) => {
@@ -985,5 +1067,74 @@ mod tests {
         };
         assert_eq!(before, "before");
         assert_eq!(after, "after");
+    }
+
+    // -- strip_list_num_prefix -------------------------------------------
+
+    fn strip(blocks: &mut Vec<Block>, marker: MarkerKind, n: u64, label: &Option<String>) -> String {
+        strip_list_num_prefix(blocks, marker, n, label);
+        match blocks.first() {
+            Some(Block::Paragraph(inlines)) => crate::model::inlines_to_plain_text(inlines),
+            _ => String::new(),
+        }
+    }
+
+    #[test]
+    fn strip_prefix_ordered() {
+        let cases = [
+            (vec![Inline::plain("1. text")], MarkerKind::Decimal, 1, None, "text"),
+            (vec![Inline::plain("1.\ttext")], MarkerKind::Decimal, 1, None, "text"),
+            (vec![Inline::plain("a. text")], MarkerKind::LowerAlpha, 1, None, "text"),
+            (vec![Inline::plain("iv. text")], MarkerKind::LowerRoman, 4, None, "text"),
+        ];
+        for (inlines, marker, n, label, expected) in cases {
+            let mut blocks = vec![Block::Paragraph(inlines)];
+            assert_eq!(strip(&mut blocks, marker, n, &label), expected);
+        }
+    }
+
+    #[test]
+    fn strip_prefix_composite_label() {
+        let mut blocks = vec![Block::Paragraph(vec![Inline::plain("1.1) text")])];
+        assert_eq!(strip(&mut blocks, MarkerKind::Decimal, 1, &Some("1.1)".into())), "text");
+    }
+
+    #[test]
+    fn strip_prefix_split_inlines() {
+        let mut blocks = vec![Block::Paragraph(vec![
+            Inline::plain("1."), Inline::plain(" "), Inline::plain("text"),
+        ])];
+        assert_eq!(strip(&mut blocks, MarkerKind::Decimal, 1, &None), "text");
+
+        let mut blocks = vec![Block::Paragraph(vec![
+            Inline::plain("1. "), Inline::plain("content"),
+        ])];
+        assert_eq!(strip(&mut blocks, MarkerKind::Decimal, 1, &None), "content");
+    }
+
+    #[test]
+    fn strip_prefix_no_match() {
+        // Text that doesn't start with the expected prefix.
+        let mut blocks = vec![Block::Paragraph(vec![Inline::plain("text")])];
+        assert_eq!(strip(&mut blocks, MarkerKind::Decimal, 1, &None), "text");
+
+        // Starts with number but no separator after it.
+        let mut blocks = vec![Block::Paragraph(vec![Inline::plain("1.text")])];
+        assert_eq!(strip(&mut blocks, MarkerKind::Decimal, 1, &None), "1.text");
+
+        // Resolved number differs from the hardcoded prefix.
+        let mut blocks = vec![Block::Paragraph(vec![Inline::plain("1. text")])];
+        assert_eq!(strip(&mut blocks, MarkerKind::Decimal, 3, &None), "1. text");
+
+        // Bullets short-circuit via `!marker.ordered()`.
+        let mut blocks = vec![Block::Paragraph(vec![Inline::plain("- text")])];
+        assert_eq!(strip(&mut blocks, MarkerKind::Bullet, 0, &None), "- text");
+    }
+
+    #[test]
+    fn strip_prefix_empty_blocks() {
+        let mut blocks: Vec<Block> = Vec::new();
+        strip_list_num_prefix(&mut blocks, MarkerKind::Decimal, 1, &None);
+        assert!(blocks.is_empty());
     }
 }
