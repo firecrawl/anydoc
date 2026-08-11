@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://skills.sh/b/firecrawl/anydoc)](https://skills.sh/firecrawl/anydoc)
 
-Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
+Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, HTML, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
 
 Built by [Firecrawl](https://firecrawl.dev) to turn any office document into LLM-ready Markdown in single-digit milliseconds, with one consistent output no matter which format goes in. It powers [Firecrawl Parse](https://firecrawl.dev/parse), so if you'd rather not run it yourself, the hosted API gives you the same conversion plus our OCR models for the scanned pages anydoc can't read on its own.
 
@@ -130,7 +130,7 @@ let document = anydoc::to_document(&bytes, None)?;
 - **One output for every format.** Each format parses into a shared document model and renders through a single Markdown serializer, so escaping, tables, heading anchors, and footnotes behave identically whether the input was a `.doc` from 2003 or a `.pptx` from yesterday.
 - **Full document structure.** Headings with anchors, bold/italic/strikethrough, inline code and code blocks, links and internal cross-references, bulleted/numbered/nested/task lists with the source's own numbering, tables with merged cells and header rows, block quotes, footnotes and endnotes, and speaker notes.
 - **Embedded assets.** Images and embedded objects render as their alt text in the Markdown, and the raw bytes stay available on the document model, tagged with their media type. Images with an external URL become ordinary Markdown images.
-- **Content-based format detection.** The format is read from the bytes themselves (PDF header, RTF open group, OLE stream names, ZIP package mimetype), so mislabeled files still convert correctly.
+- **Content-based format detection.** The format is read from the bytes themselves (PDF header, RTF open group, OLE stream names, ZIP package mimetype, or an HTML doctype/root element), so mislabeled files still convert correctly.
 - **Fast.** Pure Rust, no ML models, no external services. Median conversion time is under 5ms per document.
 - **Bindings that stay out of the way.** Node.js conversion runs on the libuv thread pool and never blocks the event loop; Python releases the GIL so other threads keep running. TypeScript types and Python stubs ship with the packages.
 - **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required.
@@ -146,6 +146,7 @@ let document = anydoc::to_document(&bytes, None)?;
 | OpenDocument     | `.odt`, `.ods`, `.odp`                                     |
 | Rich Text Format | `.rtf`                                                     |
 | EPUB             | `.epub`                                                    |
+| HTML             | `.html`, `.htm`                                            |
 | CSV              | `.csv`                                                     |
 | PDF              | `.pdf`                                                     |
 
@@ -189,7 +190,7 @@ Speed is one warm conversion per document on a Ryzen 9 9950X3D (Windows 11, 64 G
 
 ## Format detection
 
-The format is read from the file content, using the marker its specification designates: the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types. CSV has no such marker, so the extension or an explicit format names it instead.
+The format is read from the file content, using the marker its specification designates: the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types, or an HTML doctype/root element. CSV has no such marker, so the extension or an explicit format names it instead. Standalone HTML files can therefore be recognized even when an exporter gives them a `.doc` extension; MHTML is not yet supported.
 
 ```rust
 Format::from_bytes(&bytes); // Some(Format::Docx), or None when nothing matches
@@ -234,7 +235,7 @@ document bytes
   ├─► format detection      → content markers, not the extension
   │
   ├─► format parser          → one per format (doc, docx, ppt, pptx, xls,
-  │                            xlsx, odt/ods/odp, rtf, epub, csv)
+  │                            xlsx, odt/ods/odp, rtf, epub, html, csv)
   │         │
   │         └─► Document     → shared model: blocks, inlines, tables,
   │                            footnotes, assets

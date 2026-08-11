@@ -38,6 +38,7 @@ pub mod ns {
     pub const XLINK: &str = "http://www.w3.org/1999/xlink";
     pub const XML: &str = "http://www.w3.org/XML/1998/namespace";
     pub const SVG_COMPAT: &str = "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0";
+    pub const XHTML: &str = "http://www.w3.org/1999/xhtml";
 
     pub const VML: &str = "urn:schemas-microsoft-com:vml";
     pub const O_VML: &str = "urn:schemas-microsoft-com:office:office";
@@ -218,7 +219,12 @@ pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
                     });
                 }
                 bump_nodes(&mut nodes)?;
-                stack.push(start_to_element(&e, &reader, &mut interner));
+                let elem = start_to_element(&e, &reader, &mut interner);
+                if is_html_void_element(&elem) {
+                    attach(&mut stack, &mut root, Node::Elem(elem));
+                } else {
+                    stack.push(elem);
+                }
             }
             Event::Empty(e) => {
                 bump_nodes(&mut nodes)?;
@@ -269,6 +275,21 @@ pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
         log::warn!("recovered malformed xml (unclosed or mismatched elements)");
     }
     Ok(root)
+}
+
+/// HTML permits these elements to omit an end tag. Treating them as empty
+/// while parsing the shared XML-ish DOM keeps a standalone HTML document from
+/// swallowing its following siblings (for example, `<meta>` capturing the
+/// `<body>`). Namespaced XHTML and unqualified HTML are both accepted; other
+/// vocabularies still follow the normal XML recovery rules.
+fn is_html_void_element(elem: &Element) -> bool {
+    matches!(elem.ns.as_deref(), None | Some(ns::XHTML))
+        && [
+            "area", "base", "basefont", "bgsound", "br", "col", "embed", "frame", "hr", "img",
+            "input", "keygen", "link", "meta", "param", "source", "track", "wbr",
+        ]
+        .iter()
+        .any(|name| elem.local.eq_ignore_ascii_case(name))
 }
 
 /// Transcode an XML part to UTF-8 based on its BOM or encoding declaration.
@@ -503,6 +524,20 @@ mod tests {
         assert_eq!(kid.attr("urn:a", "id"), Some("1"));
         assert_eq!(kid.attr("urn:whatever", "plain"), Some("p"));
         assert!(r.find("urn:b", "root").is_none());
+    }
+
+    #[test]
+    fn html_void_elements_do_not_capture_following_siblings() {
+        let root = parse_xml(
+            br#"<!doctype html><html><head><meta charset="utf-8"><style>p { display: none; }</style></head><body><p>visible sibling</p><img src="x.png"><p>second</p></body></html>"#,
+        )
+        .unwrap();
+        let html = root.child_elems().next().unwrap();
+        let head = html.child_elems().find(|e| e.local == "head").unwrap();
+        assert_eq!(head.child_elems().filter(|e| e.local == "meta").count(), 1);
+        assert!(!head.child_elems().any(|e| e.local == "body"));
+        let body = html.child_elems().find(|e| e.local == "body").unwrap();
+        assert_eq!(body.child_elems().filter(|e| e.local == "p").count(), 2);
     }
 
     #[test]

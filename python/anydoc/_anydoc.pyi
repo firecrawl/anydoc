@@ -4,7 +4,7 @@ import os
 from typing import Literal, final
 
 Format = Literal[
-    "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "xlsx", "ods", "odp", "csv"
+    "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "html", "xlsx", "ods", "odp", "csv"
 ]
 
 class ConvertError(Exception):
@@ -43,9 +43,9 @@ class MissingPartError(ConvertError):
 def format_from_bytes(data: bytes | bytearray) -> Format | None:
     """Detect the format from the content itself: the signature and identity
     each container specification designates (PDF header, RTF open group, OLE
-    stream names, ZIP package mimetype/content types). Plain-text formats
-    (CSV) carry no signature and return `None`; so does anything
-    unrecognized."""
+    stream names, ZIP package mimetype/content types, or an HTML doctype/root
+    element). Plain-text formats (CSV) carry no signature and return `None`; so
+    does anything unrecognized."""
 
 def format_from_extension(extension: str) -> Format | None:
     """The format an extension names, with or without a leading dot."""
