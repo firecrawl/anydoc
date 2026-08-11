@@ -185,9 +185,12 @@ fn strip_list_num_prefix(
 
     // The text the renderer will place before the paragraph.
     let num_text = label.clone().unwrap_or_else(|| marker.label(number));
-    let Some(Block::Paragraph(inlines)) = blocks.first_mut() else {
-        return;
-    };
+    // A list item's pieces may start with block attachments (text boxes,
+    // rules, ...) before the paragraph carrying the inline text, so locate
+    // the first paragraph rather than assuming it is blocks[0].
+    let para_idx = blocks.iter().position(|b| matches!(b, Block::Paragraph(_)));
+    let Some(para_idx) = para_idx else { return };
+    let Block::Paragraph(inlines) = &mut blocks[para_idx] else { unreachable!() };
 
     // Flatten enough leading text inlines to decide whether the prefix matches.
     let mut flat = String::new();
@@ -206,9 +209,10 @@ fn strip_list_num_prefix(
         }
     }
 
-    // Must start with `num_text` followed by a separator or end-of-string.
+    // Must start with `num_text` followed by a separator: an exact match with
+    // nothing after it is content that happens to equal the prefix, not a
+    // hardened prefix over content we should strip.
     let sep = match flat.strip_prefix(&num_text) {
-        Some("") => 0,
         Some(r) if r.starts_with(' ') || r.starts_with('\t') => 1,
         _ => return,
     };
@@ -234,7 +238,10 @@ fn strip_list_num_prefix(
                     }
                 }
             }
-            Inline::LineBreak | Inline::Anchor(_) => {} // consume
+            // Anchors and line breaks carry structural meaning (intra-document link
+            // targets, source line boundaries), so preserve them instead of
+            // consuming them as part of the prefix region.
+            Inline::LineBreak | Inline::Anchor(_) => head.push(inv),
             other => {
                 strip = 0;
                 head.push(other);
@@ -246,7 +253,7 @@ fn strip_list_num_prefix(
 
     // Don't leave a ghost paragraph with no visible content.
     if inlines.is_empty() {
-        blocks.remove(0);
+        blocks.remove(para_idx);
     }
 }
 
