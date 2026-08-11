@@ -4,7 +4,7 @@ expression: output
 ---
 # Fixture Document
 
-Plain paragraph with **bold**, *italic*, and struck runs. **Style-bold paragraph with a** NotBold-styled span **inside.**
+Plain paragraph with **bold**, *italic*, and <s>struck</s> runs. **Style-bold paragraph with a** NotBold-styled span **inside.**
 
 ## Lists
 
@@ -40,6 +40,6 @@ Text box: after the box.
 
 Value below one millionth: 0.0000004 should survive.
 
-Footnote after an astral character.
+1 Footnote after an astral character.
 
 i Endnote body text.

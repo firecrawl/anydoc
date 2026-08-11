@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "anydoc"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "calamine",
  "cfb",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "anydoc-python"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anydoc",
  "pyo3",
@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "anydoc-wasm"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anydoc",
  "js-sys",
@@ -915,9 +915,9 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "lopdf"
-version = "0.41.0"
+version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67513274c50a2b51e5f75d9e682fcf4ab064a8a9c9ae2c3c59309084882bb24d"
+checksum = "25aab26d99567469098e64a02f42679f8965c6401263eefa31d8f2dcc37a221c"
 dependencies = [
  "aes",
  "bitflags 2.13.1",
@@ -1071,9 +1071,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "pdf-inspector"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7475018de0880b394b7cc50f871fac0c010aa411dcd14c64074a3e640a4c05c"
+checksum = "fd2f755e49ad38eafbc82ba2bec1c59d57b5bf829b13a8f35e4263bc8913df3a"
 dependencies = [
  "env_logger",
  "include_dir",
