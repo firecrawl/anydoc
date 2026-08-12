@@ -125,6 +125,30 @@ let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Csv)?;
 let document = anydoc::to_document(&bytes, None)?;
 ```
 
+### PDF images
+
+The native bindings can return each positioned PDF image as PNG bytes. The
+Markdown target is already the image's file name, so consumers only need to
+save the returned bytes under that name:
+
+```python
+from pathlib import Path
+import anydoc
+
+result = anydoc.pdf_to_markdown_with_images(Path("report.pdf").read_bytes())
+for image in result.images:
+    Path(image.filename).write_bytes(image.data)
+
+Path("report.md").write_text(result.markdown)
+# Markdown contains, for example: ![Image: Im0](p1_i1.png)
+```
+
+The same API is `pdfToMarkdownWithImages` in Node.js and WebAssembly. Rust
+callers enable the `pdf-images` feature and use
+`anydoc::pdf_to_markdown_with_images`. The feature currently requires Rust
+1.92 because of the optional renderer; the default AnyDoc build remains on
+its Rust 1.88 minimum.
+
 ## Features
 
 - **One output for every format.** Each format parses into a shared document model and renders through a single Markdown serializer, so escaping, tables, heading anchors, and footnotes behave identically whether the input was a `.doc` from 2003 or a `.pptx` from yesterday.
@@ -133,7 +157,7 @@ let document = anydoc::to_document(&bytes, None)?;
 - **Content-based format detection.** The format is read from the bytes themselves (PDF header, RTF open group, OLE stream names, ZIP package mimetype), so mislabeled files still convert correctly.
 - **Fast.** Pure Rust, no ML models, no external services. Median conversion time is under 5ms per document.
 - **Bindings that stay out of the way.** Node.js conversion runs on the libuv thread pool and never blocks the event loop; Python releases the GIL so other threads keep running. TypeScript types and Python stubs ship with the packages.
-- **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required.
+- **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), with an opt-in API for positioned PNG images and no OCR service required.
 - **Agent ready.** Ships as an [Agent Skill](#agent-skill): one `npx skills add firecrawl/anydoc` and any agent can read office documents.
 
 ## Supported formats

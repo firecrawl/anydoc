@@ -11,7 +11,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-anydoc = { path = ".." }
+anydoc = { path = "..", features = ["pdf-images"] }
 napi = { version = "3", default-features = false, features = ["napi4"] }
 napi-derive = "3"
 

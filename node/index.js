@@ -711,6 +711,7 @@ module.exports.InlineKind = nativeBinding.InlineKind
 module.exports.LinkTargetKind = nativeBinding.LinkTargetKind
 module.exports.MarkerKind = nativeBinding.MarkerKind
 module.exports.NoteKind = nativeBinding.NoteKind
+module.exports.pdfToMarkdownWithImages = nativeBinding.pdfToMarkdownWithImages
 module.exports.TableKind = nativeBinding.TableKind
 module.exports.toDocument = nativeBinding.toDocument
 module.exports.toMarkdown = nativeBinding.toMarkdown

@@ -37,6 +37,25 @@ export interface Document {
   assets: Array<Asset>
 }
 
+export interface PdfConversion {
+  markdown: string
+  images: Array<PdfImage>
+}
+
+export interface PdfImage {
+  /** File name used by the corresponding Markdown image. */
+  filename: string
+  /** One-based source page number. */
+  page: number
+  /** Source placement as [x, y, width, height] in PDF points. */
+  bbox: [number, number, number, number]
+  width: number
+  height: number
+  /** Complete PNG file bytes. */
+  data: Uint8Array
+  warnings: Array<string>
+}
+
 export type BlockKind =
   | 'heading'
   | 'paragraph'

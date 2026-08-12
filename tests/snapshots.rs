@@ -48,6 +48,13 @@ fn corpus() {
         }
         let name = rel.to_string_lossy().replace(['\\', '/'], "__");
         let output = convert(&path);
+        #[cfg(feature = "pdf-images")]
+        if rel == Path::new("pdf/text.pdf") {
+            let pdf = anydoc::pdf_to_markdown_with_images(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(pdf.images.len(), 1);
+            assert!(pdf.markdown.contains(&pdf.images[0].filename));
+            assert_eq!(&pdf.images[0].data[..8], b"\x89PNG\r\n\x1a\n");
+        }
         // Once the unified recovery policy exists (P1), annotated malformed
         // fixtures must match their single expected outcome.
         if let Some(outcome) = expected_outcome(&path) {
