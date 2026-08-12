@@ -296,6 +296,31 @@ fn url_pipes_cannot_split_table_cells() {
 }
 
 #[test]
+fn code_span_pipes_cannot_split_table_cells() {
+    let md = doc(vec![table_from(
+        vec![
+            vec![
+                Cell::from_inlines(vec![Inline::plain("Operator")]),
+                Cell::from_inlines(vec![Inline::plain("Meaning")]),
+            ],
+            vec![
+                Cell::from_inlines(vec![styled("a | b", Style { code: true, ..Style::PLAIN })]),
+                Cell::from_inlines(vec![Inline::plain("bitwise or")]),
+            ],
+        ],
+        1,
+    )]);
+    assert_eq!(md, "| Operator | Meaning |\n| --- | --- |\n| `a \\| b` | bitwise or |\n");
+}
+
+#[test]
+fn code_block_pipes_cannot_split_table_cells() {
+    let cell = Cell::new(vec![Block::CodeBlock { lang: None, text: "ls | wc -l".into() }]);
+    let md = doc(vec![table_from(vec![vec![cell]], 0)]);
+    assert_eq!(md, "|  |\n| --- |\n| `ls \\| wc -l` |\n");
+}
+
+#[test]
 fn url_angle_brackets_are_encoded_without_bracketing() {
     let md = doc(vec![Block::Paragraph(vec![Inline::Link {
         content: vec![Inline::plain("link")],

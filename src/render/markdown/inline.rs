@@ -205,7 +205,7 @@ fn render_text_run(
     }
     if !core.is_empty() {
         if style.code {
-            push_code_span(core, out);
+            push_code_span(core, ctx, out);
         } else {
             let mut open = String::new();
             if style.strike {
@@ -232,8 +232,10 @@ fn render_text_run(
     }
 }
 
-pub(crate) fn push_code_span(text: &str, out: &mut String) {
+pub(crate) fn push_code_span(text: &str, ctx: InlineContext, out: &mut String) {
     let text = text.replace('\n', " ");
+    // A raw pipe splits a GFM table cell even inside a code span.
+    let text = if ctx == InlineContext::TableCell { text.replace('|', "\\|") } else { text };
     let fence = backtick_fence(&text, 1);
     let pad = if text.starts_with('`') || text.ends_with('`') { " " } else { "" };
     let _ = write!(out, "{fence}{pad}{text}{pad}{fence}");
