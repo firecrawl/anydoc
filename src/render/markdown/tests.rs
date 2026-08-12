@@ -321,6 +321,28 @@ fn code_block_pipes_cannot_split_table_cells() {
 }
 
 #[test]
+fn code_span_backslash_before_pipe_round_trips() {
+    // GFM's cell scanner never splits at a pipe preceded by a backslash
+    // (`table_cell = (escaped_char|[^|\r\n])+` is matched greedily, no parity
+    // counting), and unescape_pipes() strips exactly one backslash before each
+    // `|`. Emitting `\\|` for code text `\|` therefore renders back as `\|`.
+    let md = doc(vec![table_from(
+        vec![
+            vec![
+                Cell::from_inlines(vec![Inline::plain("Pattern")]),
+                Cell::from_inlines(vec![Inline::plain("Meaning")]),
+            ],
+            vec![
+                Cell::from_inlines(vec![styled("a \\| b", Style { code: true, ..Style::PLAIN })]),
+                Cell::from_inlines(vec![Inline::plain("BRE alternation")]),
+            ],
+        ],
+        1,
+    )]);
+    assert_eq!(md, "| Pattern | Meaning |\n| --- | --- |\n| `a \\\\| b` | BRE alternation |\n");
+}
+
+#[test]
 fn url_angle_brackets_are_encoded_without_bracketing() {
     let md = doc(vec![Block::Paragraph(vec![Inline::Link {
         content: vec![Inline::plain("link")],
