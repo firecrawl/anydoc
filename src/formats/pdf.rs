@@ -5,14 +5,18 @@
 //! image-only PDFs need OCR, which is out of scope here; they error as
 //! unsupported. Pages flagged for OCR in an otherwise text-based document
 //! degrade with a log, consistent with the crate-wide recovery policy.
+//! Embedded images are retained as positioned Markdown placeholders.
 //!
 //! [pdf-inspector]: https://github.com/firecrawl/pdf-inspector
 
 use crate::error::ConvertError;
-use pdf_inspector::PdfError;
+use pdf_inspector::{MarkdownOptions, PdfError, PdfOptions};
 
 pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
-    let result = pdf_inspector::process_pdf_mem(bytes).map_err(map_error)?;
+    let markdown = MarkdownOptions { include_images: true, ..MarkdownOptions::default() };
+    let result =
+        pdf_inspector::process_pdf_mem_with_options(bytes, PdfOptions::new().markdown(markdown))
+            .map_err(map_error)?;
     if !result.pages_needing_ocr.is_empty() {
         log::warn!(
             "{} of {} pages need OCR and were not extracted",
