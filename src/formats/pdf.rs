@@ -14,9 +14,9 @@ use crate::error::ConvertError;
 use pdf_inspector::{PdfError, PdfOptions, PdfProcessResult};
 
 pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
-    let result =
+    let mut result =
         pdf_inspector::process_pdf_mem_with_options(bytes, PdfOptions::new()).map_err(map_error)?;
-    markdown_from_result(result)
+    take_markdown(&mut result)
 }
 
 #[cfg(feature = "pdf-images")]
@@ -24,12 +24,12 @@ pub fn to_markdown_with_images(bytes: &[u8]) -> Result<crate::PdfConversion, Con
     use pdf_inspector::{MarkdownOptions, RenderOptions};
 
     let markdown_options = MarkdownOptions { include_images: true, ..MarkdownOptions::default() };
-    let result = pdf_inspector::process_pdf_mem_with_options(
+    let mut result = pdf_inspector::process_pdf_mem_with_options(
         bytes,
         PdfOptions::new().markdown(markdown_options),
     )
     .map_err(map_error)?;
-    let mut markdown = markdown_from_result(result)?;
+    let mut markdown = take_markdown(&mut result)?;
     let mut total_bytes = 0_usize;
     let extracted =
         pdf_inspector::extract_images_mem(bytes, RenderOptions::new()).map_err(map_render_error)?;
@@ -65,10 +65,24 @@ pub fn to_markdown_with_images(bytes: &[u8]) -> Result<crate::PdfConversion, Con
         });
     }
 
-    Ok(crate::PdfConversion { markdown, images })
+    Ok(crate::PdfConversion {
+        markdown,
+        images,
+        page_count: result.page_count,
+        pages_needing_ocr: result.pages_needing_ocr,
+        ocr_reasons_by_page: result
+            .ocr_reasons_by_page
+            .into_iter()
+            .map(|reason| crate::PdfOcrReasons { page: reason.page, reasons: reason.reasons })
+            .collect(),
+        pages_with_tables: result.layout.pages_with_tables,
+        pages_with_columns: result.layout.pages_with_columns,
+        is_complex_layout: result.layout.is_complex,
+        has_encoding_issues: result.has_encoding_issues,
+    })
 }
 
-fn markdown_from_result(result: PdfProcessResult) -> Result<String, ConvertError> {
+fn take_markdown(result: &mut PdfProcessResult) -> Result<String, ConvertError> {
     if !result.pages_needing_ocr.is_empty() {
         log::warn!(
             "{} of {} pages need OCR and were not extracted",
@@ -79,7 +93,7 @@ fn markdown_from_result(result: PdfProcessResult) -> Result<String, ConvertError
     if result.has_encoding_issues {
         log::warn!("broken font encodings detected; extracted text may be garbled");
     }
-    match result.markdown {
+    match result.markdown.take() {
         Some(mut markdown) if !markdown.trim().is_empty() => {
             if !markdown.ends_with('\n') {
                 markdown.push('\n');

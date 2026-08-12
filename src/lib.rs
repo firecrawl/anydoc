@@ -30,6 +30,30 @@ pub struct PdfConversion {
     pub markdown: String,
     /// Positioned images in PDF content-stream order.
     pub images: Vec<PdfImage>,
+    /// Number of pages in the source PDF.
+    pub page_count: u32,
+    /// One-based page numbers whose text requires OCR.
+    pub pages_needing_ocr: Vec<u32>,
+    /// Machine-readable OCR reasons grouped by one-based page number.
+    pub ocr_reasons_by_page: Vec<PdfOcrReasons>,
+    /// One-based pages where tables were detected.
+    pub pages_with_tables: Vec<u32>,
+    /// One-based pages where multiple text columns were detected.
+    pub pages_with_columns: Vec<u32>,
+    /// Whether the PDF contains tables or multi-column text.
+    pub is_complex_layout: bool,
+    /// Whether broken font encodings were detected.
+    pub has_encoding_issues: bool,
+}
+
+/// OCR diagnostics for one PDF page.
+#[cfg(feature = "pdf-images")]
+#[derive(Debug)]
+pub struct PdfOcrReasons {
+    /// One-based source page number.
+    pub page: u32,
+    /// Machine-readable reason identifiers.
+    pub reasons: Vec<String>,
 }
 
 /// One positioned PDF image encoded as PNG.

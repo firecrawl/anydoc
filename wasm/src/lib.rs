@@ -120,6 +120,13 @@ pub fn pdf_to_markdown_with_images(bytes: &[u8]) -> Result<JsValue, JsValue> {
 struct PdfConversion {
     markdown: String,
     images: Vec<PdfImage>,
+    page_count: u32,
+    pages_needing_ocr: Vec<u32>,
+    ocr_reasons_by_page: Vec<PdfOcrReasons>,
+    pages_with_tables: Vec<u32>,
+    pages_with_columns: Vec<u32>,
+    is_complex_layout: bool,
+    has_encoding_issues: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -133,6 +140,12 @@ struct PdfImage {
     #[serde(with = "serde_bytes")]
     data: Vec<u8>,
     warnings: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct PdfOcrReasons {
+    page: u32,
+    reasons: Vec<String>,
 }
 
 impl From<anydoc::PdfConversion> for PdfConversion {
@@ -152,6 +165,17 @@ impl From<anydoc::PdfConversion> for PdfConversion {
                     warnings: image.warnings,
                 })
                 .collect(),
+            page_count: conversion.page_count,
+            pages_needing_ocr: conversion.pages_needing_ocr,
+            ocr_reasons_by_page: conversion
+                .ocr_reasons_by_page
+                .into_iter()
+                .map(|reason| PdfOcrReasons { page: reason.page, reasons: reason.reasons })
+                .collect(),
+            pages_with_tables: conversion.pages_with_tables,
+            pages_with_columns: conversion.pages_with_columns,
+            is_complex_layout: conversion.is_complex_layout,
+            has_encoding_issues: conversion.has_encoding_issues,
         }
     }
 }

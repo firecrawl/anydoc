@@ -185,6 +185,21 @@ struct PdfConversion {
     markdown: String,
     /// list[PdfImage]
     images: Py<PyList>,
+    page_count: u32,
+    pages_needing_ocr: Vec<u32>,
+    /// list[PdfOcrReasons]
+    ocr_reasons_by_page: Py<PyList>,
+    pages_with_tables: Vec<u32>,
+    pages_with_columns: Vec<u32>,
+    is_complex_layout: bool,
+    has_encoding_issues: bool,
+}
+
+/// OCR diagnostics for one PDF page.
+#[pyclass(frozen, get_all, module = "anydoc")]
+struct PdfOcrReasons {
+    page: u32,
+    reasons: Vec<String>,
 }
 
 /// Convert PDF bytes to Markdown and return the PNG data for each positioned
@@ -213,7 +228,22 @@ fn pdf_to_markdown_with_images(py: Python<'_>, data: Vec<u8>) -> PyResult<PdfCon
             )
         })
         .collect::<PyResult<Vec<_>>>()?;
-    Ok(PdfConversion { markdown: conversion.markdown, images: PyList::new(py, images)?.unbind() })
+    let ocr_reasons = conversion
+        .ocr_reasons_by_page
+        .into_iter()
+        .map(|reason| Py::new(py, PdfOcrReasons { page: reason.page, reasons: reason.reasons }))
+        .collect::<PyResult<Vec<_>>>()?;
+    Ok(PdfConversion {
+        markdown: conversion.markdown,
+        images: PyList::new(py, images)?.unbind(),
+        page_count: conversion.page_count,
+        pages_needing_ocr: conversion.pages_needing_ocr,
+        ocr_reasons_by_page: PyList::new(py, ocr_reasons)?.unbind(),
+        pages_with_tables: conversion.pages_with_tables,
+        pages_with_columns: conversion.pages_with_columns,
+        is_complex_layout: conversion.is_complex_layout,
+        has_encoding_issues: conversion.has_encoding_issues,
+    })
 }
 
 /// Parse an in-memory document into the document model, which also carries
@@ -259,6 +289,7 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<document::Table>()?;
     m.add_class::<PdfConversion>()?;
     m.add_class::<PdfImage>()?;
+    m.add_class::<PdfOcrReasons>()?;
     m.add("ConvertError", m.py().get_type::<ConvertError>())?;
     m.add("EncryptedError", m.py().get_type::<EncryptedError>())?;
     m.add("MalformedError", m.py().get_type::<MalformedError>())?;

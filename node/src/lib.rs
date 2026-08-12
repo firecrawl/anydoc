@@ -136,6 +136,20 @@ pub struct PdfImage {
 pub struct PdfConversion {
     pub markdown: String,
     pub images: Vec<PdfImage>,
+    pub page_count: u32,
+    pub pages_needing_ocr: Vec<u32>,
+    pub ocr_reasons_by_page: Vec<PdfOcrReasons>,
+    pub pages_with_tables: Vec<u32>,
+    pub pages_with_columns: Vec<u32>,
+    pub is_complex_layout: bool,
+    pub has_encoding_issues: bool,
+}
+
+#[napi(object)]
+pub struct PdfOcrReasons {
+    /// One-based source page number.
+    pub page: u32,
+    pub reasons: Vec<String>,
 }
 
 impl From<anydoc::PdfConversion> for PdfConversion {
@@ -155,6 +169,17 @@ impl From<anydoc::PdfConversion> for PdfConversion {
                     warnings: image.warnings,
                 })
                 .collect(),
+            page_count: conversion.page_count,
+            pages_needing_ocr: conversion.pages_needing_ocr,
+            ocr_reasons_by_page: conversion
+                .ocr_reasons_by_page
+                .into_iter()
+                .map(|reason| PdfOcrReasons { page: reason.page, reasons: reason.reasons })
+                .collect(),
+            pages_with_tables: conversion.pages_with_tables,
+            pages_with_columns: conversion.pages_with_columns,
+            is_complex_layout: conversion.is_complex_layout,
+            has_encoding_issues: conversion.has_encoding_issues,
         }
     }
 }

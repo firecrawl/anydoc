@@ -238,6 +238,13 @@ export declare const enum NoteKind {
 export interface PdfConversion {
   markdown: string
   images: Array<PdfImage>
+  pageCount: number
+  pagesNeedingOcr: Array<number>
+  ocrReasonsByPage: Array<PdfOcrReasons>
+  pagesWithTables: Array<number>
+  pagesWithColumns: Array<number>
+  isComplexLayout: boolean
+  hasEncodingIssues: boolean
 }
 
 export interface PdfImage {
@@ -251,6 +258,12 @@ export interface PdfImage {
   /** Complete PNG file bytes. */
   data: Buffer
   warnings: Array<string>
+}
+
+export interface PdfOcrReasons {
+  /** One-based source page number. */
+  page: number
+  reasons: Array<string>
 }
 
 /**

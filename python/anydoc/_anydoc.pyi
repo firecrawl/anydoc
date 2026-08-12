@@ -72,6 +72,19 @@ def pdf_to_markdown_with_images(data: bytes | bytearray) -> PdfConversion:
 class PdfConversion:
     markdown: str
     images: list[PdfImage]
+    page_count: int
+    pages_needing_ocr: list[int]
+    ocr_reasons_by_page: list[PdfOcrReasons]
+    pages_with_tables: list[int]
+    pages_with_columns: list[int]
+    is_complex_layout: bool
+    has_encoding_issues: bool
+
+@final
+class PdfOcrReasons:
+    page: int
+    """One-based source page number."""
+    reasons: list[str]
 
 @final
 class PdfImage:

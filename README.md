@@ -143,6 +143,9 @@ Path("report.md").write_text(result.markdown)
 # Markdown contains, for example: ![Image: Im0](p1_i1.png)
 ```
 
+The result also reports one-based OCR pages and reasons, table/column pages,
+layout complexity, and font-encoding issues from the same PDF pass.
+
 The same API is `pdfToMarkdownWithImages` in Node.js and WebAssembly. Rust
 callers enable the `pdf-images` feature and use
 `anydoc::pdf_to_markdown_with_images`. The feature currently requires Rust

@@ -56,6 +56,10 @@ for image in result.images:
 Path("report.md").write_text(result.markdown)
 ```
 
+`result.pages_needing_ocr` and `result.ocr_reasons_by_page` identify pages
+whose extracted text is incomplete; table, column, layout, and encoding
+diagnostics are returned alongside them.
+
 ## Errors
 
 A conversion raises only when no meaningful Markdown could come out of the file. The exception type names what went wrong:

@@ -40,6 +40,19 @@ export interface Document {
 export interface PdfConversion {
   markdown: string
   images: Array<PdfImage>
+  pageCount: number
+  pagesNeedingOcr: Array<number>
+  ocrReasonsByPage: Array<PdfOcrReasons>
+  pagesWithTables: Array<number>
+  pagesWithColumns: Array<number>
+  isComplexLayout: boolean
+  hasEncodingIssues: boolean
+}
+
+export interface PdfOcrReasons {
+  /** One-based source page number. */
+  page: number
+  reasons: Array<string>
 }
 
 export interface PdfImage {
