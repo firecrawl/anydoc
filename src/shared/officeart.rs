@@ -9,26 +9,27 @@ use std::io::Read;
 
 /// (verAndInstance, recType, body) of the OfficeArt record at `off` — the
 /// same 8-byte header the PPT record stream uses.
-pub fn record_at(data: &[u8], off: usize) -> Option<(u16, u16, &[u8])> {
-    let hdr = data.get(off..off + 8)?;
+pub(crate) fn record_at(data: &[u8], off: usize) -> Option<(u16, u16, &[u8])> {
+    let rest = data.get(off..)?;
+    let hdr = rest.get(..8)?;
     let ver_inst = u16::from_le_bytes([hdr[0], hdr[1]]);
     let rec_type = u16::from_le_bytes([hdr[2], hdr[3]]);
     let len = u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]) as usize;
-    let body = data.get(off + 8..(off + 8).checked_add(len)?)?;
+    let body = rest.get(8..)?.get(..len)?;
     Some((ver_inst, rec_type, body))
 }
 
 /// An extracted picture payload.
-pub struct Blip<'a> {
-    pub media_type: &'static str,
-    pub extension: &'static str,
-    pub bytes: Cow<'a, [u8]>,
+pub(crate) struct Blip<'a> {
+    pub(crate) media_type: &'static str,
+    pub(crate) extension: &'static str,
+    pub(crate) bytes: Cow<'a, [u8]>,
 }
 
 /// Decode one blip record (`recType` 0xF01A–0xF01F). Metafile blips may be
 /// deflate-compressed; the output is bounded by the declared uncompressed
 /// size, capped at `max_bytes`.
-pub fn decode_blip(
+pub(crate) fn decode_blip(
     ver_inst: u16,
     rec_type: u16,
     body: &[u8],
@@ -51,9 +52,10 @@ pub fn decode_blip(
         0xF01A | 0xF01B => {
             let doubled = matches!(instance, 0x3D5 | 0x217);
             let header = if doubled { 32 } else { 16 };
-            let cb_size = u32::from_le_bytes(body.get(header..header + 4)?.try_into().ok()?);
-            let compression = *body.get(header + 32)?;
-            let data = body.get(header + 34..)?;
+            let header_and_data = body.get(header..)?;
+            let cb_size = u32::from_le_bytes(header_and_data.get(..4)?.try_into().ok()?);
+            let compression = *header_and_data.get(32)?;
+            let data = header_and_data.get(34..)?;
             let (media_type, extension) =
                 if rec_type == 0xF01A { ("image/emf", "emf") } else { ("image/wmf", "wmf") };
             let bytes = match compression {
@@ -77,7 +79,7 @@ pub fn decode_blip(
 /// `Pictures` stream block sequence, or an inline shape container),
 /// descending into containers. Bounded traversal: record counts and
 /// nesting beyond any real drawing abort the search.
-pub fn first_blip(data: &[u8], max_bytes: usize) -> Option<Blip<'_>> {
+pub(crate) fn first_blip(data: &[u8], max_bytes: usize) -> Option<Blip<'_>> {
     // (cursor, end) ranges into `data`.
     let mut stack: Vec<(usize, usize)> = vec![(0, data.len())];
     let mut visited = 0u32;
@@ -91,8 +93,9 @@ pub fn first_blip(data: &[u8], max_bytes: usize) -> Option<Blip<'_>> {
             stack.pop();
             continue;
         };
-        let body_start = cursor + 8;
-        stack.last_mut().unwrap().0 = body_start + body.len();
+        let body_start = cursor.checked_add(8)?;
+        let body_end = body_start.checked_add(body.len())?;
+        stack.last_mut().unwrap().0 = body_end;
         visited += 1;
         if visited > 10_000 || stack.len() > 16 {
             return None;
@@ -101,14 +104,15 @@ pub fn first_blip(data: &[u8], max_bytes: usize) -> Option<Blip<'_>> {
             return Some(blip);
         }
         if rec_type == 0xF007 {
-            let inner_start = body_start + fbse_blip_offset(body).unwrap_or(body.len());
-            if inner_start < body_start + body.len() {
-                stack.push((inner_start, body_start + body.len()));
+            let inner_start =
+                body_start.checked_add(fbse_blip_offset(body).unwrap_or(body.len()))?;
+            if inner_start < body_end {
+                stack.push((inner_start, body_end));
             }
             continue;
         }
         if ver_inst & 0xF == 0xF {
-            stack.push((body_start, body_start + body.len()));
+            stack.push((body_start, body_end));
         }
     }
 }
@@ -117,11 +121,11 @@ pub fn first_blip(data: &[u8], max_bytes: usize) -> Option<Blip<'_>> {
 /// 36-byte header plus the entry's name.
 fn fbse_blip_offset(body: &[u8]) -> Option<usize> {
     let cb_name = *body.get(33)? as usize;
-    Some(36 + cb_name)
+    36usize.checked_add(cb_name)
 }
 
 /// Decode the blip embedded in an FBSE (0xF007) record body, if present.
-pub fn fbse_blip(body: &[u8], max_bytes: usize) -> Option<Blip<'_>> {
+pub(crate) fn fbse_blip(body: &[u8], max_bytes: usize) -> Option<Blip<'_>> {
     let offset = fbse_blip_offset(body)?;
     let (ver_inst, rec_type, blip_body) = record_at(body, offset)?;
     decode_blip(ver_inst, rec_type, blip_body, max_bytes)

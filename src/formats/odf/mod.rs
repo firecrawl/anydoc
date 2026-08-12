@@ -296,6 +296,41 @@ mod tests {
     }
 
     #[test]
+    fn styled_runs_stop_at_tables_and_work_inside_cells() {
+        let content = r#"<office:document-content
+            xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+            xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+            xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+            xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0">
+            <office:automatic-styles>
+              <style:style style:name="Source_20_Code" style:family="paragraph"/>
+            </office:automatic-styles>
+            <office:body><office:text>
+              <text:p text:style-name="Source_20_Code">before table</text:p>
+              <table:table><table:table-row><table:table-cell>
+                <text:p text:style-name="Source_20_Code">inside cell</text:p>
+              </table:table-cell></table:table-row></table:table>
+              <text:p>after table</text:p>
+            </office:text></office:body>
+            </office:document-content>"#;
+        let doc = parse(&odt_with_content(content)).unwrap();
+        let [Block::CodeBlock { text: before, .. }, Block::Table(table), Block::Paragraph(after)] =
+            &doc.blocks[..]
+        else {
+            panic!("unexpected block order: {:?}", doc.blocks);
+        };
+        assert_eq!(before, "before table");
+        assert_eq!(crate::model::inlines_to_plain_text(after), "after table");
+        let crate::model::CellSlot::Origin(cell) = &table.grid[0][0] else {
+            panic!("expected an origin cell")
+        };
+        let [Block::CodeBlock { text: inside, .. }] = &cell.blocks[..] else {
+            panic!("unexpected cell blocks: {:?}", cell.blocks)
+        };
+        assert_eq!(inside, "inside cell");
+    }
+
+    #[test]
     fn resource_limit_in_manifest_is_fatal() {
         let mut manifest = Vec::new();
         for _ in 0..(crate::package::limits::MAX_XML_DEPTH + 2) {

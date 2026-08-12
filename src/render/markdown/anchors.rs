@@ -35,7 +35,7 @@ impl AnchorMap {
 }
 
 pub(crate) fn resolve_anchors(doc: &Document) -> AnchorMap {
-    let mut used: HashSet<String> = HashSet::new();
+    let mut ids = UniqueIds::default();
     let mut resolved: HashMap<String, Resolved> = HashMap::new();
 
     // Anchor ids some link in the document targets, notes included.
@@ -50,7 +50,9 @@ pub(crate) fn resolve_anchors(doc: &Document) -> AnchorMap {
     // inside the heading content) to those slugs.
     walk_blocks(&doc.blocks, &mut |block| {
         if let Block::Heading { anchor, content, .. } = block {
-            let slug = unique(&mut used, gfm_slug(&inlines_to_plain_text(content)));
+            let Some(slug) = ids.claim(gfm_slug(&inlines_to_plain_text(content))) else {
+                return;
+            };
             let mut bind = |id: &str| {
                 resolved
                     .entry(id.to_string())
@@ -65,8 +67,10 @@ pub(crate) fn resolve_anchors(doc: &Document) -> AnchorMap {
 
     // Pass 2: every remaining anchor a link targets gets a sanitized HTML id.
     let mut assign = |id: &str| {
-        if linked.contains(id) && !resolved.contains_key(id) {
-            let html = unique(&mut used, sanitize_id(id));
+        if linked.contains(id)
+            && !resolved.contains_key(id)
+            && let Some(html) = ids.claim(sanitize_id(id))
+        {
             resolved.insert(id.to_string(), Resolved { fragment: html, emit_html: true });
         }
     };
@@ -143,17 +147,30 @@ fn for_each_anchor(inlines: &[Inline], f: &mut impl FnMut(&str)) {
     }
 }
 
-fn unique(used: &mut HashSet<String>, base: String) -> String {
-    if used.insert(base.clone()) {
-        return base;
-    }
-    for n in 1.. {
-        let candidate = format!("{base}-{n}");
-        if used.insert(candidate.clone()) {
-            return candidate;
+/// Allocates ids without repeatedly probing used numeric suffixes.
+#[derive(Default)]
+struct UniqueIds {
+    used: HashSet<String>,
+    next_suffix: HashMap<String, usize>,
+}
+
+impl UniqueIds {
+    fn claim(&mut self, base: String) -> Option<String> {
+        if self.used.insert(base.clone()) {
+            self.next_suffix.entry(base.clone()).or_insert(1);
+            return Some(base);
+        }
+        let mut n = self.next_suffix.get(&base).copied().unwrap_or(1);
+        loop {
+            let candidate = format!("{base}-{n}");
+            n = n.checked_add(1)?;
+            if self.used.insert(candidate.clone()) {
+                self.next_suffix.insert(base, n);
+                self.next_suffix.entry(candidate.clone()).or_insert(1);
+                return Some(candidate);
+            }
         }
     }
-    unreachable!()
 }
 
 /// GFM-style heading slugs: full-Unicode lowercase, spaces become hyphens,
@@ -261,9 +278,19 @@ mod tests {
 
     #[test]
     fn duplicate_slugs_get_numeric_suffixes() {
-        let mut used = HashSet::new();
-        assert_eq!(unique(&mut used, gfm_slug("dup")), "dup");
-        assert_eq!(unique(&mut used, gfm_slug("dup")), "dup-1");
-        assert_eq!(unique(&mut used, gfm_slug("dup")), "dup-2");
+        let mut ids = UniqueIds::default();
+        assert_eq!(ids.claim(gfm_slug("dup")).as_deref(), Some("dup"));
+        assert_eq!(ids.claim(gfm_slug("dup")).as_deref(), Some("dup-1"));
+        assert_eq!(ids.claim(gfm_slug("dup")).as_deref(), Some("dup-2"));
+    }
+
+    #[test]
+    fn duplicate_slug_suffixes_advance_without_reprobing() {
+        let mut ids = UniqueIds::default();
+        for n in 0..10_000 {
+            let expected = if n == 0 { "same".to_string() } else { format!("same-{n}") };
+            assert_eq!(ids.claim("same".to_string()), Some(expected));
+        }
+        assert_eq!(ids.next_suffix.get("same"), Some(&10_000));
     }
 }

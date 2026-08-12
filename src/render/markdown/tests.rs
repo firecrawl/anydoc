@@ -275,6 +275,49 @@ fn merged_cells_render_blank_covered_positions() {
 }
 
 #[test]
+fn trailing_covered_columns_are_preserved() {
+    let mut b = GridBuilder::new();
+    b.next_row();
+    b.place(Cell::spanning(vec![Block::Paragraph(vec![Inline::plain("wide")])], 3, 1)).unwrap();
+    let mut table = b.finish(TableKind::Data);
+    table.header_rows = 1;
+    let md = doc(vec![Block::Table(table)]);
+    assert_eq!(md, "| wide |  |  |\n| --- | --- | --- |\n");
+}
+
+#[test]
+fn url_pipes_cannot_split_table_cells() {
+    let cell = Cell::from_inlines(vec![Inline::Link {
+        content: Vec::new(),
+        target: LinkTarget::External("https://e.test/a|b".into()),
+    }]);
+    let md = doc(vec![table_from(vec![vec![cell]], 0)]);
+    assert_eq!(md, "|  |\n| --- |\n| [https://e.test/a\\|b](https://e.test/a%7Cb) |\n");
+}
+
+#[test]
+fn url_angle_brackets_are_encoded_without_bracketing() {
+    let md = doc(vec![Block::Paragraph(vec![Inline::Link {
+        content: vec![Inline::plain("link")],
+        target: LinkTarget::External("https://e.test/a<b>c".into()),
+    }])]);
+    assert_eq!(
+        md,
+        "[link](https://e.test/a%3Cb%3Ec)
+"
+    );
+}
+
+#[test]
+fn url_controls_cannot_split_the_document() {
+    let md = doc(vec![Block::Paragraph(vec![Inline::Link {
+        content: vec![Inline::plain("link")],
+        target: LinkTarget::External("https://e.test/a\nb".into()),
+    }])]);
+    assert_eq!(md, "[link](https://e.test/a%0Ab)\n");
+}
+
+#[test]
 fn nested_list() {
     let md = doc(vec![Block::List(List {
         marker: MarkerKind::Bullet,
@@ -430,6 +473,44 @@ fn duplicate_note_ids_render_one_definition() {
 }
 
 #[test]
+fn blank_duplicate_note_does_not_suppress_a_later_definition() {
+    let md = document_to_markdown(&Document {
+        blocks: vec![Block::Paragraph(vec![Inline::plain("Text"), Inline::NoteRef("a".into())])],
+        notes: vec![
+            note("a", vec![Block::Paragraph(Vec::new())]),
+            note("a", vec![Block::Paragraph(vec![Inline::plain("Usable.")])]),
+        ],
+        assets: Vec::new(),
+    });
+    assert_eq!(md, "Text[^1]\n\n[^1]: Usable.\n");
+}
+
+#[test]
+fn an_empty_item_keeps_its_marker_and_the_numbering() {
+    let item = |text: &str| ListItem {
+        blocks: if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![Block::Paragraph(vec![Inline::plain(text)])]
+        },
+        checked: None,
+        marker_label: None,
+    };
+    let md = doc(vec![Block::List(List {
+        marker: MarkerKind::Decimal,
+        start: 1,
+        items: vec![item("one"), item(""), item("three")],
+    })]);
+    assert_eq!(
+        md,
+        "1. one
+2. 
+3. three
+"
+    );
+}
+
+#[test]
 fn task_list() {
     let md = doc(vec![Block::List(List {
         marker: MarkerKind::Bullet,
@@ -529,6 +610,12 @@ fn code_block_in_cell_uses_code_span() {
     let cell = Cell::new(vec![Block::CodeBlock { lang: None, text: "let `x` = 1;".into() }]);
     let md = doc(vec![table_from(vec![vec![cell]], 0)]);
     assert_eq!(md, "|  |\n| --- |\n| ``let `x` = 1;`` |\n");
+}
+
+#[test]
+fn code_block_keeps_its_language_hint() {
+    let md = doc(vec![Block::CodeBlock { lang: Some("rust".into()), text: "fn main() {}".into() }]);
+    assert_eq!(md, "```rust\nfn main() {}\n```\n");
 }
 
 #[test]

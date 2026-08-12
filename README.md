@@ -156,32 +156,32 @@ anydoc is measured against six other converters on 100 real-world documents span
 | tool         | formats   | median ms | docs judged | score  | completeness | structure | formatting | cleanliness |
 | ------------ | --------- | --------- | ----------- | ------ | ------------ | --------- | ---------- | ----------- |
 | anydoc       | **14/14** | **4.4**   | 94          | **81** | **87**       | **79**    | **78**     | **81**      |
-| libreoffice  | 12/14     | 1129.5    | 87          | 39     | 59           | 41        | 40         | 24          |
-| unstructured | 8/14      | 572.9     | 58          | 62     | 76           | 59        | 50         | 63          |
-| markitdown   | 6/14      | 134.8     | 33          | 64     | 78           | 66        | 60         | 52          |
-| pandoc       | 5/14      | 102.1     | 34          | 56     | 73           | 57        | 56         | 38          |
-| docling      | 4/14      | 513.6     | 21          | 57     | 60           | 59        | 57         | 51          |
-| mammoth      | 1/14      | 52.5      | 8           | 69     | 80           | 72        | 74         | 51          |
+| libreoffice  | 12/14     | 1129.5    | 87          | 40     | 59           | 42        | 40         | 24          |
+| unstructured | 8/14      | 572.9     | 58          | 63     | 76           | 59        | 51         | 63          |
+| markitdown   | 6/14      | 134.8     | 33          | 65     | 78           | 66        | 60         | 52          |
+| pandoc       | 5/14      | 102.1     | 34          | 56     | 74           | 57        | 56         | 38          |
+| docling      | 4/14      | 513.6     | 21          | 57     | 60           | 60        | 57         | 51          |
+| mammoth      | 1/14      | 52.5      | 8           | 70     | 84           | 71        | 75         | 51          |
 
 Per format, like for like:
 
 | format | anydoc | libreoffice | unstructured | markitdown | pandoc | docling | mammoth |
 | ------ | ------ | ----------- | ------------ | ---------- | ------ | ------- | ------- |
 | doc    | **87** | 57          | 67           | -          | -      | -       | -       |
-| docm   | **85** | 45          | -            | -          | -      | -       | -       |
-| docx   | **86** | 54          | 53           | 73         | 67     | 71      | 69      |
+| docm   | **84** | 48          | -            | -          | -      | -       | -       |
+| docx   | **88** | 56          | 53           | 71         | 68     | 71      | 70      |
 | epub   | **77** | -           | 72           | 72         | 52     | -       | -       |
 | odp    | **86** | 23          | -            | -          | -      | -       | -       |
 | ods    | **82** | 38          | -            | -          | -      | -       | -       |
-| odt    | **80** | 52          | 68           | -          | 60     | -       | -       |
+| odt    | **80** | 51          | 68           | -          | 60     | -       | -       |
 | ppt    | **80** | 26          | -            | -          | -      | -       | -       |
-| pptx   | **75** | 24          | -            | 61         | -      | 52      | -       |
-| rtf    | **88** | 54          | 45           | -          | 44     | -       | -       |
+| pptx   | **74** | 24          | -            | 66         | -      | 52      | -       |
+| rtf    | **88** | 53          | 46           | -          | 45     | -       | -       |
 | xls    | **80** | 38          | 66           | 62         | -      | -       | -       |
 | xlsm   | **76** | 32          | -            | -          | -      | -       | -       |
 | xlsx   | **72** | 30          | 66           | 55         | -      | 47      | -       |
 
-**How quality was scored:** an LLM judge (Claude Sonnet 5) compares two tools' outputs blind against ground truth: the document's first six pages, rendered to images by LibreOffice. Each output is scored on completeness, structure, formatting, and cleanliness. Every pair is judged twice with the outputs swapped to cancel position bias, for 481 verdicts in total. Each tool's `score` averages its per-format scores over the formats it supports, so a corpus heavy in one format can't skew it. It also means each row averages a different set of formats (mammoth's 69 is docx alone, while anydoc's 81 spans all fourteen), so the per-format table is the fair comparison.
+**How quality was scored:** an LLM judge (Claude Sonnet 5) compares two tools' outputs blind against ground truth: the document's first six pages, rendered to images by LibreOffice. Each output is scored on completeness, structure, formatting, and cleanliness. Every pair is judged twice with the outputs swapped to cancel position bias, for 482 verdicts in total. Each tool's `score` averages its per-format scores over the formats it supports, so a corpus heavy in one format can't skew it. It also means each row averages a different set of formats (mammoth's 69 is docx alone, while anydoc's 81 spans all fourteen), so the per-format table is the fair comparison.
 
 Speed is one warm conversion per document on a Ryzen 9 9950X3D (Windows 11, 64 GB DDR5-6400). anydoc and the Python libraries are timed with process spawn excluded; the CLI tools include it, since that is how they are used. The harness lives in [`bench/`](bench/README.md); the corpus is not redistributable and is not in the repo.
 

@@ -10,6 +10,7 @@ mod tables;
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Note, NoteKind, Style, inlines_are_empty};
 use crate::shared::binary::codepage_encoding;
+use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::field_result;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
@@ -135,6 +136,8 @@ struct CharState {
     ls: Option<i32>,
     legacy_list: Option<MarkerKind>,
     outline: Option<u8>,
+    /// The block container this paragraph's style names.
+    block: Option<BlockStyle>,
     /// Emphasis the paragraph style itself carries, subtracted from headings.
     style_base: Style,
     suppress: bool,
@@ -154,6 +157,7 @@ impl Default for CharState {
             ls: None,
             legacy_list: None,
             outline: None,
+            block: None,
             style_base: Style::PLAIN,
             suppress: false,
             capture: Capture::None,
@@ -466,6 +470,7 @@ struct Parser<'a> {
     inlines: Vec<Inline>,
     blocks: Vec<Block>,
     list_run: Vec<ListEntry>,
+    styled: StyledRun,
     counters: Counters,
     table: TableState,
     dest: Destinations,
@@ -488,6 +493,7 @@ impl<'a> Parser<'a> {
             inlines: Vec::new(),
             blocks: Vec::new(),
             list_run: Vec::new(),
+            styled: StyledRun::default(),
             counters: Counters::default(),
             table: TableState::new(),
             dest: Destinations::default(),
@@ -626,6 +632,7 @@ impl<'a> Parser<'a> {
                 if let Some(def) = def {
                     self.flush_pending();
                     self.state.outline = def.outline;
+                    self.state.block = def.block;
                     self.state.style = def.delta.apply(self.state.style);
                     self.state.style_base = self.state.style;
                 }
@@ -646,6 +653,7 @@ impl<'a> Parser<'a> {
                 self.state.ls = None;
                 self.state.legacy_list = None;
                 self.state.outline = None;
+                self.state.block = None;
                 self.state.style_base = Style::PLAIN;
             }
             // \page and \column break the flow without ending the
@@ -934,7 +942,7 @@ impl<'a> Parser<'a> {
     /// Flush the finished top-level table, if any, into the block stream.
     fn flush_top_table(&mut self) -> Result<(), ConvertError> {
         if let Some(block) = self.table.take_table(1)? {
-            self.flush_list();
+            self.flush_runs();
             self.blocks.push(block);
         }
         Ok(())
@@ -945,16 +953,21 @@ impl<'a> Parser<'a> {
         let listtext = self.dest.listtext.take();
 
         if self.state.in_table {
-            if !inlines_are_empty(&inlines) {
-                let depth = self.state.itap.max(1);
-                self.table.push_cell_paragraph(depth, Block::Paragraph(inlines));
-            }
+            let depth = self.state.itap.max(1);
+            self.table.push_cell_paragraph(depth, self.state.block, inlines);
             return Ok(());
         }
         self.flush_top_table()?;
 
+        // A styled container absorbs its blank paragraphs: they are the
+        // blank lines of a code block.
+        if let Some(style) = self.state.block {
+            flush_list(&mut self.blocks, &mut self.list_run);
+            self.styled.push(style, inlines, &mut self.blocks);
+            return Ok(());
+        }
         if inlines_are_empty(&inlines) {
-            self.flush_list();
+            self.flush_runs();
             return Ok(());
         }
         // Numbering identity comes from the list tables; the captured label
@@ -962,7 +975,7 @@ impl<'a> Parser<'a> {
         // advance the sequence and keep their number visible.
         let entry = self.list_entry(listtext.as_deref());
         if let Some(level) = self.state.outline {
-            self.flush_list();
+            self.flush_runs();
             let mut content = inlines;
             rebase_emphasis(&mut content, self.state.style_base);
             if let Some((key, _, number, label)) = &entry
@@ -985,7 +998,7 @@ impl<'a> Parser<'a> {
             });
             return Ok(());
         }
-        self.flush_list();
+        self.flush_runs();
         self.blocks.push(Block::Paragraph(inlines));
         Ok(())
     }
@@ -1058,7 +1071,7 @@ impl<'a> Parser<'a> {
     fn end_cell(&mut self, depth: usize) -> Result<(), ConvertError> {
         let inlines = std::mem::take(&mut self.inlines);
         self.dest.listtext = None;
-        self.table.end_cell(depth, inlines)
+        self.table.end_cell(depth, self.state.block, inlines)
     }
 
     fn end_row(&mut self, depth: usize) -> Result<(), ConvertError> {
@@ -1069,7 +1082,9 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn flush_list(&mut self) {
+    /// Close every open block run before something else is emitted.
+    fn flush_runs(&mut self) {
+        self.styled.flush(&mut self.blocks);
         flush_list(&mut self.blocks, &mut self.list_run);
     }
 
@@ -1082,7 +1097,7 @@ impl<'a> Parser<'a> {
         // Collapse any dangling nested tables outward, then flush.
         self.table.collapse_nested()?;
         self.flush_top_table()?;
-        self.flush_list();
+        self.flush_runs();
         Ok(Document { blocks: self.blocks, notes: self.dest.notes, assets: self.assets.assets })
     }
 }
@@ -1112,6 +1127,41 @@ mod tests {
             let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
             assert_eq!(markdown, "Alfa\\\nBeta\n", "source: {src}");
         }
+    }
+
+    #[test]
+    fn backslash_before_a_line_break_breaks_the_paragraph() {
+        // The paragraph mark Cocoa's RTF writer emits instead of `\par`.
+        for src in
+            ["{\\rtf1 Alpha\\\nBeta\\\nGamma\\\n}", "{\\rtf1 Alpha\\\r\nBeta\\\rGamma\\\r\n}"]
+        {
+            let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+            assert_eq!(markdown, "Alpha\n\nBeta\n\nGamma\n", "source: {src:?}");
+        }
+    }
+
+    #[test]
+    fn body_text_before_a_table_stays_out_of_the_first_cell() {
+        let src = "{\\rtf1 Intro\\\n\\trowd\\cellx2000\\cellx4000 A\\cell B\\cell\\row}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert!(markdown.starts_with("Intro\n\n|"), "{markdown}");
+    }
+
+    #[test]
+    fn styled_runs_stop_before_tables_and_work_inside_cells() {
+        let src = br"{\rtf1\ansi{\stylesheet{\s0 Normal;}{\s1 Source Code;}}\pard\plain\s1 before table\par\trowd\cellx2000\pard\plain\intbl\s1 first\par second\cell\row}";
+        let doc = parse(src).unwrap();
+        let [Block::CodeBlock { text: before, .. }, Block::Table(table)] = &doc.blocks[..] else {
+            panic!("unexpected block order: {:?}", doc.blocks)
+        };
+        assert_eq!(before, "before table");
+        let crate::model::CellSlot::Origin(cell) = &table.grid[0][0] else {
+            panic!("expected an origin cell")
+        };
+        let [Block::CodeBlock { text: inside, .. }] = &cell.blocks[..] else {
+            panic!("unexpected cell blocks: {:?}", cell.blocks)
+        };
+        assert_eq!(inside, "first\nsecond");
     }
 
     #[test]

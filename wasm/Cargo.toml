@@ -4,7 +4,7 @@
 # only keeps it off crates.io.
 [package]
 name = "anydoc-wasm"
-version = "0.1.6"
+version = "0.1.8"
 edition = "2024"
 description = "WebAssembly bindings for anydoc: convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown in the browser"
 license = "MIT"

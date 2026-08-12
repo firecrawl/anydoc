@@ -31,10 +31,7 @@ const CT_NS: &str = "http://schemas.openxmlformats.org/package/2006/content-type
 const MANIFEST_NS: &str = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0";
 const SPREADSHEET_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
-pub fn from_bytes(bytes: &[u8]) -> Option<Format> {
-    if bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-") {
-        return Some(Format::Pdf);
-    }
+pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Format> {
     if bytes.starts_with(b"{\\rtf") {
         return Some(Format::Rtf);
     }
@@ -43,6 +40,9 @@ pub fn from_bytes(bytes: &[u8]) -> Option<Format> {
     }
     if bytes.starts_with(b"PK\x03\x04") {
         return detect_zip(bytes);
+    }
+    if bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-") {
+        return Some(Format::Pdf);
     }
     None
 }
@@ -238,6 +238,12 @@ mod tests {
         assert_eq!(from_bytes(b"{\\rtf1\\ansi hi}"), Some(Format::Rtf));
         assert_eq!(from_bytes(b"a,b,c\n1,2,3\n"), None);
         assert_eq!(from_bytes(b""), None);
+    }
+
+    #[test]
+    fn container_signature_wins_over_an_early_embedded_pdf() {
+        let pkg = zip_of(&[("embedded.pdf", b"%PDF-1.7\n"), ("word/document.xml", b"<document/>")]);
+        assert_eq!(from_bytes(&pkg), Some(Format::Docx));
     }
 
     #[test]

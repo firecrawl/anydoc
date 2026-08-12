@@ -7,13 +7,13 @@ use crate::package::limits;
 use std::io::{Cursor, Read};
 
 /// Little-endian `u16` at `off`; `None` when out of bounds.
-pub fn get_u16(b: &[u8], off: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(b.get(off..off + 2)?.try_into().ok()?))
+pub(crate) fn get_u16(b: &[u8], off: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(b.get(off..)?.get(..2)?.try_into().ok()?))
 }
 
 /// Little-endian `u32` at `off`; `None` when out of bounds.
-pub fn get_u32(b: &[u8], off: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(b.get(off..off + 4)?.try_into().ok()?))
+pub(crate) fn get_u32(b: &[u8], off: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(b.get(off..)?.get(..4)?.try_into().ok()?))
 }
 
 /// Map an Office code-page number to the decoder used by RTF and OLE
@@ -40,7 +40,7 @@ pub fn codepage_encoding(cp: u32) -> &'static encoding_rs::Encoding {
 /// Read a named stream from an OLE2 compound file. A missing stream is
 /// `MissingPart`; the read is hard-capped at `MAX_ENTRY_BYTES` so a corrupt
 /// sector chain cannot expand without bound.
-pub fn read_ole_stream<R: Read + std::io::Seek>(
+pub(crate) fn read_ole_stream<R: Read + std::io::Seek>(
     ole: &mut cfb::CompoundFile<R>,
     name: &str,
 ) -> Result<Vec<u8>, ConvertError> {
@@ -233,5 +233,11 @@ mod tests {
     #[test]
     fn malformed_summary_offsets_degrade_to_no_title() {
         assert_eq!(parse_summary_title(&[0xFE, 0xFF, 0, 0, 0, 0]), None);
+    }
+
+    #[test]
+    fn integer_reads_reject_overflowing_offsets() {
+        assert_eq!(get_u16(&[1, 2, 3, 4], usize::MAX), None);
+        assert_eq!(get_u32(&[1, 2, 3, 4], usize::MAX), None);
     }
 }

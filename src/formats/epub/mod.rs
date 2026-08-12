@@ -367,7 +367,8 @@ impl HtmlCtx for ChapterCtx<'_, '_> {
             return None;
         }
         if let Some(fragment) = href.strip_prefix('#') {
-            return Some(LinkTarget::Anchor(scoped(&self.chapter_path, Some(fragment))));
+            let fragment = path::decode_fragment(fragment);
+            return Some(LinkTarget::Anchor(scoped(&self.chapter_path, Some(&fragment))));
         }
         if is_absolute_uri(href) {
             return Some(LinkTarget::External(href.to_string()));

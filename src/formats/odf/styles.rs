@@ -7,6 +7,7 @@
 
 use crate::error::ConvertError;
 use crate::package::xml::{Element, ns};
+use crate::shared::blockstyle::{self, BlockStyle};
 use crate::shared::delta::StyleDelta;
 use crate::shared::list::MarkerKind;
 use std::cell::RefCell;
@@ -149,6 +150,22 @@ impl<'a> OdfStyles<'a> {
             self.memo.borrow_mut().insert(current.to_string(), delta);
         }
         Ok(delta)
+    }
+
+    /// The block container a paragraph style names, walking
+    /// `parent-style-name`: an automatic style carries the name on the
+    /// named style it derives from.
+    pub fn block_style(&self, name: &str) -> Option<BlockStyle> {
+        let mut id = key("paragraph", name);
+        let mut visited: HashSet<String> = HashSet::new();
+        while visited.insert(id.clone()) {
+            let (def, parent) = self.raw.get(&id)?;
+            if let Some(hit) = def.attr(ns::STYLE, "name").and_then(blockstyle::from_style_name) {
+                return Some(hit);
+            }
+            id = parent.clone()?;
+        }
+        None
     }
 
     pub fn list_level(&self, style_name: &str, depth: usize) -> ListLevel {

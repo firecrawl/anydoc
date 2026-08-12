@@ -27,7 +27,7 @@ pub fn walk_sprms(grpprl: &[u8], mut f: impl FnMut(u16, &[u8])) {
         let sprm = u16::from_le_bytes([grpprl[pos], grpprl[pos + 1]]);
         pos += 2;
         let len = sprm_operand_len(sprm, &grpprl[pos..]);
-        let Some(operand) = grpprl.get(pos..pos + len) else {
+        let Some(operand) = grpprl.get(pos..).and_then(|rest| rest.get(..len)) else {
             break;
         };
         f(sprm, operand);
@@ -159,7 +159,8 @@ pub fn apply_pap_sprms(grpprl: &[u8], data: &[u8], delta: &mut PapDelta) {
         0x6646 => {
             if let Some(off) = get_u32(operand, 0).map(|v| v as usize)
                 && let Some(cb) = get_u16(data, off).map(|v| v as usize)
-                && let Some(huge) = data.get(off + 2..off + 2 + cb)
+                && let Some(huge) = data.get(off..).and_then(|rest| rest.get(2..))
+                && let Some(huge) = huge.get(..cb)
             {
                 apply_pap_sprms(huge, &[], delta);
             }

@@ -145,7 +145,7 @@ fn render_link(
         if matches!(target, LinkTarget::Anchor(_)) {
             return;
         }
-        let _ = write!(out, "[{}]({})", escape_url_as_text(&url), format_url(&url));
+        let _ = write!(out, "[{}]({})", escape_url_as_text(&url, ctx), format_url(&url));
     } else {
         let _ = write!(out, "[{}]({})", label, format_url(&url));
     }

@@ -1802,6 +1802,179 @@ def outline_docx():
     ])
 
 
+def blockstyle_odt():
+    """LibreOffice names its quote and code containers Quotations and
+    Preformatted Text; automatic styles reach them through parent-style-name."""
+    styles_xml = """<?xml version="1.0"?>
+<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0">
+<office:styles>
+<style:style style:name="Quotations" style:family="paragraph" style:parent-style-name="Standard"/>
+<style:style style:name="Preformatted_20_Text" style:display-name="Preformatted Text"
+ style:family="paragraph" style:parent-style-name="Standard"/>
+</office:styles></office:document-styles>"""
+    content_xml = """<?xml version="1.0"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+<office:automatic-styles>
+<style:style style:name="P1" style:family="paragraph"
+ style:parent-style-name="Preformatted_20_Text"/>
+</office:automatic-styles>
+<office:body><office:text>
+<text:p>Body before.</text:p>
+<text:p text:style-name="Preformatted_20_Text">fn main() {</text:p>
+<text:p text:style-name="P1"><text:s text:c="4"/>println!("ok");</text:p>
+<text:p text:style-name="Preformatted_20_Text">}</text:p>
+<text:p>Body between.</text:p>
+<text:p text:style-name="Quotations">A quotation.</text:p>
+<text:p text:style-name="Quotations">Its second paragraph.</text:p>
+<text:p>Body after.</text:p>
+</office:text></office:body></office:document-content>"""
+    write_zip(OUT / "odt" / "handmade-blockstyle.odt",
+              [("content.xml", content_xml), ("styles.xml", styles_xml)],
+              mimetype_first="application/vnd.oasis.opendocument.text")
+
+
+def blockstyle_rtf():
+    parts = [
+        rb"{\rtf1\ansi\ansicpg1252\deff0",
+        rb"{\fonttbl{\f0\fcharset0 Arial;}}",
+        # The style name is the trailing text of each stylesheet group; \s4
+        # reaches its container only through the \sbasedon chain.
+        rb"{\stylesheet{\s0 Normal;}{\s1 Preformatted Text;}"
+        rb"{\s2 Quotations;}{\s3 Quote;}{\s4\sbasedon1 Listing;}}",
+        rb"\pard\plain\s0 Body before.\par",
+        rb"\pard\plain\s1 fn main() \{\par",
+        rb"\pard\plain\s4     println!(\'22ok\'22);\par",
+        rb"\pard\plain\s1 \}\par",
+        rb"\pard\plain\s0 Body between.\par",
+        rb"\pard\plain\s2 A quotation.\par",
+        rb"\pard\plain\s3 Its second paragraph.\par",
+        rb"\pard\plain\s0 Body after.\par",
+        rb"}",
+    ]
+    (OUT / "rtf").mkdir(parents=True, exist_ok=True)
+    (OUT / "rtf" / "handmade-blockstyle.rtf").write_bytes(b"\n".join(parts))
+
+
+def blockstyle_doc():
+    """Binary .doc whose STSH names a Source Code and a Quote style, bound to
+    paragraphs through a PAPX FKP page."""
+    CODE_ISTD, QUOTE_ISTD = 15, 16
+
+    def std(name, istd):
+        stdf = bytearray(10)
+        struct.pack_into("<H", stdf, 0, 0x0FFE)              # sti: not built-in
+        struct.pack_into("<H", stdf, 2, (0x0FFF << 4) | 1)   # istdBase nil, paragraph
+        struct.pack_into("<H", stdf, 4, 2)                   # cupx: papx + chpx
+        chars = name.encode("utf-16-le")
+        xstz = struct.pack("<H", len(name)) + chars + b"\x00\x00"
+        # UPX payloads follow the name, each 2-byte aligned in the record.
+        upx = struct.pack("<H", 2) + struct.pack("<H", istd) + struct.pack("<H", 0)
+        record = bytes(stdf) + xstz + upx
+        assert len(record) % 2 == 0
+        return struct.pack("<H", len(record)) + record
+
+    cstd = QUOTE_ISTD + 1
+    stshi = bytearray(18)
+    struct.pack_into("<H", stshi, 0, cstd)      # cstd
+    struct.pack_into("<H", stshi, 2, 10)        # cbSTDBaseInFile
+    stsh = struct.pack("<H", len(stshi)) + bytes(stshi)
+    for istd in range(cstd):
+        if istd == CODE_ISTD:
+            stsh += std("Source Code", istd)
+        elif istd == QUOTE_ISTD:
+            stsh += std("Quote", istd)
+        else:
+            stsh += struct.pack("<H", 0)
+
+    paras = ["Body before.\r", "fn main() {\r", "}\r", "A quotation.\r", "Body after.\r"]
+    istds = [0, CODE_ISTD, CODE_ISTD, QUOTE_ISTD, 0]
+    text = "".join(paras).encode("cp1252")
+
+    # PAPX FKP page: rgfc boundaries, then one BX per paragraph pointing at a
+    # PAPX blob (cb 0 form: byte 0 zero, byte 1 length in words).
+    fkp = bytearray(512)
+    fc = 0x400
+    bounds = [fc]
+    for p in paras:
+        fc += len(p)
+        bounds.append(fc)
+    for i, b in enumerate(bounds):
+        struct.pack_into("<I", fkp, i * 4, b)
+    count = len(paras)
+    blob_at = {}
+    off = (count + 1) * 4 + count * 13
+    off += off % 2
+    for istd in dict.fromkeys(istds):
+        fkp[off] = 0
+        fkp[off + 1] = 1
+        struct.pack_into("<H", fkp, off + 2, istd)
+        blob_at[istd] = off // 2
+        off += 4
+    for k, istd in enumerate(istds):
+        fkp[(count + 1) * 4 + k * 13] = blob_at[istd]
+    fkp[511] = count
+
+    PN = 3
+    word_doc = bytearray(word_doc_stream(0x0409, text))
+    word_doc += b"\x00" * (PN * 512 - len(word_doc))
+    word_doc += fkp
+    # PlcfBtePapx: one FKP page covering the whole text.
+    plcf = struct.pack("<II", 0x400, bounds[-1]) + struct.pack("<I", PN)
+    struct.pack_into("<II", word_doc, 0xA2, 0, len(stsh))
+    struct.pack_into("<II", word_doc, 0x102, len(stsh), len(plcf))
+
+    write_cfb(OUT / "doc" / "handmade-blockstyle.doc",
+              [("0Table", stsh + plcf), ("WordDocument", bytes(word_doc))])
+
+
+def blockstyle_docx():
+    def p(text, style, runs=None):
+        body = runs or f'<w:r><w:t xml:space="preserve">{text}</w:t></w:r>'
+        return f'<w:p><w:pPr><w:pStyle w:val="{style}"/></w:pPr>{body}</w:p>'
+
+    # Syntax highlighting: Pandoc splits a code line into styled runs.
+    highlighted = ('<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">fn</w:t></w:r>'
+                   '<w:r><w:t xml:space="preserve"> main() {</w:t></w:r>')
+    document = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document {W}><w:body>
+{para("Body before.")}
+{p("", "SourceCode", highlighted)}
+{p("    println!(\"ok\");", "SourceCode")}
+{p("}", "SourceCode")}
+{para("Body between.")}
+{p("A quotation.", "BlockText")}
+{p("Its second paragraph.", "BlockText")}
+{para("Body between.")}
+{p("Word quote.", "Quote")}
+{p("Word intense quote.", "IntenseQuote")}
+{para("Body between.")}
+{p("HTML preformatted line.", "HTMLPreformatted")}
+{p("Inherits Source Code.", "SourceCodeChild")}
+{para("Body after.")}
+</w:body></w:document>"""
+    styles = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles {W}>
+<w:docDefaults><w:rPrDefault><w:rPr/></w:rPrDefault></w:docDefaults>
+<w:style w:type="paragraph" w:styleId="SourceCode"><w:name w:val="Source Code"/></w:style>
+<w:style w:type="paragraph" w:styleId="SourceCodeChild"><w:name w:val="Listing"/>
+<w:basedOn w:val="SourceCode"/></w:style>
+<w:style w:type="paragraph" w:styleId="BlockText"><w:name w:val="Block Text"/></w:style>
+<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/></w:style>
+<w:style w:type="paragraph" w:styleId="IntenseQuote"><w:name w:val="Intense Quote"/></w:style>
+<w:style w:type="paragraph" w:styleId="HTMLPreformatted"><w:name w:val="HTML Preformatted"/></w:style>
+</w:styles>"""
+    ct = CONTENT_TYPES_BASE.format(extra="")
+    write_zip(OUT / "docx" / "handmade-blockstyle.docx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/document.xml", document),
+        ("word/styles.xml", styles),
+    ])
+
+
 # ---------------------------------------------------------------------------
 # R14: binary PPT per-slide master selection with tri-state level defaults
 
@@ -2359,6 +2532,10 @@ def main():
     sparsenotes_ppt()
     tables_docx()
     outline_docx()
+    blockstyle_docx()
+    blockstyle_odt()
+    blockstyle_rtf()
+    blockstyle_doc()
     ole_docx()
     links_pptx()
     manyrefs_docx()

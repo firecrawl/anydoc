@@ -4,6 +4,7 @@
 
 use crate::error::ConvertError;
 use crate::model::{Block, Inline, inlines_are_empty};
+use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::grid::{GridRow, build_edge_table};
 
 pub use crate::shared::grid::CellProp;
@@ -30,11 +31,16 @@ struct TableBuild {
 pub struct TableState {
     tables: Vec<TableBuild>,
     cell_blocks: Vec<Vec<Block>>,
+    cell_runs: Vec<StyledRun>,
 }
 
 impl TableState {
     pub fn new() -> Self {
-        TableState { tables: Vec::new(), cell_blocks: vec![Vec::new()] }
+        TableState {
+            tables: Vec::new(),
+            cell_blocks: vec![Vec::new()],
+            cell_runs: vec![StyledRun::default()],
+        }
     }
 
     /// Deepest depth with a builder allocated.
@@ -46,17 +52,28 @@ impl TableState {
         while self.tables.len() < depth {
             self.tables.push(TableBuild::default());
         }
-        while self.cell_blocks.len() < depth {
-            self.cell_blocks.push(Vec::new());
-        }
+        self.ensure_cell_depth(depth);
         &mut self.tables[depth - 1]
     }
 
-    fn cell_block_at(&mut self, depth: usize) -> &mut Vec<Block> {
+    fn ensure_cell_depth(&mut self, depth: usize) {
         while self.cell_blocks.len() < depth {
             self.cell_blocks.push(Vec::new());
         }
+        while self.cell_runs.len() < depth {
+            self.cell_runs.push(StyledRun::default());
+        }
+    }
+
+    fn cell_block_at(&mut self, depth: usize) -> &mut Vec<Block> {
+        self.ensure_cell_depth(depth);
         &mut self.cell_blocks[depth - 1]
+    }
+
+    fn flush_cell_run(&mut self, depth: usize) {
+        self.ensure_cell_depth(depth);
+        let blocks = &mut self.cell_blocks[depth - 1];
+        self.cell_runs[depth - 1].flush(blocks);
     }
 
     /// `\trowd`: reset the row's declared properties.
@@ -87,28 +104,48 @@ impl TableState {
     }
 
     /// A paragraph ended inside a cell at `depth`.
-    pub fn push_cell_paragraph(&mut self, depth: usize, block: Block) {
-        self.cell_block_at(depth).push(block);
+    pub fn push_cell_paragraph(
+        &mut self,
+        depth: usize,
+        style: Option<BlockStyle>,
+        inlines: Vec<Inline>,
+    ) {
+        self.ensure_cell_depth(depth);
+        let blocks = &mut self.cell_blocks[depth - 1];
+        let run = &mut self.cell_runs[depth - 1];
+        if let Some(style) = style {
+            run.push(style, inlines, blocks);
+        } else {
+            run.flush(blocks);
+            if !inlines_are_empty(&inlines) {
+                blocks.push(Block::Paragraph(inlines));
+            }
+        }
     }
 
     /// Whether unfinished cell content is pending at `depth`.
     pub fn has_pending_cell(&mut self, depth: usize) -> bool {
+        self.flush_cell_run(depth);
         !self.cell_block_at(depth).is_empty()
     }
 
     /// Whether a row at `depth` is partially built (pending cell content or
     /// already-closed cells awaiting their `\row`).
     pub fn has_partial_row(&mut self, depth: usize) -> bool {
-        !self.cell_block_at(depth).is_empty()
+        self.has_pending_cell(depth)
             || self.tables.get(depth - 1).is_some_and(|t| !t.row.cells.is_empty())
     }
 
     /// `\cell` / `\nestcell`: close the cell, folding in any completed
     /// deeper table.
-    pub fn end_cell(&mut self, depth: usize, inlines: Vec<Inline>) -> Result<(), ConvertError> {
-        if !inlines_are_empty(&inlines) {
-            self.cell_block_at(depth).push(Block::Paragraph(inlines));
-        }
+    pub fn end_cell(
+        &mut self,
+        depth: usize,
+        style: Option<BlockStyle>,
+        inlines: Vec<Inline>,
+    ) -> Result<(), ConvertError> {
+        self.push_cell_paragraph(depth, style, inlines);
+        self.flush_cell_run(depth);
         // A deeper completed table belongs inside this cell.
         self.flush_into_cell(depth + 1, depth)?;
         let blocks = std::mem::take(self.cell_block_at(depth));
@@ -145,6 +182,7 @@ impl TableState {
     /// Build a finished table at `depth` into cell blocks one level up.
     fn flush_into_cell(&mut self, depth: usize, into: usize) -> Result<(), ConvertError> {
         if let Some(block) = self.take_table(depth)? {
+            self.flush_cell_run(into);
             self.cell_block_at(into).push(block);
         }
         Ok(())
@@ -156,5 +194,31 @@ impl TableState {
             self.flush_into_cell(depth, depth - 1)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn styled_paragraphs_are_grouped_within_one_cell() {
+        let mut state = TableState::new();
+        state.begin_row(1);
+        state.declare_cell(1, 1000);
+        state.push_cell_paragraph(1, Some(BlockStyle::Code), vec![Inline::plain("first")]);
+        state.end_cell(1, Some(BlockStyle::Code), vec![Inline::plain("second")]).unwrap();
+        state.end_row(1);
+
+        let Block::Table(table) = state.take_table(1).unwrap().unwrap() else {
+            panic!("expected a table")
+        };
+        let crate::model::CellSlot::Origin(cell) = &table.grid[0][0] else {
+            panic!("expected an origin cell")
+        };
+        let [Block::CodeBlock { text, .. }] = &cell.blocks[..] else {
+            panic!("unexpected cell blocks: {:?}", cell.blocks)
+        };
+        assert_eq!(text, "first\nsecond");
     }
 }

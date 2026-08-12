@@ -45,13 +45,13 @@ pub fn document_to_markdown(doc: &Document) -> String {
         doc.notes.iter().filter_map(|n| rc.nums.get(&n.id).map(|&num| (n, num))).collect();
     ordered.sort_by_key(|(_, num)| *num);
     for (note, num) in ordered {
-        // Duplicate note ids collapse to one number; render one definition.
-        if !rendered_defs.insert(num) {
-            log::debug!("duplicate note id {:?} dropped from output", note.id);
-            continue;
-        }
         let body = render_blocks(&note.blocks, &rc);
         if body.is_empty() {
+            continue;
+        }
+        // The first non-empty definition for a duplicate id wins.
+        if !rendered_defs.insert(num) {
+            log::debug!("duplicate note id {:?} dropped from output", note.id);
             continue;
         }
         let mut lines = body.lines();

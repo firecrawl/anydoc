@@ -9,6 +9,7 @@
 use crate::error::ConvertError;
 use crate::model::Style;
 use crate::package::xml::{Element, ns};
+use crate::shared::blockstyle::{self, BlockStyle};
 use crate::shared::chain::StyleChains;
 use crate::shared::delta::StyleDelta;
 use crate::shared::heading::{level_from_name, level_from_style_id};
@@ -112,6 +113,15 @@ impl<'a> Styles<'a> {
                 .parse::<u8>()
                 .ok()?;
             Some(if level < 9 { Some(level + 1) } else { None })
+        })
+    }
+
+    /// The block container a paragraph style names, inherited through
+    /// `basedOn` (Word's `Quote`, Pandoc's `Source Code`, ...).
+    pub fn block_style(&self, id: &str) -> Result<Option<BlockStyle>, ConvertError> {
+        self.chains.walk(id, |style| {
+            let name = style.find(ns::W, "name")?.attr(ns::W, "val")?;
+            blockstyle::from_style_name(name)
         })
     }
 

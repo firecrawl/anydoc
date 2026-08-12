@@ -9,17 +9,17 @@
 use crate::error::ConvertError;
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct Target {
+pub(crate) struct Target {
     /// Normalized archive path (no leading slash).
-    pub path: String,
-    pub fragment: Option<String>,
+    pub(crate) path: String,
+    pub(crate) fragment: Option<String>,
 }
 
 /// Resolve a relative or package-absolute reference against the part it
 /// appears in.
-pub fn resolve(base_part: &str, reference: &str) -> Result<Target, ConvertError> {
+pub(crate) fn resolve(base_part: &str, reference: &str) -> Result<Target, ConvertError> {
     let (reference, fragment) = match reference.split_once('#') {
-        Some((r, f)) => (r, Some(f.to_string())),
+        Some((r, f)) => (r, Some(decode_component(f))),
         None => (reference, None),
     };
     let reference = reference.split_once('?').map_or(reference, |(r, _)| r);
@@ -45,7 +45,7 @@ pub fn resolve(base_part: &str, reference: &str) -> Result<Target, ConvertError>
                 segments.pop();
             }
             raw => {
-                let decoded = decode_segment(raw);
+                let decoded = decode_component(raw);
                 if decoded.contains('/') || decoded.contains('\\') {
                     return Err(ConvertError::malformed(format!(
                         "percent-encoded separator in package reference segment {raw:?}"
@@ -63,18 +63,18 @@ pub fn resolve(base_part: &str, reference: &str) -> Result<Target, ConvertError>
     Ok(Target { path: segments.join("/"), fragment })
 }
 
-/// Percent-decode one path segment. Infallible by design: a `%` not
+/// Percent-decode one URI component. Infallible by design: a `%` not
 /// followed by two hex digits passes through literally (producers emit such
 /// names), and non-UTF-8 decoded bytes degrade lossily - the result is only
 /// ever matched against archive entry names, where a near-miss simply fails
 /// the lookup.
-fn decode_segment(segment: &str) -> String {
-    let bytes = segment.as_bytes();
+fn decode_component(component: &str) -> String {
+    let bytes = component.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%'
-            && let Some(hex) = segment.get(i + 1..i + 3)
+            && let Some(hex) = component.get(i..).and_then(|rest| rest.get(1..3))
             // from_str_radix alone also accepts `+5`; only true hex digit
             // pairs decode.
             && hex.bytes().all(|b| b.is_ascii_hexdigit())
@@ -88,6 +88,10 @@ fn decode_segment(segment: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+pub(crate) fn decode_fragment(fragment: &str) -> String {
+    decode_component(fragment)
 }
 
 #[cfg(test)]
@@ -125,6 +129,13 @@ mod tests {
         let t = resolve("OEBPS/ch1.xhtml", "ch2.xhtml?x=1#f").unwrap();
         assert_eq!(t.path, "OEBPS/ch2.xhtml");
         assert_eq!(t.fragment.as_deref(), Some("f"));
+    }
+
+    #[test]
+    fn fragments_are_percent_decoded() {
+        let t = resolve("OEBPS/ch1.xhtml", "ch2.xhtml#caf%C3%A9%20menu").unwrap();
+        assert_eq!(t.fragment.as_deref(), Some("café menu"));
+        assert_eq!(decode_fragment("caf%C3%A9"), "café");
     }
 
     #[test]

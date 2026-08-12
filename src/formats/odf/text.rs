@@ -10,6 +10,7 @@ use crate::model::{
 use crate::package::Package;
 use crate::package::xml::{Element, Node, ns};
 use crate::shared::assets::{AssetSink, media_type_for};
+use crate::shared::blockstyle::StyledRun;
 use crate::shared::delta::{StyleDelta, rebase_emphasis};
 use crate::shared::text::{clean_text, collapse_ws};
 use std::cell::RefCell;
@@ -49,9 +50,11 @@ impl<'a, 'b> Ctx<'a, 'b> {
 
 pub fn parse_container(parent: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError> {
     let mut blocks = Vec::new();
+    let mut run = StyledRun::default();
     for child in parent.child_elems() {
-        parse_block_elem(child, ctx, &mut blocks)?;
+        parse_block_elem(child, ctx, &mut blocks, &mut run)?;
     }
+    run.flush(&mut blocks);
     Ok(blocks)
 }
 
@@ -59,9 +62,14 @@ fn parse_block_elem(
     elem: &Element,
     ctx: &Ctx,
     blocks: &mut Vec<Block>,
+    run: &mut StyledRun,
 ) -> Result<(), ConvertError> {
     let in_text = elem.ns.as_deref().is_some_and(|n| n == ns::TEXT);
     if in_text {
+        // Only a run of same-styled paragraphs continues a container.
+        if !elem.is(ns::TEXT, "p") {
+            run.flush(blocks);
+        }
         match elem.local.as_str() {
             "h" => {
                 let level = elem
@@ -85,8 +93,20 @@ fn parse_block_elem(
             }
             "p" => {
                 let (inlines, boxes) = parse_inline_content(elem, ctx)?;
-                blocks.push(Block::Paragraph(inlines));
-                blocks.extend(boxes);
+                let style =
+                    elem.attr(ns::TEXT, "style-name").and_then(|n| ctx.styles.block_style(n));
+                match style {
+                    Some(style) => run.push(style, inlines, blocks),
+                    None => {
+                        run.flush(blocks);
+                        blocks.push(Block::Paragraph(inlines));
+                    }
+                }
+                if !boxes.is_empty() {
+                    // A frame is not part of the container's text.
+                    run.flush(blocks);
+                    blocks.extend(boxes);
+                }
                 return Ok(());
             }
             "list" => {
@@ -107,6 +127,7 @@ fn parse_block_elem(
         }
     }
     if elem.is(ns::TABLE, "table") {
+        run.flush(blocks);
         blocks.extend(parse_table(elem, ctx)?);
     }
     Ok(())
@@ -176,13 +197,16 @@ fn parse_list(
         let mut chain = ancestors.to_vec();
         chain.push(number);
         let mut item_blocks = Vec::new();
+        let mut item_run = StyledRun::default();
         for child in item.child_elems() {
             if child.is(ns::TEXT, "list") {
+                item_run.flush(&mut item_blocks);
                 item_blocks.extend(parse_list(child, ctx, depth + 1, style_name, &chain)?);
             } else {
-                parse_block_elem(child, ctx, &mut item_blocks)?;
+                parse_block_elem(child, ctx, &mut item_blocks, &mut item_run)?;
             }
         }
+        item_run.flush(&mut item_blocks);
         if header {
             // A list header has no marker: its blocks sit next to the list
             // and do not consume a number.
@@ -458,11 +482,24 @@ fn classify_href(href: &str) -> Option<LinkTarget> {
         if target.is_empty() {
             return None;
         }
-        return Some(LinkTarget::Anchor(target.to_string()));
+        return Some(LinkTarget::Anchor(crate::package::path::decode_fragment(target)));
     }
     if crate::shared::uri::is_absolute_uri(href) {
         Some(LinkTarget::External(href.to_string()))
     } else {
         Some(LinkTarget::Relative(href.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_href_fragments_are_percent_decoded() {
+        assert_eq!(
+            classify_href("#caf%C3%A9%20menu"),
+            Some(LinkTarget::Anchor("café menu".into()))
+        );
     }
 }

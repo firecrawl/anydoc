@@ -9,6 +9,7 @@ use crate::model::{
 use crate::package::Package;
 use crate::package::relationships::{RelTarget, Relationships, TargetMode, rel_target_bytes};
 use crate::package::xml::{Element, ns};
+use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
 use crate::shared::header::resolve_header_rows;
@@ -98,7 +99,25 @@ pub(super) enum ParaKind {
         number: u64,
         label: Option<String>,
     },
+    /// A paragraph whose style names a block container.
+    Styled(BlockStyle),
     Plain,
+}
+
+/// Block runs a following paragraph may extend: a list being built, and a
+/// styled container. Only one is ever open, so starting either closes the
+/// other.
+#[derive(Default)]
+pub(super) struct Runs {
+    list: Vec<ListEntry>,
+    styled: StyledRun,
+}
+
+impl Runs {
+    fn flush(&mut self, blocks: &mut Vec<Block>) {
+        self.styled.flush(blocks);
+        flush_list(blocks, &mut self.list);
+    }
 }
 
 /// A paragraph's content in source order: inline runs interleaved with
@@ -110,9 +129,9 @@ pub(super) enum Piece {
 
 pub(super) fn parse_blocks(parent: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError> {
     let mut blocks: Vec<Block> = Vec::new();
-    let mut list_run: Vec<ListEntry> = Vec::new();
-    collect_blocks(parent, ctx, &mut blocks, &mut list_run)?;
-    flush_list(&mut blocks, &mut list_run);
+    let mut runs = Runs::default();
+    collect_blocks(parent, ctx, &mut blocks, &mut runs)?;
+    runs.flush(&mut blocks);
     Ok(blocks)
 }
 
@@ -120,12 +139,12 @@ fn collect_blocks(
     parent: &Element,
     ctx: &Ctx,
     blocks: &mut Vec<Block>,
-    list_run: &mut Vec<ListEntry>,
+    runs: &mut Runs,
 ) -> Result<(), ConvertError> {
     for child in parent.child_elems() {
         if child.is(ns::MC, "AlternateContent") {
             if let Some(branch) = ctx.alternate_branch(child) {
-                collect_blocks(branch, ctx, blocks, list_run)?;
+                collect_blocks(branch, ctx, blocks, runs)?;
             }
             continue;
         }
@@ -135,60 +154,72 @@ fn collect_blocks(
         match child.local.as_str() {
             "p" => {
                 let (kind, pieces) = parse_paragraph(child, ctx)?;
-                emit_paragraph(kind, pieces, blocks, list_run);
+                emit_paragraph(kind, pieces, blocks, runs);
             }
             "tbl" => {
-                flush_list(blocks, list_run);
+                runs.flush(blocks);
                 blocks.extend(parse_table(child, ctx)?);
             }
             "sdt" => {
                 if let Some(content) = child.find(ns::W, "sdtContent") {
-                    collect_blocks(content, ctx, blocks, list_run)?;
+                    collect_blocks(content, ctx, blocks, runs)?;
                 }
             }
-            "customXml" => collect_blocks(child, ctx, blocks, list_run)?,
+            "customXml" => collect_blocks(child, ctx, blocks, runs)?,
             _ => {}
         }
     }
     Ok(())
 }
 
-fn emit_paragraph(
-    kind: ParaKind,
-    pieces: Vec<Piece>,
-    blocks: &mut Vec<Block>,
-    list_run: &mut Vec<ListEntry>,
-) {
+fn emit_paragraph(kind: ParaKind, pieces: Vec<Piece>, blocks: &mut Vec<Block>, runs: &mut Runs) {
     match kind {
         ParaKind::ListItem { ilvl, key, number, label } => {
-            // Attachments anchored in a list paragraph stay inside the item,
-            // so the surrounding list run is never severed.
-            let (inlines, item_blocks) = split_pieces(pieces);
-            let mut item = vec![Block::Paragraph(inlines)];
-            item.extend(item_blocks);
-            list_run.push(ListEntry { level: ilvl, key, number, label, blocks: item });
+            runs.styled.flush(blocks);
+            let item = pieces_into_blocks(pieces);
+            runs.list.push(ListEntry { level: ilvl, key, number, label, blocks: item });
         }
-        ParaKind::Heading { level, label, base } => {
-            flush_list(blocks, list_run);
-            let (mut content, after) = split_pieces(pieces);
-            if !inlines_are_empty(&content) {
-                rebase_emphasis(&mut content, base);
-                if let Some(label) = label {
-                    content.insert(0, Inline::Text { text: label, style: Style::PLAIN });
-                }
-                blocks.push(Block::Heading { level, anchor: None, content });
-            }
-            blocks.extend(after);
-        }
-        ParaKind::Plain => {
-            flush_list(blocks, list_run);
-            // Emit in source order: paragraph text split around attachments.
+        ParaKind::Styled(style) => {
+            flush_list(blocks, &mut runs.list);
             for piece in pieces {
                 match piece {
-                    Piece::Inlines(inlines) => blocks.push(Block::Paragraph(inlines)),
-                    Piece::Blocks(b) => blocks.extend(b),
+                    Piece::Inlines(inlines) => runs.styled.push(style, inlines, blocks),
+                    Piece::Blocks(attachments) => {
+                        runs.styled.flush(blocks);
+                        blocks.extend(attachments);
+                    }
                 }
             }
+        }
+        ParaKind::Heading { level, label, base } => {
+            runs.flush(blocks);
+            let mut label = label;
+            let mut emitted_heading = false;
+            for piece in pieces {
+                match piece {
+                    Piece::Inlines(mut content) if !inlines_are_empty(&content) => {
+                        rebase_emphasis(&mut content, base);
+                        if !emitted_heading {
+                            if let Some(label) = label.take() {
+                                content
+                                    .insert(0, Inline::Text { text: label, style: Style::PLAIN });
+                            }
+                            blocks.push(Block::Heading { level, anchor: None, content });
+                            emitted_heading = true;
+                        } else {
+                            // Attachments cannot be nested in a heading, so
+                            // subsequent text becomes a paragraph.
+                            blocks.push(Block::Paragraph(content));
+                        }
+                    }
+                    Piece::Inlines(_) => {}
+                    Piece::Blocks(attachments) => blocks.extend(attachments),
+                }
+            }
+        }
+        ParaKind::Plain => {
+            runs.flush(blocks);
+            blocks.extend(pieces_into_blocks(pieces));
         }
     }
 }
@@ -209,6 +240,10 @@ fn parse_paragraph(p: &Element, ctx: &Ctx) -> Result<(ParaKind, Vec<Piece>), Con
         None => None,
     };
     let heading = direct_outline.or(style_heading).flatten();
+    let style_block = match pstyle_id {
+        Some(id) => ctx.styles.block_style(id)?,
+        None => None,
+    };
 
     // Numbering resolves independently of heading semantics: a numbered
     // heading advances its sequence and keeps its number visible.
@@ -234,7 +269,10 @@ fn parse_paragraph(p: &Element, ctx: &Ctx) -> Result<(ParaKind, Vec<Piece>), Con
         }
         None => match numbering {
             Some((ilvl, key, number, label)) => ParaKind::ListItem { ilvl, key, number, label },
-            None => ParaKind::Plain,
+            None => match style_block {
+                Some(style) => ParaKind::Styled(style),
+                None => ParaKind::Plain,
+            },
         },
     };
 
@@ -657,6 +695,19 @@ fn split_pieces(pieces: Vec<Piece>) -> (Vec<Inline>, Vec<Block>) {
     (inlines, blocks)
 }
 
+fn pieces_into_blocks(pieces: Vec<Piece>) -> Vec<Block> {
+    let mut blocks = Vec::new();
+    for piece in pieces {
+        match piece {
+            // Visually empty inlines still become a paragraph: a
+            // bookmark-only one carries the anchor link resolution binds to.
+            Piece::Inlines(inlines) => blocks.push(Block::Paragraph(inlines)),
+            Piece::Blocks(attachments) => blocks.extend(attachments),
+        }
+    }
+    blocks
+}
+
 /// Find text-box content (`w:txbxContent`) in a drawing or VML pict, skipping
 /// `mc:Fallback` so AlternateContent shapes aren't collected twice.
 fn collect_text_boxes<'e>(elem: &'e Element, out: &mut Vec<&'e Element>) {
@@ -821,5 +872,118 @@ fn collect_row_cells<'e>(parent: &'e Element, cells: &mut Vec<TcInfo<'e>>) {
             "customXml" => collect_row_cells(child, cells),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::MarkerKind;
+
+    fn text(value: &str) -> Piece {
+        Piece::Inlines(vec![Inline::plain(value)])
+    }
+
+    fn assert_text(block: &Block, expected: &str) {
+        let Block::Paragraph(inlines) = block else { panic!("expected paragraph: {block:?}") };
+        assert_eq!(crate::model::inlines_to_plain_text(inlines), expected);
+    }
+
+    #[test]
+    fn heading_attachments_keep_source_order() {
+        let mut blocks = Vec::new();
+        emit_paragraph(
+            ParaKind::Heading { level: 2, label: None, base: Style::PLAIN },
+            vec![text("before"), Piece::Blocks(vec![Block::Rule]), text("after")],
+            &mut blocks,
+            &mut Runs::default(),
+        );
+        let [Block::Heading { content, .. }, Block::Rule, after] = &blocks[..] else {
+            panic!("unexpected blocks: {blocks:?}")
+        };
+        assert_eq!(crate::model::inlines_to_plain_text(content), "before");
+        assert_text(after, "after");
+    }
+
+    #[test]
+    fn list_attachments_keep_source_order_inside_the_item() {
+        let mut blocks = Vec::new();
+        let mut runs = Runs::default();
+        emit_paragraph(
+            ParaKind::ListItem {
+                ilvl: 0,
+                key: ListKey { instance: 1, marker: MarkerKind::Bullet },
+                number: 0,
+                label: None,
+            },
+            vec![text("before"), Piece::Blocks(vec![Block::Rule]), text("after")],
+            &mut blocks,
+            &mut runs,
+        );
+        runs.flush(&mut blocks);
+        let [Block::List(list)] = &blocks[..] else { panic!("unexpected blocks: {blocks:?}") };
+        let [before, Block::Rule, after] = &list.items[0].blocks[..] else {
+            panic!("unexpected item: {:?}", list.items[0].blocks)
+        };
+        assert_text(before, "before");
+        assert_text(after, "after");
+    }
+
+    #[test]
+    fn a_bookmark_only_paragraph_keeps_its_anchor() {
+        // `inlines_are_empty` is true of a lone anchor, but dropping the
+        // paragraph would strip the target a link resolves against.
+        let mut blocks = Vec::new();
+        emit_paragraph(
+            ParaKind::Plain,
+            vec![Piece::Inlines(vec![Inline::Anchor("mark".into())])],
+            &mut blocks,
+            &mut Runs::default(),
+        );
+        let [Block::Paragraph(inlines)] = &blocks[..] else { panic!("{blocks:?}") };
+        assert!(matches!(inlines[..], [Inline::Anchor(_)]), "{inlines:?}");
+    }
+
+    #[test]
+    fn an_empty_list_item_carries_no_blocks() {
+        let mut blocks = Vec::new();
+        let mut runs = Runs::default();
+        emit_paragraph(
+            ParaKind::ListItem {
+                ilvl: 0,
+                key: ListKey { instance: 1, marker: MarkerKind::Bullet },
+                number: 0,
+                label: None,
+            },
+            Vec::new(),
+            &mut blocks,
+            &mut runs,
+        );
+        runs.flush(&mut blocks);
+        let [Block::List(list)] = &blocks[..] else { panic!("{blocks:?}") };
+        assert!(list.items[0].blocks.is_empty(), "{:?}", list.items[0].blocks);
+    }
+
+    #[test]
+    fn attachments_split_styled_runs_in_place() {
+        let mut blocks = Vec::new();
+        let mut runs = Runs::default();
+        emit_paragraph(
+            ParaKind::Styled(BlockStyle::Code),
+            vec![text("before"), Piece::Blocks(vec![Block::Rule]), text("after")],
+            &mut blocks,
+            &mut runs,
+        );
+        runs.flush(&mut blocks);
+        let [
+            Block::CodeBlock { text: before, .. },
+            Block::Rule,
+            Block::CodeBlock { text: after, .. },
+        ] = &blocks[..]
+        else {
+            panic!("unexpected blocks: {blocks:?}")
+        };
+        assert_eq!(before, "before");
+        assert_eq!(after, "after");
     }
 }

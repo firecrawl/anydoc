@@ -16,6 +16,7 @@ use crate::model::{
 use crate::package::limits;
 use crate::shared::assets::AssetSink;
 use crate::shared::binary::{get_u16, get_u32, read_ole_stream};
+use crate::shared::blockstyle::StyledRun;
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
 use crate::shared::grid::{CellProp, GridRow, build_edge_table};
@@ -162,26 +163,29 @@ fn parse_clx(
     fc: usize,
     lcb: usize,
 ) -> Result<(Vec<Piece>, Vec<Vec<u8>>), ConvertError> {
-    let clx =
-        table.get(fc..fc + lcb).ok_or_else(|| ConvertError::malformed("Clx out of bounds"))?;
+    let clx = table
+        .get(fc..)
+        .and_then(|rest| rest.get(..lcb))
+        .ok_or_else(|| ConvertError::malformed("Clx out of bounds"))?;
     let mut prcs: Vec<Vec<u8>> = Vec::new();
     let mut pos = 0;
     loop {
-        match clx.get(pos) {
+        let rest = clx.get(pos..).ok_or_else(|| ConvertError::malformed("malformed Clx"))?;
+        match rest.first() {
             Some(1) => {
-                let cb = get_u16(clx, pos + 1).ok_or_else(|| ConvertError::malformed("bad Prc"))?
-                    as usize;
-                if let Some(grpprl) = clx.get(pos + 3..pos + 3 + cb) {
+                let cb =
+                    get_u16(rest, 1).ok_or_else(|| ConvertError::malformed("bad Prc"))? as usize;
+                if let Some(grpprl) = rest.get(3..).and_then(|payload| payload.get(..cb)) {
                     prcs.push(grpprl.to_vec());
                 }
                 pos += 3 + cb;
             }
             Some(2) => {
-                let lcb_plc = get_u32(clx, pos + 1)
-                    .ok_or_else(|| ConvertError::malformed("bad Pcdt"))?
-                    as usize;
-                let plc = clx
-                    .get(pos + 5..pos + 5 + lcb_plc)
+                let lcb_plc =
+                    get_u32(rest, 1).ok_or_else(|| ConvertError::malformed("bad Pcdt"))? as usize;
+                let plc = rest
+                    .get(5..)
+                    .and_then(|payload| payload.get(..lcb_plc))
                     .ok_or_else(|| ConvertError::malformed("PlcPcd out of bounds"))?;
                 let pieces = parse_plc_pcd(plc, &mut prcs)?;
                 return Ok((pieces, prcs));
@@ -339,7 +343,7 @@ fn extract_text(
         }
         let len = piece.cp_end.saturating_sub(piece.cp_start).min(total_cp - cp);
         if piece.compressed {
-            let Some(bytes) = word_doc.get(piece.fc..piece.fc + len) else {
+            let Some(bytes) = word_doc.get(piece.fc..).and_then(|rest| rest.get(..len)) else {
                 continue;
             };
             // Byte-accurate accounting: in a compressed piece each CP is one
@@ -360,7 +364,10 @@ fn extract_text(
                 i += seq;
             }
         } else {
-            let Some(bytes) = word_doc.get(piece.fc..piece.fc + len * 2) else {
+            let Some(byte_len) = len.checked_mul(2) else {
+                continue;
+            };
+            let Some(bytes) = word_doc.get(piece.fc..).and_then(|rest| rest.get(..byte_len)) else {
                 continue;
             };
             let units: Vec<u16> =
@@ -445,7 +452,10 @@ fn parse_fkps(
             continue;
         };
         let pn = (pn_raw & 0x3F_FFFF) as usize;
-        let Some(page) = word_doc.get(pn * 512..pn * 512 + 512) else {
+        let Some(page_off) = pn.checked_mul(512) else {
+            continue;
+        };
+        let Some(page) = word_doc.get(page_off..).and_then(|rest| rest.get(..512)) else {
             continue;
         };
         parse_fkp_page(page, kind, data, &mut runs);
@@ -476,7 +486,10 @@ fn parse_fkp_page(page: &[u8], kind: FkpKind, data: &[u8], runs: &mut Vec<Run>) 
             match kind {
                 FkpKind::Chpx => {
                     if let Some(&cb) = page.get(off)
-                        && let Some(grpprl) = page.get(off + 1..off + 1 + cb as usize)
+                        && let Some(grpprl) = page
+                            .get(off..)
+                            .and_then(|rest| rest.get(1..))
+                            .and_then(|rest| rest.get(..cb as usize))
                     {
                         props.chpx = grpprl.to_vec();
                     }
@@ -489,7 +502,7 @@ fn parse_fkp_page(page: &[u8], kind: FkpKind, data: &[u8], runs: &mut Vec<Run>) 
                         } else {
                             (off + 1, cb as usize * 2 - 1)
                         };
-                        if let Some(grpprl) = page.get(start..start + len)
+                        if let Some(grpprl) = page.get(start..).and_then(|rest| rest.get(..len))
                             && grpprl.len() >= 2
                         {
                             props.istd = u16::from_le_bytes([grpprl[0], grpprl[1]]);
@@ -682,7 +695,9 @@ impl Assembler {
     fn build_blocks(&self, lo: usize, hi: usize) -> Result<Vec<Block>, ConvertError> {
         let mut blocks: Vec<Block> = Vec::new();
         let mut list_run: Vec<ListEntry> = Vec::new();
+        let mut styled = StyledRun::default();
         let mut cell_blocks: Vec<Block> = Vec::new();
+        let mut cell_styled = StyledRun::default();
         let mut row: Vec<Vec<Block>> = Vec::new();
         let mut table_rows: Vec<DocRow> = Vec::new();
         let mut para = ParaBuilder::new();
@@ -702,6 +717,10 @@ impl Assembler {
                     let inlines = std::mem::replace(&mut para, ParaBuilder::new()).finish();
                     let is_cell_mark = c == '\u{7}';
                     if pap.effective.in_table.unwrap_or(false) || is_cell_mark {
+                        // A table is a hard boundary for top-level list and
+                        // styled runs, even while its rows are accumulated.
+                        styled.flush(&mut blocks);
+                        flush_list(&mut blocks, &mut list_run);
                         // Nested-table content (table depth > 1, inner
                         // cell/row terminators) flattens into the outer
                         // cell as paragraphs.
@@ -709,10 +728,14 @@ impl Assembler {
                             || pap.effective.inner_cell.unwrap_or(false)
                             || pap.effective.inner_ttp.unwrap_or(false);
                         if inner {
-                            if !inlines_are_empty(&inlines) {
-                                cell_blocks.push(Block::Paragraph(inlines));
-                            }
+                            self.emit_cell_paragraph(
+                                &pap,
+                                inlines,
+                                &mut cell_blocks,
+                                &mut cell_styled,
+                            );
                         } else if is_cell_mark && pap.effective.ttp.unwrap_or(false) {
+                            cell_styled.flush(&mut cell_blocks);
                             // Row end: the TTP mark's PAPX carries the TAP
                             // (boundaries, merge flags, header row).
                             if !row.is_empty() {
@@ -722,12 +745,21 @@ impl Assembler {
                                 });
                             }
                         } else if is_cell_mark {
-                            if !inlines_are_empty(&inlines) {
-                                cell_blocks.push(Block::Paragraph(inlines));
-                            }
+                            self.emit_cell_paragraph(
+                                &pap,
+                                inlines,
+                                &mut cell_blocks,
+                                &mut cell_styled,
+                            );
+                            cell_styled.flush(&mut cell_blocks);
                             row.push(std::mem::take(&mut cell_blocks));
-                        } else if !inlines_are_empty(&inlines) {
-                            cell_blocks.push(Block::Paragraph(inlines));
+                        } else {
+                            self.emit_cell_paragraph(
+                                &pap,
+                                inlines,
+                                &mut cell_blocks,
+                                &mut cell_styled,
+                            );
                         }
                     } else {
                         Self::flush_table(
@@ -736,7 +768,7 @@ impl Assembler {
                             &mut row,
                             &mut cell_blocks,
                         )?;
-                        self.emit_paragraph(&pap, inlines, &mut blocks, &mut list_run);
+                        self.emit_paragraph(&pap, inlines, &mut blocks, &mut list_run, &mut styled);
                     }
                 }
                 '\u{b}' => para.push_inline(Inline::LineBreak),
@@ -768,10 +800,14 @@ impl Assembler {
             i += 1;
         }
         let inlines = para.finish();
+        cell_styled.flush(&mut cell_blocks);
+        Self::flush_table(&mut blocks, &mut table_rows, &mut row, &mut cell_blocks)?;
         if !inlines_are_empty(&inlines) {
+            styled.flush(&mut blocks);
+            flush_list(&mut blocks, &mut list_run);
             blocks.push(Block::Paragraph(inlines));
         }
-        Self::flush_table(&mut blocks, &mut table_rows, &mut row, &mut cell_blocks)?;
+        styled.flush(&mut blocks);
         flush_list(&mut blocks, &mut list_run);
         Ok(blocks)
     }
@@ -822,14 +858,24 @@ impl Assembler {
         inlines: Vec<Inline>,
         blocks: &mut Vec<Block>,
         list_run: &mut Vec<ListEntry>,
+        styled: &mut StyledRun,
     ) {
+        let style = self.stylesheet.get(pap.istd);
+        // A styled container absorbs its blank paragraphs: they are the
+        // blank lines of a code block.
+        if let Some(block) = style.block {
+            flush_list(blocks, list_run);
+            styled.push(block, inlines, blocks);
+            return;
+        }
         if inlines_are_empty(&inlines) {
+            styled.flush(blocks);
             flush_list(blocks, list_run);
             return;
         }
-        let style = self.stylesheet.get(pap.istd);
         let heading = style.heading.or(pap.effective.outline.flatten());
         if let Some(level) = heading {
+            styled.flush(blocks);
             flush_list(blocks, list_run);
             let mut content = inlines;
             rebase_emphasis(&mut content, style.chp);
@@ -860,6 +906,7 @@ impl Assembler {
                 } else {
                     (0, None)
                 };
+                styled.flush(blocks);
                 list_run.push(ListEntry {
                     level: ilvl,
                     key: ListKey { instance: list.lsid as u64, marker },
@@ -871,8 +918,28 @@ impl Assembler {
             }
             // Marker "none": numbering suppressed, plain paragraph.
         }
+        styled.flush(blocks);
         flush_list(blocks, list_run);
         blocks.push(Block::Paragraph(inlines));
+    }
+
+    /// Emit one paragraph into the current table cell. Styled runs are
+    /// scoped to the cell and are flushed before ordinary cell content.
+    fn emit_cell_paragraph(
+        &self,
+        pap: &EffectivePap,
+        inlines: Vec<Inline>,
+        blocks: &mut Vec<Block>,
+        styled: &mut StyledRun,
+    ) {
+        if let Some(block) = self.stylesheet.get(pap.istd).block {
+            styled.push(block, inlines, blocks);
+        } else {
+            styled.flush(blocks);
+            if !inlines_are_empty(&inlines) {
+                blocks.push(Block::Paragraph(inlines));
+            }
+        }
     }
 
     /// Extract the inline picture whose PICF + OfficeArt data the character's

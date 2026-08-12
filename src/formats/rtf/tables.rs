@@ -2,6 +2,7 @@
 //! per-font charsets), the style sheet, and the list/list-override tables.
 
 use crate::formats::rtf::lexer::{Lexer, Token, destination_groups};
+use crate::shared::blockstyle::{self, BlockStyle};
 use crate::shared::delta::StyleDelta;
 use crate::shared::heading::level_from_name;
 use crate::shared::list::MarkerKind;
@@ -62,11 +63,12 @@ pub struct ListDef {
     pub levels: [ListLevelDef; LIST_LEVELS],
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct StyleDef {
     pub outline: Option<u8>,
     pub delta: StyleDelta,
-    pub name: Option<String>,
+    /// The block container the style's name designates.
+    pub block: Option<BlockStyle>,
 }
 
 #[derive(Debug, Default)]
@@ -86,7 +88,7 @@ pub fn parse_prelude(bytes: &[u8], default_encoding: &'static encoding_rs::Encod
         parse_fonttbl(group, &mut prelude.fonts, default_encoding);
     }
     for group in destination_groups(bytes, "stylesheet") {
-        parse_stylesheet(group, &mut prelude.styles);
+        parse_stylesheet(group, &mut prelude.styles, default_encoding);
     }
     let mut by_list_id: HashMap<i32, ListDef> = HashMap::new();
     for group in destination_groups(bytes, "listtable") {
@@ -160,24 +162,40 @@ fn parse_fonttbl(
 /// The null style id: `\sbasedon222` means "based on nothing".
 const NULL_STYLE: i32 = 222;
 
-fn parse_stylesheet(group: &[u8], styles: &mut HashMap<i32, StyleDef>) {
+fn parse_stylesheet(
+    group: &[u8],
+    styles: &mut HashMap<i32, StyleDef>,
+    enc: &'static encoding_rs::Encoding,
+) {
     let mut lexer = Lexer::new(group);
     let mut depth = 0usize;
     let mut current: Option<(i32, StyleDef, Option<i32>)> = None;
     let mut raw: HashMap<i32, (StyleDef, Option<i32>)> = HashMap::new();
+    // A style's name is the text at the end of its group, before the `;`.
+    let mut name: Vec<u8> = Vec::new();
     while let Some(token) = lexer.next_token() {
         match token {
             Token::Open => depth += 1,
             Token::Close => {
                 if depth == 1
-                    && let Some((id, def, base)) = current.take()
+                    && let Some((id, mut def, base)) = current.take()
                 {
+                    let (text, _, _) = enc.decode(&name);
+                    def.block = blockstyle::from_style_name(text.trim_end_matches(';'));
+                    if def.outline.is_none() {
+                        def.outline = level_from_name(text.trim_end_matches(';'));
+                    }
                     raw.insert(id, (def, base));
                 }
+                name.clear();
                 depth = depth.saturating_sub(1);
             }
-            Token::Word { name, param } => match name {
-                "s" => current = Some((param.unwrap_or(0), StyleDef::default(), None)),
+            Token::Hex(b) | Token::Byte(b) if depth == 1 && current.is_some() => name.push(b),
+            Token::Word { name: word, param } => match word {
+                "s" => {
+                    current = Some((param.unwrap_or(0), StyleDef::default(), None));
+                    name.clear();
+                }
                 "sbasedon" => {
                     if let Some((_, _, base)) = current.as_mut() {
                         *base = param.filter(|&b| b != NULL_STYLE);
@@ -202,11 +220,6 @@ fn parse_stylesheet(group: &[u8], styles: &mut HashMap<i32, StyleDef>) {
                 }
                 _ => {}
             },
-            Token::Byte(byte) if depth == 1 => {
-                if let Some((_, def, _)) = current.as_mut() {
-                    def.name.get_or_insert_with(String::new).push(byte as char);
-                }
-            }
             _ => {}
         }
     }
@@ -230,15 +243,7 @@ fn parse_stylesheet(group: &[u8], styles: &mut HashMap<i32, StyleDef>) {
         for def in chain.iter().rev() {
             resolved.delta = resolved.delta.merge(def.delta);
             resolved.outline = def.outline.or(resolved.outline);
-            if def.name.is_some() {
-                resolved.name = def.name.clone();
-            }
-        }
-        if resolved.outline.is_none() {
-            resolved.outline = resolved
-                .name
-                .as_deref()
-                .and_then(|name| level_from_name(name.trim_end_matches(';')));
+            resolved.block = def.block.or(resolved.block);
         }
         styles.insert(id, resolved);
     }

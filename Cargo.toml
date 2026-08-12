@@ -5,7 +5,7 @@ exclude = ["fuzz"]
 
 [package]
 name = "anydoc"
-version = "0.1.6"
+version = "0.1.8"
 edition = "2024"
 # Edition 2024 needs 1.85; zip and calamine both raise it to 1.88.
 rust-version = "1.88"
@@ -28,7 +28,7 @@ csv = "1.4.0"
 flate2 = "1"
 encoding_rs = "0.8.35"
 log = "0.4"
-pdf-inspector = "0.1.7"
+pdf-inspector = "0.1.8"
 quick-xml = "0.41.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 

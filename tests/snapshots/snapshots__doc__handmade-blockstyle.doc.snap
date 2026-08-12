@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Body before.
+
+```
+fn main() {
+}
+```
+
+> A quotation.
+
+Body after.

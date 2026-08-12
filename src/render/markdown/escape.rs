@@ -142,24 +142,40 @@ fn entity_ahead(chars: &[char]) -> bool {
 
 /// Format a link destination, angle-bracketing when needed.
 pub(crate) fn format_url(url: &str) -> String {
-    if url.chars().any(|c| c.is_whitespace() || c == '(' || c == ')' || c == '<' || c == '>') {
-        let escaped: String = url
-            .chars()
-            .map(|c| match c {
-                '<' => "%3C".to_string(),
-                '>' => "%3E".to_string(),
-                '\n' | '\r' => String::new(),
-                c => c.to_string(),
-            })
-            .collect();
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut escaped = String::with_capacity(url.len());
+    for c in url.chars() {
+        match c {
+            '<' => escaped.push_str("%3C"),
+            '>' => escaped.push_str("%3E"),
+            // Raw pipes split GFM table cells.
+            '|' => escaped.push_str("%7C"),
+            // Encode controls so they cannot split the Markdown output.
+            c if c.is_control() => {
+                let mut bytes = [0; 4];
+                for byte in c.encode_utf8(&mut bytes).bytes() {
+                    escaped.push('%');
+                    escaped.push(HEX[(byte >> 4) as usize] as char);
+                    escaped.push(HEX[(byte & 0x0F) as usize] as char);
+                }
+            }
+            c => escaped.push(c),
+        }
+    }
+    if escaped.chars().any(|c| c.is_whitespace() || c == '(' || c == ')') {
         format!("<{escaped}>")
     } else {
-        url.to_string()
+        escaped
     }
 }
 
-pub(crate) fn escape_url_as_text(url: &str) -> String {
-    url.replace('\\', "\\\\").replace('[', "\\[").replace(']', "\\]")
+pub(crate) fn escape_url_as_text(url: &str, ctx: InlineContext) -> String {
+    let cleaned: String = url.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    escape_text(
+        &cleaned,
+        ctx,
+        EscapeOpts { trailing_active: true, in_label: true, ..Default::default() },
+    )
 }
 
 /// Shortest backtick fence longer than any backtick run in `text`.

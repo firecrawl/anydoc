@@ -48,9 +48,15 @@ impl<'a> Lexer<'a> {
         let b = *self.bytes.get(self.pos)?;
         if !b.is_ascii_alphabetic() {
             self.pos += 1;
+            // A reader treats `\` before CR or LF as a paragraph mark; the
+            // trailing LF of a CRLF pair is skipped as plain-text whitespace.
+            if b == b'\r' || b == b'\n' {
+                return Some(Token::Word { name: "par", param: None });
+            }
             if b == b'\'' {
-                let hi = (*self.bytes.get(self.pos)? as char).to_digit(16);
-                let lo = (*self.bytes.get(self.pos + 1)? as char).to_digit(16);
+                let pair = self.bytes.get(self.pos..)?.get(..2)?;
+                let hi = (pair[0] as char).to_digit(16);
+                let lo = (pair[1] as char).to_digit(16);
                 return match (hi, lo) {
                     (Some(hi), Some(lo)) => {
                         self.pos += 2;
@@ -93,7 +99,7 @@ impl<'a> Lexer<'a> {
         }
         if name == "bin" {
             let n = param.unwrap_or(0).max(0) as usize;
-            let end = (self.pos + n).min(self.bytes.len());
+            let end = self.pos.saturating_add(n).min(self.bytes.len());
             let payload = &self.bytes[self.pos..end];
             self.pos = end;
             return Some(Token::Bin(payload));
@@ -166,6 +172,23 @@ mod tests {
         }
         assert_eq!(bin, br"}}{\\");
         assert_eq!((opens, closes), (1, 1));
+    }
+
+    #[test]
+    fn backslash_before_a_line_break_is_one_paragraph_mark() {
+        for src in [b"{\\rtf1 a\\\nb}".as_slice(), b"{\\rtf1 a\\\r\nb}", b"{\\rtf1 a\\\rb}"] {
+            let mut lexer = Lexer::new(src);
+            let mut pars = 0;
+            let mut symbols = 0;
+            while let Some(t) = lexer.next_token() {
+                match t {
+                    Token::Word { name: "par", param: None } => pars += 1,
+                    Token::Symbol(_) => symbols += 1,
+                    _ => {}
+                }
+            }
+            assert_eq!((pars, symbols), (1, 0), "source: {:?}", String::from_utf8_lossy(src));
+        }
     }
 
     #[test]

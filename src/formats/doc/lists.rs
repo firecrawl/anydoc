@@ -98,26 +98,35 @@ const LSTF_SIZE: usize = 28;
 
 fn parse_plf_lst(table: &[u8], fc: usize, lcb: usize) -> HashMap<u32, [LevelDef; LEVELS]> {
     let mut out = HashMap::new();
-    let Some(count) = get_u16(table, fc).map(|v| v as usize) else {
+    let Some(plf) = table.get(fc..) else {
+        return out;
+    };
+    let Some(count) = get_u16(plf, 0).map(|v| v as usize) else {
         return out;
     };
     let mut lstfs: Vec<(u32, bool)> = Vec::with_capacity(count);
-    let mut pos = fc + 2;
+    let mut pos = 2usize;
     for _ in 0..count {
-        let Some(lsid) = get_u32(table, pos) else {
+        let Some(record) = plf.get(pos..).and_then(|rest| rest.get(..LSTF_SIZE)) else {
             return out;
         };
-        let simple = table.get(pos + 26).is_some_and(|&flags| flags & 0x01 != 0);
+        let Some(lsid) = get_u32(record, 0) else {
+            return out;
+        };
+        let simple = record[26] & 0x01 != 0;
         lstfs.push((lsid, simple));
-        pos += LSTF_SIZE;
+        pos = match pos.checked_add(LSTF_SIZE) {
+            Some(next) => next,
+            None => return out,
+        };
     }
-    // The LVL array begins where lcbPlfLst ends.
-    let mut pos = fc + lcb;
+    // The LVL array begins where lcbPlfLst ends, still relative to `plf`.
+    let mut pos = lcb;
     for (lsid, simple) in lstfs {
         let n_levels = if simple { 1 } else { LEVELS };
         let mut levels: [LevelDef; LEVELS] = std::array::from_fn(|_| LevelDef::default());
         for slot in levels.iter_mut().take(n_levels) {
-            match parse_lvl(table, pos) {
+            match parse_lvl(plf, pos) {
                 Some((def, next)) => {
                     *slot = def;
                     pos = next;
@@ -138,26 +147,29 @@ fn parse_plf_lst(table: &[u8], fc: usize, lcb: usize) -> HashMap<u32, [LevelDef;
 /// One LVL: an LVLF header, then PAPX and CHPX grpprls, then the number text.
 fn parse_lvl(plf: &[u8], pos: usize) -> Option<(LevelDef, usize)> {
     const LVLF_SIZE: usize = 28;
-    let start = get_u32(plf, pos)? as u64;
-    let nfc = *plf.get(pos + 4)?;
-    let flags = *plf.get(pos + 5)?;
+    let record = plf.get(pos..)?;
+    let header = record.get(..LVLF_SIZE)?;
+    let start = get_u32(header, 0)? as u64;
+    let nfc = header[4];
+    let flags = header[5];
     let legal = flags & 0x04 != 0;
     let no_restart = flags & 0x08 != 0;
     // rgbxchNums: one-based offsets of number placeholders within xst,
     // zero-terminated unless full.
     let placeholder_offsets: Vec<u8> =
-        plf.get(pos + 6..pos + 15)?.iter().copied().take_while(|&b| b != 0).collect();
-    let restart_lim = *plf.get(pos + 26)?;
-    let cb_papx = *plf.get(pos + 25)? as usize;
-    let cb_chpx = *plf.get(pos + 24)? as usize;
-    let mut next = pos + LVLF_SIZE + cb_papx + cb_chpx;
-    let xch_count = get_u16(plf, next)? as usize;
-    next += 2;
+        header[6..15].iter().copied().take_while(|&b| b != 0).collect();
+    let restart_lim = header[26];
+    let cb_papx = header[25] as usize;
+    let cb_chpx = header[24] as usize;
+    let mut next = LVLF_SIZE.checked_add(cb_papx)?.checked_add(cb_chpx)?;
+    let xch_count = get_u16(record, next)? as usize;
+    next = next.checked_add(2)?;
     let marker = marker_for_nfc(nfc);
     let mut text: Vec<NumberText> = Vec::new();
     if marker.is_some_and(MarkerKind::ordered) {
         for i in 0..xch_count {
-            let ch = get_u16(plf, next + i * 2)?;
+            let unit = i.checked_mul(2)?.checked_add(next)?;
+            let ch = get_u16(record, unit)?;
             if ch <= 0x08 && placeholder_offsets.contains(&((i + 1) as u8)) {
                 text.push(NumberText::Level(ch as u8));
             } else if let Some(c) = char::from_u32(ch as u32).filter(|c| !c.is_control()) {
@@ -168,9 +180,12 @@ fn parse_lvl(plf: &[u8], pos: usize) -> Option<(LevelDef, usize)> {
             }
         }
     }
-    next += xch_count * 2;
+    next = next.checked_add(xch_count.checked_mul(2)?)?;
     let restart = no_restart.then_some(restart_lim as u32);
-    Some((LevelDef { marker, start, restart, pattern: NumberPattern { text, legal } }, next))
+    Some((
+        LevelDef { marker, start, restart, pattern: NumberPattern { text, legal } },
+        pos.checked_add(next)?,
+    ))
 }
 
 const LFO_SIZE: usize = 16;
@@ -182,12 +197,18 @@ fn parse_plf_lfo(plf: &[u8], by_lsid: &HashMap<u32, [LevelDef; LEVELS]>, lists: 
     let mut lfos: Vec<(u32, usize)> = Vec::with_capacity(count);
     let mut pos = 4;
     for _ in 0..count {
-        let Some(lsid) = get_u32(plf, pos) else {
+        let Some(record) = plf.get(pos..).and_then(|rest| rest.get(..LFO_SIZE)) else {
             return;
         };
-        let clfolvl = plf.get(pos + 12).copied().unwrap_or(0) as usize;
+        let Some(lsid) = get_u32(record, 0) else {
+            return;
+        };
+        let clfolvl = record[12] as usize;
         lfos.push((lsid, clfolvl));
-        pos += LFO_SIZE;
+        let Some(next) = pos.checked_add(LFO_SIZE) else {
+            return;
+        };
+        pos = next;
     }
     for (i, (lsid, clfolvl)) in lfos.into_iter().enumerate() {
         let ilfo = (i + 1) as u16;
@@ -198,16 +219,20 @@ fn parse_plf_lfo(plf: &[u8], by_lsid: &HashMap<u32, [LevelDef; LEVELS]>, lists: 
             None => ListDef::unknown(ilfo),
         };
         for _ in 0..clfolvl {
-            let Some(start_at) = get_u32(plf, pos) else {
+            let Some(override_record) = plf.get(pos..).and_then(|rest| rest.get(..8)) else {
                 break;
             };
-            let Some(&bits) = plf.get(pos + 4) else {
+            let Some(start_at) = get_u32(override_record, 0) else {
                 break;
             };
+            let bits = override_record[4];
             let ilvl = (bits & 0x0F) as usize;
             let f_start_at = bits & 0x10 != 0;
             let f_formatting = bits & 0x20 != 0;
-            pos += 8;
+            let Some(next) = pos.checked_add(8) else {
+                break;
+            };
+            pos = next;
             if f_formatting {
                 // The override embeds a full LVL; its own start wins.
                 match parse_lvl(plf, pos) {

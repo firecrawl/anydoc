@@ -7,6 +7,11 @@ use crate::render::markdown::Ctx;
 use crate::render::markdown::escape::InlineContext;
 use crate::render::markdown::inline::render_inlines;
 
+struct RenderedCell {
+    text: String,
+    covered_span: bool,
+}
+
 pub(crate) fn render_table(table: &Table, rc: &Ctx) -> Option<String> {
     // Interior empty rows render as blank rows — they carry the source's
     // row coordinates; trailing blank rows are popped below.
@@ -14,27 +19,33 @@ pub(crate) fn render_table(table: &Table, rc: &Ctx) -> Option<String> {
         return None;
     }
     let width = table.grid.iter().map(|r| r.len()).max().unwrap_or(0);
-    let mut rendered: Vec<Vec<String>> = table
+    let mut rendered: Vec<Vec<RenderedCell>> = table
         .grid
         .iter()
         .map(|row| {
-            let mut cells: Vec<String> = row
+            let mut cells: Vec<RenderedCell> = row
                 .iter()
                 .map(|slot| match slot {
-                    CellSlot::Origin(cell) => render_cell(cell, rc),
-                    CellSlot::Covered { .. } => String::new(),
+                    CellSlot::Origin(cell) => {
+                        RenderedCell { text: render_cell(cell, rc), covered_span: false }
+                    }
+                    CellSlot::Covered { .. } => {
+                        RenderedCell { text: String::new(), covered_span: true }
+                    }
                 })
                 .collect();
-            cells.resize(width, String::new());
+            cells.resize_with(width, || RenderedCell { text: String::new(), covered_span: false });
             cells
         })
         .collect();
-    while rendered.len() > 1 && rendered.last().is_some_and(|r| r.iter().all(|c| c.is_empty())) {
+    while rendered.len() > 1
+        && rendered.last().is_some_and(|r| r.iter().all(|c| c.text.is_empty() && !c.covered_span))
+    {
         rendered.pop();
     }
     let width = rendered
         .iter()
-        .map(|r| r.iter().rposition(|c| !c.is_empty()).map_or(0, |i| i + 1))
+        .map(|r| r.iter().rposition(|c| !c.text.is_empty() || c.covered_span).map_or(0, |i| i + 1))
         .max()
         .unwrap_or(0);
     if width == 0 {
@@ -48,21 +59,21 @@ pub(crate) fn render_table(table: &Table, rc: &Ctx) -> Option<String> {
     // GFM tables always carry a delimiter row, so a table with no header row
     // of its own renders an empty one above the data.
     let header: Vec<String> = if table.header_rows >= 1 && !rendered.is_empty() {
-        rendered.remove(0)
+        rendered.remove(0).into_iter().map(|c| c.text).collect()
     } else {
         vec![String::new(); width]
     };
-    out.push_str(&format_row(&header));
+    out.push_str(&format_row(header.iter().map(String::as_str)));
     out.push('\n');
-    out.push_str(&format_row(&vec!["---".to_string(); width]));
+    out.push_str(&format_row(std::iter::repeat_n("---", width)));
     for row in &rendered {
         out.push('\n');
-        out.push_str(&format_row(row));
+        out.push_str(&format_row(row.iter().map(|c| c.text.as_str())));
     }
     Some(out)
 }
 
-fn format_row(cells: &[String]) -> String {
+fn format_row<'a>(cells: impl IntoIterator<Item = &'a str>) -> String {
     let mut s = String::from("|");
     for cell in cells {
         s.push(' ');
