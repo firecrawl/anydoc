@@ -17,6 +17,10 @@ keywords = ["markdown", "docx", "pdf", "converter", "document"]
 categories = ["parser-implementations", "text-processing"]
 include = ["/src", "/examples/convert.rs", "/README.md", "/LICENSE"]
 
+[features]
+default = []
+ocr = ["dep:image", "dep:ocrs", "dep:rten", "pdf-inspector/render"]
+
 [dev-dependencies]
 insta = "1"
 sha2 = "0.11"
@@ -27,11 +31,17 @@ cfb = "0.14.0"
 csv = "1.4.0"
 flate2 = "1"
 encoding_rs = "0.8.35"
+image = { version = "0.25.10", optional = true, default-features = false, features = ["bmp", "jpeg", "png", "tiff", "webp"] }
 log = "0.4"
-pdf-inspector = "0.1.8"
+ocrs = { version = "0.12.2", optional = true }
+pdf-inspector = "0.1.7"
 quick-xml = "0.41.0"
+rten = { version = "0.24.0", default-features = false, features = ["rten_format"], optional = true }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [profile.release]
 lto = "thin"
 strip = "symbols"
+
+[patch.crates-io]
+pdf-inspector = { git = "https://github.com/massimodeluisa/pdf-inspector.git", rev = "433629e84cc880b450ac71ccf968e10df2b7299d" }

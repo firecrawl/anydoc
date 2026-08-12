@@ -18,6 +18,42 @@ export type ConvertErrorCode =
   | 'missingPart'
   /** The file could not be read, from `toMarkdown` only. */
   | 'io'
+  /**
+   * Local OCR was required for every page carrying content and recovered no
+   * text from any of them. Only a `Converter` conversion produces this.
+   */
+  | 'ocr'
+  /**
+   * The OCR models could not be loaded, from `Converter.create` only.
+   */
+  | 'ocrInit'
+/**
+ * A reusable converter that carries local OCR.
+ *
+ * The models are parsed once, when the converter is created, and every
+ * conversion made with it shares that engine; nothing is rebuilt per call.
+ * The module-level functions keep their own behavior, which never uses OCR.
+ */
+export declare class Converter {
+  /**
+   * Parse the OCR models and build a converter that reuses them. Parsing
+   * runs off the event loop.
+   *
+   * Rejects with an `Error` carrying a `ConvertErrorCode` on `code`:
+   * `'ocrInit'` when the models cannot be loaded.
+   */
+  static create(models: OcrModels): Promise<Converter>
+  /**
+   * Convert an in-memory document to Markdown, recognizing the pages that
+   * need OCR. Without a format, it is detected from the content, which
+   * signature-less formats (CSV) have to name explicitly. Conversion runs
+   * off the event loop.
+   *
+   * Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
+   */
+  toMarkdownBytes(bytes: Uint8Array, format?: Format | undefined | null): Promise<string>
+}
+
 /**
  * An embedded binary asset (image, object payload). Bytes are always
  * retained, so a document stays self-contained.
@@ -102,8 +138,9 @@ export declare const enum Format {
   odt = 'odt',
   /**
    * Converted with pdf-inspector, which emits Markdown directly:
-   * `toDocument` is unsupported for PDFs. Scanned or image-only PDFs
-   * (needing OCR) error as unsupported.
+   * `toDocument` is unsupported for PDFs. Pages with no extractable text
+   * need OCR: the module-level functions report them as unsupported,
+   * while a `Converter` recognizes exactly those pages.
    */
   pdf = 'pdf',
   ppt = 'ppt',
@@ -113,7 +150,13 @@ export declare const enum Format {
   xlsx = 'xlsx',
   ods = 'ods',
   odp = 'odp',
-  csv = 'csv'
+  csv = 'csv',
+  /**
+   * Raster image documents (PNG, JPEG, WebP, TIFF, BMP). Recognized with
+   * local OCR where it is configured, and unsupported otherwise;
+   * `toDocument` is unsupported for images the same way it is for PDFs.
+   */
+  image = 'image'
 }
 
 /**
@@ -233,6 +276,17 @@ export interface Note {
 export declare const enum NoteKind {
   footnote = 'footnote',
   endnote = 'endnote'
+}
+
+/**
+ * The RTen models local OCR needs, as bytes the caller supplies. anydoc
+ * performs no download and no filesystem access of its own.
+ */
+export interface OcrModels {
+  /** The text-detection model. */
+  detectionModel: Uint8Array
+  /** The text-recognition model. */
+  recognitionModel: Uint8Array
 }
 
 /** Fully resolved character style. */

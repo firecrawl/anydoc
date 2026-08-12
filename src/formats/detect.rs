@@ -14,6 +14,9 @@
 //!   type of the part the package-level officeDocument relationship
 //!   designates as the main document (with the main part's mandated root
 //!   element as the authority when content types are stale or generic).
+//! - Raster images: the signature each codec mandates (PNG, JPEG, WebP,
+//!   TIFF, BMP). They are checked last, after every container, and all map
+//!   to one format: the decoder identifies the codec itself.
 //!
 //! Plain-text formats (CSV) carry no signature and are never detected;
 //! callers fall back to the file extension. Detection never errors: any
@@ -44,7 +47,35 @@ pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Format> {
     if bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-") {
         return Some(Format::Pdf);
     }
-    None
+    detect_image(bytes)
+}
+
+/// Raster image signatures, checked after every container. They share one
+/// format: which codec it is only matters to the decoder. Detection runs
+/// ahead of the extension fallback, so a signature that also matches
+/// ordinary text would take formats like CSV away from it.
+fn detect_image(bytes: &[u8]) -> Option<Format> {
+    let is_image = bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
+        || (bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"))
+        || bytes.starts_with(b"II*\0")
+        || bytes.starts_with(b"MM\0*")
+        || is_bmp(bytes);
+    is_image.then_some(Format::Image)
+}
+
+/// `BM` alone is two ordinary letters, and text files do start with them
+/// (`BMI,weight,height`), so the DIB header behind it has to be one of the
+/// sizes the format specifies before this claims a bitmap.
+fn is_bmp(bytes: &[u8]) -> bool {
+    const DIB_HEADER_SIZES: [u32; 7] = [12, 40, 52, 56, 64, 108, 124];
+
+    bytes.starts_with(b"BM")
+        && bytes
+            .get(14..18)
+            .and_then(|size| size.try_into().ok())
+            .map(u32::from_le_bytes)
+            .is_some_and(|size| DIB_HEADER_SIZES.contains(&size))
 }
 
 /// Classify an OLE compound file by its mandated content stream. Encrypted
@@ -238,6 +269,47 @@ mod tests {
         assert_eq!(from_bytes(b"{\\rtf1\\ansi hi}"), Some(Format::Rtf));
         assert_eq!(from_bytes(b"a,b,c\n1,2,3\n"), None);
         assert_eq!(from_bytes(b""), None);
+    }
+
+    /// `BM`, then a file header and a DIB header of `dib_size` bytes.
+    fn bmp_of(dib_size: u32) -> Vec<u8> {
+        let mut bytes = vec![0_u8; 14];
+        bytes[..2].copy_from_slice(b"BM");
+        bytes.extend_from_slice(&dib_size.to_le_bytes());
+        bytes.resize(14 + dib_size as usize, 0);
+        bytes
+    }
+
+    #[test]
+    fn image_codecs_are_identified_by_their_signature() {
+        for signature in [
+            b"\x89PNG\r\n\x1a\n".as_slice(),
+            &[0xFF, 0xD8, 0xFF, 0xE0],
+            b"RIFF\x24\0\0\0WEBPVP8 ",
+            b"II*\0\x08\0\0\0",
+            b"MM\0*\0\0\0\x08",
+            &bmp_of(40),
+            &bmp_of(124),
+        ] {
+            assert_eq!(from_bytes(signature), Some(Format::Image), "{signature:?}");
+        }
+    }
+
+    #[test]
+    fn near_misses_are_not_images() {
+        // `BM` needs a DIB header of a specified size behind it. A CSV whose
+        // first column is BMI used to convert and has to keep converting.
+        assert_eq!(from_bytes(b"BMI,weight,height\n22.5,70,1.76\n21.0,65,1.76\n"), None);
+        assert_eq!(from_bytes(&bmp_of(41)), None);
+        assert_eq!(from_bytes(b"BM"), None);
+        // RIFF containers that are not WebP (this one is a WAV).
+        assert_eq!(from_bytes(b"RIFF\x24\0\0\0WAVEfmt "), None);
+        assert_eq!(from_bytes(b"RIFF"), None);
+        // One byte off each remaining signature.
+        assert_eq!(from_bytes(b"\x89PNG\r\n\x1a\x00"), None);
+        assert_eq!(from_bytes(&[0xFF, 0xD8, 0xFE, 0xE0]), None);
+        assert_eq!(from_bytes(b"II\0*\x08\0\0\0"), None);
+        assert_eq!(from_bytes(b"MM*\0\0\0\0\x08"), None);
     }
 
     #[test]

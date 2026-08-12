@@ -5,14 +5,16 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
-import {
+import * as anydoc from './pkg/anydoc_wasm.js'
+
+const {
   initSync,
   formatFromBytes,
   formatFromExtension,
   formatFromPath,
   toDocument,
   toMarkdownBytes,
-} from './pkg/anydoc_wasm.js'
+} = anydoc
 
 const fixture = (name) => fileURLToPath(new URL(`../tests/fixtures/${name}`, import.meta.url))
 
@@ -82,4 +84,38 @@ test('conversion errors throw a coded Error', () => {
   throws(() => toMarkdownBytes(CSV), 'unsupported', /unrecognized file content/)
   throws(() => toMarkdownBytes(ENCRYPTED, 'odt'), 'encrypted', /encrypted/)
   throws(() => toDocument(ENCRYPTED, 'odt'), 'encrypted', /encrypted/)
+})
+
+// The Converter exists only in a build with the `ocr` feature, so the same
+// suite covers both. Which build this is has to come from the caller:
+// ANYDOC_WASM_OCR_BUILD=1 for an OCR build, 0 for a plain one. A test that
+// read it off the module could not tell a broken feature gate from a build
+// that never had the feature.
+const { Converter } = anydoc
+const OCR_BUILD = process.env.ANYDOC_WASM_OCR_BUILD
+
+test('the OCR converter is present exactly when the build says it is', {
+  skip: OCR_BUILD === undefined && 'set ANYDOC_WASM_OCR_BUILD=1 or 0 to assert the feature gate',
+}, () => {
+  assert.ok(['0', '1'].includes(OCR_BUILD), `ANYDOC_WASM_OCR_BUILD has to be 1 or 0, got ${OCR_BUILD}`)
+
+  if (OCR_BUILD === '1') {
+    assert.equal(typeof Converter, 'function', 'an OCR build has to export Converter')
+  } else {
+    assert.equal(Converter, undefined, 'a build without --features ocr may not export Converter')
+  }
+})
+
+test('the converter rejects model bytes it cannot use', { skip: !Converter && 'built without --features ocr' }, () => {
+  const throws = (models, message) =>
+    assert.throws(() => new Converter(models), (error) => {
+      assert.ok(error instanceof Error)
+      assert.equal(error.code, 'ocrInit')
+      assert.match(error.message, message)
+      return true
+    })
+
+  throws({ detectionModel: new Uint8Array([0, 1, 2, 3]), recognitionModel: new Uint8Array([4, 5]) }, /detection model/)
+  throws({ recognitionModel: new Uint8Array([4, 5]) }, /detectionModel is required/)
+  throws({ detectionModel: 'not bytes', recognitionModel: new Uint8Array([4, 5]) }, /detectionModel has to be a Uint8Array/)
 })

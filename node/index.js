@@ -700,6 +700,7 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
+module.exports.Converter = nativeBinding.Converter
 module.exports.BlockKind = nativeBinding.BlockKind
 module.exports.CellSlotKind = nativeBinding.CellSlotKind
 module.exports.Format = nativeBinding.Format

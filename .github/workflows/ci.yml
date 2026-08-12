@@ -22,9 +22,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # Browser bindings live in wasm/; this locked check keeps the root
+      # crate and every parser dependency buildable for that target.
+      - run: cargo check -p anydoc --target wasm32-unknown-unknown --locked
       # Root package only: the node/ and python/ binding crates are cdylib-only
       # and their test harnesses cannot link outside a Node/Python host; they
       # are covered by the node and python jobs instead.
@@ -78,7 +82,70 @@ jobs:
           curl -sSfL https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz
           | tar xz --strip-components=1 -C /usr/local/bin wasm-pack-v0.15.0-x86_64-unknown-linux-musl/wasm-pack
       - run: wasm-pack build wasm --release --target web --scope firecrawl
+      # The suite is told which build it is looking at, so the test guarding
+      # the OCR feature gate has an expectation of its own to check.
       - run: node --test wasm/test.mjs
+        env:
+          ANYDOC_WASM_OCR_BUILD: '0'
+
+  # Cargo.lock pins pdf-inspector through [patch.crates-io] to a git
+  # revision of my fork's PR branch (firecrawl/pdf-inspector#280), so
+  # every lane below runs fine from a clean clone. The remaining step
+  # before merge is switching that patch to the released pdf-inspector
+  # crate once #280 ships.
+  ocr:
+    name: OCR
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ocr
+      # The model-gated Rust tests are #[ignore]d, so they never run here:
+      # the models are a separate CC-BY-SA-4.0 download CI does not carry.
+      - run: cargo test --locked --features ocr
+      - run: cargo check --locked -p anydoc --features ocr --target wasm32-unknown-unknown
+      - run: cargo clippy -p anydoc-wasm --features ocr --target wasm32-unknown-unknown -- -D warnings
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - name: Install wasm-pack
+        run: >
+          curl -sSfL https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz
+          | tar xz --strip-components=1 -C /usr/local/bin wasm-pack-v0.15.0-x86_64-unknown-linux-musl/wasm-pack
+      # wasm-pack takes cargo flags after `--`; passing --features directly
+      # makes it forward its own arguments to cargo and fail.
+      - run: wasm-pack build wasm --release --target web --scope firecrawl -- --features ocr
+      - run: node --test wasm/test.mjs
+        env:
+          ANYDOC_WASM_OCR_BUILD: '1'
+
+  # The crate compiles on 1.88; the ocr feature pulls in a renderer that needs
+  # 1.92. Both floors are pinned so a dependency cannot raise either quietly.
+  compiler-floor:
+    name: Compiler floor (${{ matrix.rust }})
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rust: 1.88.0
+            check: cargo check --locked -p anydoc
+          - rust: 1.92.0
+            check: cargo check --locked -p anydoc --features ocr
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: compiler-floor-${{ matrix.rust }}
+      - run: ${{ matrix.check }}
 
   python:
     name: Python bindings
