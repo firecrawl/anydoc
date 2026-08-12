@@ -39,7 +39,12 @@ Markdown goes to stdout, errors to stderr, and `anydoc --help` covers the rest.
 ## Usage
 
 ```js
-import { toDocument, toMarkdown, toMarkdownBytes } from '@firecrawl/anydoc';
+import {
+  pdfToMarkdownWithImages,
+  toDocument,
+  toMarkdown,
+  toMarkdownBytes,
+} from '@firecrawl/anydoc';
 
 // From a file path:
 const markdown = await toMarkdown('report.docx');
@@ -52,6 +57,10 @@ const fromCsv = await toMarkdownBytes(bytes, 'csv');
 
 // Or stop at the document model, which also carries embedded assets:
 const document = await toDocument(bytes);
+
+// PDF Markdown plus positioned PNG files. Each Markdown image target is the
+// matching image.filename.
+const pdf = await pdfToMarkdownWithImages(pdfBytes);
 ```
 
 ## Errors
@@ -94,7 +103,7 @@ formatFromPath('report.odt'); // 'odt'
 
 ## Images and embedded objects
 
-Markdown cannot embed bytes, so an embedded image renders as its alt text while the bytes stay on `document.assets`, tagged with a media type and the part they came from. Images that carry an external URL render as ordinary Markdown images.
+For office documents, an embedded image renders as its alt text while the bytes stay on `document.assets`, tagged with a media type and the part they came from. PDF images are available through `pdfToMarkdownWithImages` as rendered PNG bytes whose `filename` matches the Markdown target. Images that carry an external URL render as ordinary Markdown images.
 
 Full behavior notes and benchmarks live in the [repository README](https://github.com/firecrawl/anydoc#readme).
 

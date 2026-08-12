@@ -11,6 +11,7 @@ npm install @firecrawl/anydoc-wasm
 ```js
 import init, {
   formatFromBytes,
+  pdfToMarkdownWithImages,
   toMarkdownBytes,
   toDocument,
 } from '@firecrawl/anydoc-wasm';
@@ -25,6 +26,10 @@ const fromCsv = toMarkdownBytes(bytes, 'csv');
 
 // Or stop at the document model, which also carries embedded assets:
 const document = toDocument(bytes);
+
+// PDF Markdown plus positioned PNG files. Each Markdown image target is the
+// matching image.filename.
+const pdf = pdfToMarkdownWithImages(pdfBytes);
 
 // Format detection on its own:
 formatFromBytes(bytes); // 'docx', or undefined when nothing matches

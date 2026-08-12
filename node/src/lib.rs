@@ -118,6 +118,79 @@ pub fn to_markdown_bytes(
     })
 }
 
+#[napi(object)]
+pub struct PdfImage {
+    pub filename: String,
+    /// One-based source page number.
+    pub page: u32,
+    /// Source placement as [x, y, width, height] in PDF points.
+    pub bbox: Vec<f64>,
+    pub width: u32,
+    pub height: u32,
+    /// Complete PNG file bytes.
+    pub data: Buffer,
+    pub warnings: Vec<String>,
+}
+
+#[napi(object)]
+pub struct PdfConversion {
+    pub markdown: String,
+    pub images: Vec<PdfImage>,
+    pub page_count: u32,
+    pub pages_needing_ocr: Vec<u32>,
+    pub ocr_reasons_by_page: Vec<PdfOcrReasons>,
+    pub pages_with_tables: Vec<u32>,
+    pub pages_with_columns: Vec<u32>,
+    pub is_complex_layout: bool,
+    pub has_encoding_issues: bool,
+}
+
+#[napi(object)]
+pub struct PdfOcrReasons {
+    /// One-based source page number.
+    pub page: u32,
+    pub reasons: Vec<String>,
+}
+
+impl From<anydoc::PdfConversion> for PdfConversion {
+    fn from(conversion: anydoc::PdfConversion) -> Self {
+        Self {
+            markdown: conversion.markdown,
+            images: conversion
+                .images
+                .into_iter()
+                .map(|image| PdfImage {
+                    filename: image.filename,
+                    page: image.page,
+                    bbox: image.bbox.into_iter().map(f64::from).collect(),
+                    width: image.width,
+                    height: image.height,
+                    data: image.data.into(),
+                    warnings: image.warnings,
+                })
+                .collect(),
+            page_count: conversion.page_count,
+            pages_needing_ocr: conversion.pages_needing_ocr,
+            ocr_reasons_by_page: conversion
+                .ocr_reasons_by_page
+                .into_iter()
+                .map(|reason| PdfOcrReasons { page: reason.page, reasons: reason.reasons })
+                .collect(),
+            pages_with_tables: conversion.pages_with_tables,
+            pages_with_columns: conversion.pages_with_columns,
+            is_complex_layout: conversion.is_complex_layout,
+            has_encoding_issues: conversion.has_encoding_issues,
+        }
+    }
+}
+
+/// Convert PDF bytes to Markdown and return the PNG data for each positioned
+/// image. An image's `filename` is the exact target used in `markdown`.
+#[napi(ts_return_type = "Promise<PdfConversion>")]
+pub fn pdf_to_markdown_with_images(bytes: Uint8Array) -> AsyncTask<PdfConversionTask> {
+    AsyncTask::new(PdfConversionTask { bytes: bytes.to_vec(), failure: Failure::default() })
+}
+
 /// Parse an in-memory document into the document model, which also carries
 /// the embedded assets. Without a format, it is detected from the content.
 ///
@@ -186,6 +259,28 @@ pub struct MarkdownBytesTask {
     bytes: Vec<u8>,
     format: Option<anydoc::Format>,
     failure: Failure,
+}
+
+pub struct PdfConversionTask {
+    bytes: Vec<u8>,
+    failure: Failure,
+}
+
+impl Task for PdfConversionTask {
+    type Output = anydoc::PdfConversion;
+    type JsValue = PdfConversion;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        anydoc::pdf_to_markdown_with_images(&self.bytes).map_err(|e| self.failure.capture(e))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output.into())
+    }
+
+    fn reject(&mut self, env: Env, error: Error) -> Result<Self::JsValue> {
+        Err(self.failure.reject(env, error))
+    }
 }
 
 impl Task for MarkdownBytesTask {

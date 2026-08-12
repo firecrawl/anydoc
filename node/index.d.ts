@@ -235,6 +235,43 @@ export declare const enum NoteKind {
   endnote = 'endnote'
 }
 
+export interface PdfConversion {
+  markdown: string
+  images: Array<PdfImage>
+  pageCount: number
+  pagesNeedingOcr: Array<number>
+  ocrReasonsByPage: Array<PdfOcrReasons>
+  pagesWithTables: Array<number>
+  pagesWithColumns: Array<number>
+  isComplexLayout: boolean
+  hasEncodingIssues: boolean
+}
+
+export interface PdfImage {
+  filename: string
+  /** One-based source page number. */
+  page: number
+  /** Source placement as [x, y, width, height] in PDF points. */
+  bbox: Array<number>
+  width: number
+  height: number
+  /** Complete PNG file bytes. */
+  data: Buffer
+  warnings: Array<string>
+}
+
+export interface PdfOcrReasons {
+  /** One-based source page number. */
+  page: number
+  reasons: Array<string>
+}
+
+/**
+ * Convert PDF bytes to Markdown and return the PNG data for each positioned
+ * image. An image's `filename` is the exact target used in `markdown`.
+ */
+export declare function pdfToMarkdownWithImages(bytes: Uint8Array): Promise<PdfConversion>
+
 /** Fully resolved character style. */
 export interface Style {
   bold: boolean

@@ -63,6 +63,43 @@ def to_markdown_bytes(data: bytes | bytearray, format: Format | None = None) -> 
     detected from the content, which signature-less formats (CSV) have to
     name explicitly."""
 
+def pdf_to_markdown_with_images(data: bytes | bytearray) -> PdfConversion:
+    """Convert PDF bytes to Markdown and return the PNG data for each
+    positioned image. A `PdfImage.filename` is the exact target used in
+    `PdfConversion.markdown`."""
+
+@final
+class PdfConversion:
+    markdown: str
+    images: list[PdfImage]
+    page_count: int
+    pages_needing_ocr: list[int]
+    ocr_reasons_by_page: list[PdfOcrReasons]
+    pages_with_tables: list[int]
+    pages_with_columns: list[int]
+    is_complex_layout: bool
+    has_encoding_issues: bool
+
+@final
+class PdfOcrReasons:
+    page: int
+    """One-based source page number."""
+    reasons: list[str]
+
+@final
+class PdfImage:
+    filename: str
+    """File name used by the corresponding Markdown image."""
+    page: int
+    """One-based source page number."""
+    bbox: tuple[float, float, float, float]
+    """Source placement as `(x, y, width, height)` in PDF points."""
+    width: int
+    height: int
+    data: bytes
+    """Complete PNG file bytes."""
+    warnings: list[str]
+
 def to_document(data: bytes | bytearray, format: Format | None = None) -> Document:
     """Parse an in-memory document into the document model, which also
     carries the embedded assets. Without a format, it is detected from the

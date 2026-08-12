@@ -44,6 +44,22 @@ markdown = anydoc.to_markdown_bytes(data, "csv")
 document = anydoc.to_document(data)
 ```
 
+For a PDF, `pdf_to_markdown_with_images` returns positioned PNG files as well
+as Markdown. Every Markdown image target equals one returned `filename`:
+
+```python
+from pathlib import Path
+
+result = anydoc.pdf_to_markdown_with_images(Path("report.pdf").read_bytes())
+for image in result.images:
+    Path(image.filename).write_bytes(image.data)
+Path("report.md").write_text(result.markdown)
+```
+
+`result.pages_needing_ocr` and `result.ocr_reasons_by_page` identify pages
+whose extracted text is incomplete; table, column, layout, and encoding
+diagnostics are returned alongside them.
+
 ## Errors
 
 A conversion raises only when no meaningful Markdown could come out of the file. The exception type names what went wrong:
@@ -80,7 +96,7 @@ anydoc.format_from_path("report.odt")  # 'odt'
 
 ## Images and embedded objects
 
-Markdown cannot embed bytes, so an embedded image renders as its alt text while the bytes stay on `document.assets`, tagged with a media type and the part they came from. Images that carry an external URL render as ordinary Markdown images.
+For office documents, an embedded image renders as its alt text while the bytes stay on `document.assets`, tagged with a media type and the part they came from. PDF images are available through `pdf_to_markdown_with_images` as rendered PNG bytes whose `filename` matches the Markdown target. Images that carry an external URL render as ordinary Markdown images.
 
 Full behavior notes and benchmarks live in the [repository README](https://github.com/firecrawl/anydoc#readme).
 

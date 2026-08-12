@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyList};
 
 mod document;
 
@@ -164,6 +165,87 @@ fn to_markdown_bytes(py: Python<'_>, data: Vec<u8>, format: Option<&str>) -> PyR
     py.detach(|| anydoc::to_markdown_bytes(&data, format)).map_err(|e| convert_error(py, e))
 }
 
+/// One positioned PDF image encoded as PNG.
+#[pyclass(frozen, get_all, module = "anydoc")]
+struct PdfImage {
+    filename: String,
+    /// One-based source page number.
+    page: u32,
+    /// Source placement as (x, y, width, height) in PDF points.
+    bbox: (f32, f32, f32, f32),
+    width: u32,
+    height: u32,
+    data: Py<PyBytes>,
+    warnings: Vec<String>,
+}
+
+/// PDF Markdown and the images referenced by it.
+#[pyclass(frozen, get_all, module = "anydoc")]
+struct PdfConversion {
+    markdown: String,
+    /// list[PdfImage]
+    images: Py<PyList>,
+    page_count: u32,
+    pages_needing_ocr: Vec<u32>,
+    /// list[PdfOcrReasons]
+    ocr_reasons_by_page: Py<PyList>,
+    pages_with_tables: Vec<u32>,
+    pages_with_columns: Vec<u32>,
+    is_complex_layout: bool,
+    has_encoding_issues: bool,
+}
+
+/// OCR diagnostics for one PDF page.
+#[pyclass(frozen, get_all, module = "anydoc")]
+struct PdfOcrReasons {
+    page: u32,
+    reasons: Vec<String>,
+}
+
+/// Convert PDF bytes to Markdown and return the PNG data for each positioned
+/// image. A `PdfImage.filename` is the exact target used in `markdown`.
+#[pyfunction]
+fn pdf_to_markdown_with_images(py: Python<'_>, data: Vec<u8>) -> PyResult<PdfConversion> {
+    let conversion = py
+        .detach(|| anydoc::pdf_to_markdown_with_images(&data))
+        .map_err(|e| convert_error(py, e))?;
+    let images = conversion
+        .images
+        .into_iter()
+        .map(|image| {
+            let [x, y, width, height] = image.bbox;
+            Py::new(
+                py,
+                PdfImage {
+                    filename: image.filename,
+                    page: image.page,
+                    bbox: (x, y, width, height),
+                    width: image.width,
+                    height: image.height,
+                    data: PyBytes::new(py, &image.data).unbind(),
+                    warnings: image.warnings,
+                },
+            )
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    let ocr_reasons = conversion
+        .ocr_reasons_by_page
+        .into_iter()
+        .map(|reason| Py::new(py, PdfOcrReasons { page: reason.page, reasons: reason.reasons }))
+        .collect::<PyResult<Vec<_>>>()?;
+    Ok(PdfConversion {
+        markdown: conversion.markdown,
+        images: PyList::new(py, images)?.unbind(),
+        page_count: conversion.page_count,
+        pages_needing_ocr: conversion.pages_needing_ocr,
+        ocr_reasons_by_page: PyList::new(py, ocr_reasons)?.unbind(),
+        pages_with_tables: conversion.pages_with_tables,
+        pages_with_columns: conversion.pages_with_columns,
+        is_complex_layout: conversion.is_complex_layout,
+        has_encoding_issues: conversion.has_encoding_issues,
+    })
+}
+
 /// Parse an in-memory document into the document model, which also carries
 /// the embedded assets. Without a format, it is detected from the content.
 ///
@@ -190,6 +272,7 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(format_from_path, m)?)?;
     m.add_function(wrap_pyfunction!(to_markdown, m)?)?;
     m.add_function(wrap_pyfunction!(to_markdown_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(pdf_to_markdown_with_images, m)?)?;
     m.add_function(wrap_pyfunction!(to_document, m)?)?;
     m.add_class::<document::Asset>()?;
     m.add_class::<document::Block>()?;
@@ -204,6 +287,9 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<document::Note>()?;
     m.add_class::<document::Style>()?;
     m.add_class::<document::Table>()?;
+    m.add_class::<PdfConversion>()?;
+    m.add_class::<PdfImage>()?;
+    m.add_class::<PdfOcrReasons>()?;
     m.add("ConvertError", m.py().get_type::<ConvertError>())?;
     m.add("EncryptedError", m.py().get_type::<EncryptedError>())?;
     m.add("MalformedError", m.py().get_type::<MalformedError>())?;

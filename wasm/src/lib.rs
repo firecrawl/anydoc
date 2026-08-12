@@ -103,6 +103,83 @@ pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String,
     anydoc::to_markdown_bytes(bytes, format.map(anydoc::Format::from)).map_err(convert_error)
 }
 
+/// Convert PDF bytes to Markdown and return the PNG data for each positioned
+/// image. An image's `filename` is the exact target used in `markdown`.
+#[wasm_bindgen(
+    js_name = pdfToMarkdownWithImages,
+    unchecked_return_type = "PdfConversion"
+)]
+pub fn pdf_to_markdown_with_images(bytes: &[u8]) -> Result<JsValue, JsValue> {
+    let conversion = anydoc::pdf_to_markdown_with_images(bytes).map_err(convert_error)?;
+    serde_wasm_bindgen::to_value(&PdfConversion::from(conversion))
+        .map_err(|error| js_sys::Error::new(&error.to_string()).into())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfConversion {
+    markdown: String,
+    images: Vec<PdfImage>,
+    page_count: u32,
+    pages_needing_ocr: Vec<u32>,
+    ocr_reasons_by_page: Vec<PdfOcrReasons>,
+    pages_with_tables: Vec<u32>,
+    pages_with_columns: Vec<u32>,
+    is_complex_layout: bool,
+    has_encoding_issues: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PdfImage {
+    filename: String,
+    page: u32,
+    bbox: [f32; 4],
+    width: u32,
+    height: u32,
+    #[serde(with = "serde_bytes")]
+    data: Vec<u8>,
+    warnings: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct PdfOcrReasons {
+    page: u32,
+    reasons: Vec<String>,
+}
+
+impl From<anydoc::PdfConversion> for PdfConversion {
+    fn from(conversion: anydoc::PdfConversion) -> Self {
+        Self {
+            markdown: conversion.markdown,
+            images: conversion
+                .images
+                .into_iter()
+                .map(|image| PdfImage {
+                    filename: image.filename,
+                    page: image.page,
+                    bbox: image.bbox,
+                    width: image.width,
+                    height: image.height,
+                    data: image.data,
+                    warnings: image.warnings,
+                })
+                .collect(),
+            page_count: conversion.page_count,
+            pages_needing_ocr: conversion.pages_needing_ocr,
+            ocr_reasons_by_page: conversion
+                .ocr_reasons_by_page
+                .into_iter()
+                .map(|reason| PdfOcrReasons { page: reason.page, reasons: reason.reasons })
+                .collect(),
+            pages_with_tables: conversion.pages_with_tables,
+            pages_with_columns: conversion.pages_with_columns,
+            is_complex_layout: conversion.is_complex_layout,
+            has_encoding_issues: conversion.has_encoding_issues,
+        }
+    }
+}
+
 /// Parse an in-memory document into the document model, which also carries
 /// the embedded assets. Without a format, it is detected from the content.
 ///

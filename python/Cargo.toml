@@ -13,7 +13,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-anydoc = { path = ".." }
+anydoc = { path = "..", features = ["pdf-images"] }
 # abi3-py310 pins the stable ABI: one wheel per platform covers every
 # CPython from 3.10 up.
 pyo3 = { version = "0.29", features = ["abi3-py310", "extension-module"] }

@@ -28,9 +28,14 @@ csv = "1.4.0"
 flate2 = "1"
 encoding_rs = "0.8.35"
 log = "0.4"
-pdf-inspector = "0.1.8"
+pdf-inspector = { git = "https://github.com/qin-ctx/pdf-inspector", rev = "0d3ab538de89125109b501c9a7a6c320fcf9e338" }
+png = { version = "0.18", optional = true }
 quick-xml = "0.41.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+[features]
+default = []
+pdf-images = ["pdf-inspector/render", "dep:png"]
 
 [profile.release]
 lto = "thin"
