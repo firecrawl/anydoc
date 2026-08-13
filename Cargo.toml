@@ -28,6 +28,7 @@ csv = "1.4.0"
 flate2 = "1"
 encoding_rs = "0.8.35"
 log = "0.4"
+# 0.1.8+ resolves lopdf >= 0.42.0 (RUSTSEC-2026-0187). Do not lower this floor.
 pdf-inspector = "0.1.8"
 quick-xml = "0.41.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }

@@ -149,6 +149,8 @@ let document = anydoc::to_document(&bytes, None)?;
 | CSV              | `.csv`                                                     |
 | PDF              | `.pdf`                                                     |
 
+What each format keeps, reduces, or drops (images as alt text, headers/footers, hidden sheet rows, PDF `to_document`, OCR, nested tables, and similar) is listed in [SUPPORT.md](SUPPORT.md).
+
 ## Benchmark
 
 anydoc is measured against six other converters on 100 real-world documents spanning fourteen formats. Scores run from 0 to 100, higher is better; speed is the median time to convert one document.
