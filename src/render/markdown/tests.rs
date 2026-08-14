@@ -1,4 +1,4 @@
-use super::document_to_markdown;
+use super::{MarkdownOptions, document_to_markdown, document_to_markdown_with_options};
 use crate::model::{
     AnchorId, Block, Cell, Document, GridBuilder, ImageSource, Inline, LinkTarget, List, ListItem,
     MarkerKind, Note, NoteKind, Style, Table, TableKind,
@@ -6,6 +6,13 @@ use crate::model::{
 
 fn doc(blocks: Vec<Block>) -> String {
     document_to_markdown(&Document { blocks, notes: Vec::new(), assets: Vec::new() })
+}
+
+fn presentation_doc(blocks: Vec<Block>) -> String {
+    document_to_markdown_with_options(
+        &Document { blocks, notes: Vec::new(), assets: Vec::new() },
+        MarkdownOptions { render_unlinked_slide_anchors: true },
+    )
 }
 
 fn styled(text: &str, style: Style) -> Inline {
@@ -578,11 +585,20 @@ fn unreferenced_anchor_renders_nothing() {
 
 #[test]
 fn unreferenced_slide_anchor_renders_html_id() {
-    let md = doc(vec![Block::Paragraph(vec![
+    let md = presentation_doc(vec![Block::Paragraph(vec![
         Inline::Anchor("slide-1".into()),
         Inline::plain("First slide"),
     ])]);
     assert_eq!(md, "<a id=\"slide-1\"></a>First slide\n");
+}
+
+#[test]
+fn unreferenced_slide_like_anchor_renders_nothing_without_presentation_context() {
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::Anchor("slide-1".into()),
+        Inline::plain("Not a presentation slide"),
+    ])]);
+    assert_eq!(md, "Not a presentation slide\n");
 }
 
 #[test]

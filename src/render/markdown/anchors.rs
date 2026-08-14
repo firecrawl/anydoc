@@ -35,7 +35,7 @@ impl AnchorMap {
     }
 }
 
-pub(crate) fn resolve_anchors(doc: &Document) -> AnchorMap {
+pub(crate) fn resolve_anchors(doc: &Document, render_unlinked_slide_anchors: bool) -> AnchorMap {
     let mut ids = UniqueIds::default();
     let mut resolved: HashMap<String, Resolved> = HashMap::new();
 
@@ -70,7 +70,7 @@ pub(crate) fn resolve_anchors(doc: &Document) -> AnchorMap {
     // Slide boundary anchors are structural, so they render even when no
     // internal link targets them.
     let mut assign = |id: &str| {
-        if (linked.contains(id) || is_slide_boundary_anchor(id))
+        if (linked.contains(id) || (render_unlinked_slide_anchors && is_slide_boundary_anchor(id)))
             && !resolved.contains_key(id)
             && let Some(html) = ids.claim(sanitize_id(id))
         {

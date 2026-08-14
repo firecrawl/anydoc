@@ -37,8 +37,24 @@ pub(crate) struct Ctx {
     anchors: AnchorMap,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct MarkdownOptions {
+    pub(crate) render_unlinked_slide_anchors: bool,
+}
+
+#[cfg(test)]
 pub fn document_to_markdown(doc: &Document) -> String {
-    let rc = Ctx { nums: number_notes(doc), anchors: resolve_anchors(doc) };
+    document_to_markdown_with_options(doc, MarkdownOptions::default())
+}
+
+pub(crate) fn document_to_markdown_with_options(
+    doc: &Document,
+    options: MarkdownOptions,
+) -> String {
+    let rc = Ctx {
+        nums: number_notes(doc),
+        anchors: resolve_anchors(doc, options.render_unlinked_slide_anchors),
+    };
     let mut parts: Vec<String> = doc.blocks.iter().filter_map(|b| render_block(b, &rc)).collect();
     let mut rendered_defs: HashSet<usize> = HashSet::new();
     let mut ordered: Vec<(&Note, usize)> =
