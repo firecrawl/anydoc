@@ -342,7 +342,8 @@ impl Extractor {
         // slides), which order-based zipping would misattribute.
         let mut used = vec![false; notes.len()];
         let mut out = Vec::new();
-        for (sid, blocks) in slides {
+        for (slide_index, (sid, blocks)) in slides.into_iter().enumerate() {
+            out.push(Block::Paragraph(vec![Inline::Anchor(format!("slide-{}", slide_index + 1))]));
             out.extend(blocks);
             for (i, (nid, nblocks)) in notes.iter_mut().enumerate() {
                 if !used[i] && sid.is_some() && *nid == sid {
