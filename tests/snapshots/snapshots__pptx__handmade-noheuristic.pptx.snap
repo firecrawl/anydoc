@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+## Real Placeholder Title
+
+Would Be Guessed
+
+Body text

@@ -1,0 +1,6 @@
+---
+source: tests/snapshots.rs
+assertion_line: 69
+expression: output
+---
+## Untitled Slide

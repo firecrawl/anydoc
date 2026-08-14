@@ -1,0 +1,18 @@
+---
+source: tests/snapshots.rs
+assertion_line: 69
+expression: output
+---
+# Workbook Document Title
+
+## First
+
+|  |
+| --- |
+| One |
+
+## Second
+
+|  |
+| --- |
+| Two |

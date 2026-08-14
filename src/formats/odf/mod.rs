@@ -9,6 +9,7 @@ use crate::model::{Block, Document, Inline, inlines_are_empty};
 use crate::package::Package;
 use crate::package::xml::{Element, ns};
 use crate::shared::assets::AssetSink;
+use crate::shared::meta;
 use std::cell::RefCell;
 use text::{Ctx, parse_container};
 
@@ -37,6 +38,9 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
 
     let assets = RefCell::new(AssetSink::new());
     let ctx = Ctx::new(&styles, &pkg, &assets);
+    let has_document_title = body.find(ns::OFFICE, "spreadsheet").is_some()
+        || body.find(ns::OFFICE, "presentation").is_some();
+    let document_title = if has_document_title { meta::odf_title(&pkg)? } else { None };
 
     let blocks = if let Some(text) = body.find(ns::OFFICE, "text") {
         parse_container(text, &ctx)?
@@ -53,7 +57,9 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
 
     let notes = ctx.notes.into_inner();
     let assets = std::mem::take(&mut assets.borrow_mut().assets);
-    Ok(Document { blocks, notes, assets })
+    let mut document = Document { blocks, notes, assets };
+    meta::prepend_title(&mut document, document_title.as_deref());
+    Ok(document)
 }
 
 /// Encrypted ODF packages carry `manifest:encryption-data` elements on file
@@ -75,6 +81,14 @@ fn parse_presentation(pres: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertEr
         let mut body = Vec::new();
         let mut notes = Vec::new();
         walk_shapes(page, ctx, &mut title, &mut body, &mut notes)?;
+        let has_title_heading =
+            title.iter().any(|block| matches!(block, Block::Heading { level: 2, .. }));
+        if !has_title_heading
+            && let Some(name) = page.attr(ns::DRAW, "name")
+            && !is_auto_page_name(name)
+        {
+            title.insert(0, Block::heading(2, vec![Inline::plain(name.trim())]));
+        }
         blocks.append(&mut title);
         blocks.append(&mut body);
         // Speaker notes are included (fixed policy), set off as a quote.
@@ -128,10 +142,14 @@ fn walk_shapes(
                         break;
                     }
                 }
-                if class == "title" {
-                    push_title_heading(inner, title);
-                } else {
+                if class == "outline" {
                     body.append(&mut inner);
+                } else {
+                    match class {
+                        "title" => push_heading(inner, title, 2),
+                        "subtitle" => push_heading(inner, title, 3),
+                        _ => body.append(&mut inner),
+                    }
                 }
             }
             "g" => walk_shapes(child, ctx, title, body, notes)?,
@@ -150,8 +168,8 @@ fn walk_shapes(
     Ok(())
 }
 
-/// Collapse a title frame's paragraphs into one slide heading.
-fn push_title_heading(inner: Vec<Block>, blocks: &mut Vec<Block>) {
+/// Collapse a title-like frame's paragraphs into one slide heading.
+fn push_heading(inner: Vec<Block>, blocks: &mut Vec<Block>, level: u8) {
     let mut inlines: Vec<Inline> = Vec::new();
     for block in inner {
         let Block::Paragraph(para) = block else { continue };
@@ -165,8 +183,23 @@ fn push_title_heading(inner: Vec<Block>, blocks: &mut Vec<Block>) {
     }
     if !inlines_are_empty(&inlines) {
         let anchor = Some(crate::model::inlines_to_plain_text(&inlines));
-        blocks.push(Block::Heading { level: 2, anchor, content: inlines });
+        blocks.push(Block::Heading { level, anchor, content: inlines });
     }
+}
+
+/// Whether a page name is a conventional, non-authored slide label.
+fn is_auto_page_name(name: &str) -> bool {
+    let name = name.trim();
+    if name.is_empty() {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    ["page", "slide", "folie", "diapositive", "diapositiva", "sivu", "blad"].iter().any(|prefix| {
+        lower.strip_prefix(prefix).is_some_and(|rest| {
+            let rest = rest.trim_start();
+            !rest.is_empty() && rest.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    })
 }
 
 #[cfg(test)]
@@ -194,6 +227,25 @@ mod tests {
     fn corrupt_manifest_does_not_classify_as_encrypted() {
         let doc = parse(&odt(b"<manifest:manifest <<< not xml")).unwrap();
         assert!(!doc.blocks.is_empty());
+    }
+
+    #[test]
+    fn auto_page_names_are_rejected_but_authored_names_survive() {
+        for name in [
+            "",
+            " Page 1 ",
+            "slide12",
+            "Folie 3",
+            "Diapositive 4",
+            "diapositiva5",
+            "Sivu 6",
+            "blad 7",
+        ] {
+            assert!(is_auto_page_name(name), "expected auto-name: {name:?}");
+        }
+        for name in ["Page Layout", "Slide Deck Intro", "Data", "Summary 2"] {
+            assert!(!is_auto_page_name(name), "expected authored name: {name:?}");
+        }
     }
 
     fn odt_with_content(content: &str) -> Vec<u8> {

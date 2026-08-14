@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Legacy Workbook
+
+## Data
+
+|  |
+| --- |
+| Data |

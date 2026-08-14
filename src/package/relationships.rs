@@ -20,6 +20,8 @@ pub mod rel_type {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes";
     pub const ENDNOTES: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes";
+    pub const CORE_PROPERTIES: &str =
+        "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

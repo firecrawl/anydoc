@@ -83,6 +83,7 @@ export declare const enum CellSlotKind {
 
 export interface Document {
   blocks: Array<Block>
+  outline: Array<OutlineEntry>
   /**
    * Footnote and endnote bodies, referenced from text by a `noteRef`
    * inline.
@@ -233,6 +234,15 @@ export interface Note {
 export declare const enum NoteKind {
   footnote = 'footnote',
   endnote = 'endnote'
+}
+
+export interface OutlineEntry {
+  /** Source outline depth, 1-based. */
+  level: number
+  /** Heading text with styling and links flattened away. */
+  text: string
+  /** Stable source anchor, when the heading carries one. */
+  anchor?: string
 }
 
 /** Fully resolved character style. */

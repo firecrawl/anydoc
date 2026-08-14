@@ -12,6 +12,7 @@ use crate::package::xml::{Element, ns};
 use crate::shared::blockstyle::{self, BlockStyle};
 use crate::shared::chain::StyleChains;
 use crate::shared::delta::StyleDelta;
+use crate::shared::heading::{level_from_name, level_from_style_id};
 
 /// Per-property parity of `true` toggle specifications in a style chain.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -90,24 +91,21 @@ impl<'a> Styles<'a> {
     }
 
     /// Heading level a paragraph style resolves to, from its name
-    /// (`heading N`, `Title`) or an `outlineLvl`, inherited through
-    /// `basedOn`. Tri-state: `Some(None)` when the nearest specification is
-    /// the explicit off value (`outlineLvl` 9), which stops inheritance.
+    /// (`heading N`, `Title`, `Subtitle`), its anchored normalized `styleId`,
+    /// or an `outlineLvl`, inherited through `basedOn`. Tri-state:
+    /// `Some(None)` when the nearest specification is the explicit off value
+    /// (`outlineLvl` 9), which stops inheritance.
     pub fn heading_level(&self, id: &str) -> Result<Option<Option<u8>>, ConvertError> {
         self.chains.walk(id, |style| {
-            let name = style
-                .find(ns::W, "name")
-                .and_then(|e| e.attr(ns::W, "val"))
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            if let Some(rest) = name.strip_prefix("heading ")
-                && let Ok(level) = rest.trim().parse::<u8>()
-            {
+            let name = style.find(ns::W, "name").and_then(|e| e.attr(ns::W, "val")).unwrap_or("");
+            if let Some(level) = level_from_name(name) {
                 return Some(Some(level));
             }
-            if name == "title" {
-                return Some(Some(1));
+
+            if let Some(level) = level_from_style_id(style.attr(ns::W, "styleId").unwrap_or("")) {
+                return Some(Some(level));
             }
+
             let level = style
                 .find(ns::W, "pPr")?
                 .find(ns::W, "outlineLvl")?
@@ -242,5 +240,25 @@ mod tests {
         let styles = Styles::parse(root.find(ns::W, "styles").unwrap());
         assert_eq!(styles.run_toggles("NotBold").unwrap(), Toggles::default());
         assert!(styles.run_toggles("Flip").unwrap().bold);
+    }
+
+    #[test]
+    fn heading_level_uses_subtitle_and_anchored_style_id_fallbacks() {
+        let styles_xml = r#"<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/></w:style>
+            <w:style w:type="paragraph" w:styleId="Heading2"/>
+            <w:style w:type="paragraph" w:styleId="Heading_Box"><w:name w:val="Custom Box"/></w:style>
+            <w:style w:type="paragraph" w:styleId="NamedPriority"><w:name w:val="Heading 3"/></w:style>
+            <w:style w:type="paragraph" w:styleId="Off"><w:basedOn w:val="Heading2"/>
+                <w:pPr><w:outlineLvl w:val="9"/></w:pPr>
+            </w:style>
+        </w:styles>"#;
+        let root = parse(styles_xml);
+        let styles = Styles::parse(root.find(ns::W, "styles").unwrap());
+        assert_eq!(styles.heading_level("Subtitle").unwrap(), Some(Some(2)));
+        assert_eq!(styles.heading_level("Heading2").unwrap(), Some(Some(2)));
+        assert_eq!(styles.heading_level("Heading_Box").unwrap(), None);
+        assert_eq!(styles.heading_level("NamedPriority").unwrap(), Some(Some(3)));
+        assert_eq!(styles.heading_level("Off").unwrap(), Some(None));
     }
 }

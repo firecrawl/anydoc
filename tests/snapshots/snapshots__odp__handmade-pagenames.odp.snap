@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+assertion_line: 69
+expression: output
+---
+## Frame wins
+
+### Subtitle survives
+
+Outline stays body
+
+## Summary

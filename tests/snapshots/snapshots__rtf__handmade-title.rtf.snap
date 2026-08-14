@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Привет Deck
+
+Body text

@@ -4,6 +4,7 @@
 use crate::formats::rtf::lexer::{Lexer, Token, destination_groups};
 use crate::shared::blockstyle::{self, BlockStyle};
 use crate::shared::delta::StyleDelta;
+use crate::shared::heading::level_from_name;
 use crate::shared::list::MarkerKind;
 use crate::shared::numbering::{NumberPattern, NumberText};
 use std::collections::HashMap;
@@ -181,6 +182,9 @@ fn parse_stylesheet(
                 {
                     let (text, _, _) = enc.decode(&name);
                     def.block = blockstyle::from_style_name(text.trim_end_matches(';'));
+                    if def.outline.is_none() {
+                        def.outline = level_from_name(text.trim_end_matches(';'));
+                    }
                     raw.insert(id, (def, base));
                 }
                 name.clear();
@@ -470,24 +474,5 @@ fn charset_encoding(
         222 => encoding_rs::WINDOWS_874,
         238 => encoding_rs::WINDOWS_1250,
         _ => default_encoding,
-    }
-}
-
-pub fn codepage_encoding(cp: u32) -> &'static encoding_rs::Encoding {
-    match cp {
-        932 => encoding_rs::SHIFT_JIS,
-        936 => encoding_rs::GBK,
-        949 => encoding_rs::EUC_KR,
-        950 => encoding_rs::BIG5,
-        1250 => encoding_rs::WINDOWS_1250,
-        1251 => encoding_rs::WINDOWS_1251,
-        1253 => encoding_rs::WINDOWS_1253,
-        1254 => encoding_rs::WINDOWS_1254,
-        1255 => encoding_rs::WINDOWS_1255,
-        1256 => encoding_rs::WINDOWS_1256,
-        1257 => encoding_rs::WINDOWS_1257,
-        1258 => encoding_rs::WINDOWS_1258,
-        874 => encoding_rs::WINDOWS_874,
-        _ => encoding_rs::WINDOWS_1252,
     }
 }

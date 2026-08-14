@@ -49,6 +49,10 @@ test('toDocument exposes the document model', async () => {
   assert.equal(typeof heading.content[0].text, 'string')
   assert.equal(heading.content[0].kind, 'text')
   assert.equal(typeof heading.content[0].style.bold, 'boolean')
+  assert.ok(Array.isArray(document.outline))
+  assert.equal(document.outline[0].level, heading.level)
+  assert.equal(typeof document.outline[0].text, 'string')
+  assert.equal(typeof document.outline[0].level, 'number')
 })
 
 test('toDocument carries embedded assets as buffers', async () => {

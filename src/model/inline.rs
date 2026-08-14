@@ -73,3 +73,96 @@ pub fn inlines_are_empty(inlines: &[Inline]) -> bool {
         Inline::Anchor(_) | Inline::LineBreak => true,
     })
 }
+
+/// Remove a character style when one non-empty heading run carries it across
+/// the complete visible text. Mixed styling is left intact so an emphasized
+/// word in an otherwise plain heading remains meaningful.
+pub(crate) fn strip_uniform_style(inlines: &mut [Inline]) {
+    if uniform_style(inlines).is_some_and(|style| style != Style::PLAIN) {
+        strip_style(inlines);
+    }
+}
+
+/// Return the one style shared by all visible text, or `None` when visible
+/// content is mixed or includes content without a character style.
+fn uniform_style(inlines: &[Inline]) -> Option<Style> {
+    let mut style = None;
+    if !collect_uniform_style(inlines, &mut style) {
+        return None;
+    }
+    style
+}
+
+fn collect_uniform_style(inlines: &[Inline], style: &mut Option<Style>) -> bool {
+    for inline in inlines {
+        match inline {
+            Inline::Text { text, style: text_style } => {
+                if text.is_empty() {
+                    continue;
+                }
+                match style {
+                    Some(existing) if *existing != *text_style => return false,
+                    Some(_) => {}
+                    None => *style = Some(*text_style),
+                }
+            }
+            Inline::Link { content, .. } => {
+                if !collect_uniform_style(content, style) {
+                    return false;
+                }
+            }
+            Inline::Anchor(_) => {}
+            Inline::Image { .. } | Inline::NoteRef(_) | Inline::LineBreak => return false,
+        }
+    }
+    true
+}
+
+fn strip_style(inlines: &mut [Inline]) {
+    for inline in inlines {
+        match inline {
+            Inline::Text { style, .. } => *style = Style::PLAIN,
+            Inline::Link { content, .. } => strip_style(content),
+            Inline::Image { .. } | Inline::Anchor(_) | Inline::NoteRef(_) | Inline::LineBreak => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn styled(text: &str, style: Style) -> Inline {
+        Inline::Text { text: text.into(), style }
+    }
+
+    #[test]
+    fn fully_styled_content_is_stripped() {
+        let mut inlines = vec![styled("All", Style { bold: true, ..Style::PLAIN })];
+        strip_uniform_style(&mut inlines);
+        assert!(matches!(inlines[0], Inline::Text { style: Style::PLAIN, .. }));
+    }
+
+    #[test]
+    fn half_styled_content_is_preserved() {
+        let mut inlines =
+            vec![Inline::plain("Half "), styled("bold", Style { bold: true, ..Style::PLAIN })];
+        strip_uniform_style(&mut inlines);
+        assert!(matches!(inlines[0], Inline::Text { style: Style::PLAIN, .. }));
+        assert!(matches!(inlines[1], Inline::Text { style: Style { bold: true, .. }, .. }));
+    }
+
+    #[test]
+    fn uniform_combined_style_is_stripped() {
+        let mut inlines = vec![styled("All", Style { bold: true, italic: true, ..Style::PLAIN })];
+        strip_uniform_style(&mut inlines);
+        assert!(matches!(inlines[0], Inline::Text { style: Style::PLAIN, .. }));
+    }
+
+    #[test]
+    fn plain_content_is_unchanged() {
+        let mut inlines = vec![Inline::plain("Plain")];
+        strip_uniform_style(&mut inlines);
+        assert!(matches!(inlines[0], Inline::Text { style: Style::PLAIN, .. }));
+    }
+}
