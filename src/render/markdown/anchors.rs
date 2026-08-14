@@ -3,10 +3,11 @@
 //! heading's GFM auto-generated slug; an anchor a link targets gets a
 //! sanitized, stable HTML id rendered as `<a id="..."></a>` at its position.
 //!
-//! Anchors nothing links to render nothing, except structural slide boundary
-//! anchors: producers mark up far more positions than they reference (a
-//! bookmark per paragraph, an id per EPUB element), and an unreachable target
-//! is usually only noise in the output.
+//! Anchors nothing links to render nothing. Presentation callers may opt into
+//! rendering unlinked structural slide boundary anchors, but other unlinked
+//! anchors stay hidden: producers mark up far more positions than they
+//! reference (a bookmark per paragraph, an id per EPUB element), and an
+//! unreachable target is usually only noise in the output.
 
 use crate::model::{Block, Document, Inline, LinkTarget, inlines_to_plain_text};
 use std::collections::{HashMap, HashSet};
@@ -67,8 +68,8 @@ pub(crate) fn resolve_anchors(doc: &Document, render_unlinked_slide_anchors: boo
     });
 
     // Pass 2: every remaining anchor a link targets gets a sanitized HTML id.
-    // Slide boundary anchors are structural, so they render even when no
-    // internal link targets them.
+    // Presentation slide boundary anchors are structural, so callers can opt
+    // into rendering them even when no internal link targets them.
     let mut assign = |id: &str| {
         if (linked.contains(id) || (render_unlinked_slide_anchors && is_slide_boundary_anchor(id)))
             && !resolved.contains_key(id)
