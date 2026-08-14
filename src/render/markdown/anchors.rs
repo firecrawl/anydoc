@@ -3,9 +3,10 @@
 //! heading's GFM auto-generated slug; an anchor a link targets gets a
 //! sanitized, stable HTML id rendered as `<a id="..."></a>` at its position.
 //!
-//! Anchors nothing links to render nothing: producers mark up far more
-//! positions than they reference (a bookmark per paragraph, an id per EPUB
-//! element), and an unreachable target is only noise in the output.
+//! Anchors nothing links to render nothing, except structural slide boundary
+//! anchors: producers mark up far more positions than they reference (a
+//! bookmark per paragraph, an id per EPUB element), and an unreachable target
+//! is usually only noise in the output.
 
 use crate::model::{Block, Document, Inline, LinkTarget, inlines_to_plain_text};
 use std::collections::{HashMap, HashSet};
@@ -66,8 +67,10 @@ pub(crate) fn resolve_anchors(doc: &Document) -> AnchorMap {
     });
 
     // Pass 2: every remaining anchor a link targets gets a sanitized HTML id.
+    // Slide boundary anchors are structural, so they render even when no
+    // internal link targets them.
     let mut assign = |id: &str| {
-        if linked.contains(id)
+        if (linked.contains(id) || is_slide_boundary_anchor(id))
             && !resolved.contains_key(id)
             && let Some(html) = ids.claim(sanitize_id(id))
         {
@@ -145,6 +148,14 @@ fn for_each_anchor(inlines: &[Inline], f: &mut impl FnMut(&str)) {
             _ => {}
         }
     }
+}
+
+fn is_slide_boundary_anchor(id: &str) -> bool {
+    let Some(n) = id.strip_prefix("slide-") else {
+        return false;
+    };
+
+    matches!(n.parse::<usize>(), Ok(value) if value > 0)
 }
 
 /// Allocates ids without repeatedly probing used numeric suffixes.

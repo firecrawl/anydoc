@@ -577,6 +577,15 @@ fn unreferenced_anchor_renders_nothing() {
 }
 
 #[test]
+fn unreferenced_slide_anchor_renders_html_id() {
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::Anchor("slide-1".into()),
+        Inline::plain("First slide"),
+    ])]);
+    assert_eq!(md, "<a id=\"slide-1\"></a>First slide\n");
+}
+
+#[test]
 fn heading_coincident_anchor_uses_slug() {
     let md = doc(vec![
         Block::Heading {
