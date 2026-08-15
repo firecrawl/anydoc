@@ -225,6 +225,7 @@ export function App({ anyDocClient }: AppProps = {}) {
           <a href="https://github.com/firecrawl/anydoc" target="_blank" rel="noreferrer">
             AnyDoc（MIT）
           </a>
+          ，第三方许可随安装包提供
         </span>
       </footer>
 

@@ -27,6 +27,19 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "resources": ["resources/pdfium.dll", "resources/PDFIUM-SOURCE.txt"]
+    "publisher": "AnyDoc Assistant",
+    "shortDescription": "Local-first Word, PowerPoint and PDF understanding",
+    "longDescription": "Parse documents locally with AnyDoc, analyze page visuals with configurable models, chat with citations, and export structured results.",
+    "resources": [
+      "resources/pdfium.dll",
+      "resources/PDFIUM-SOURCE.txt",
+      "resources/THIRD_PARTY_NOTICES.md",
+      "resources/licenses/*"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }

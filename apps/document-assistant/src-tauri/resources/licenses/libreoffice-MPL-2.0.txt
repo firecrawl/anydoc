@@ -1,0 +1,16 @@
+LibreOffice compatibility notice
+================================
+
+LibreOffice is not bundled in this installer. AnyDoc Assistant can detect and
+use a separately installed LibreOffice copy as a fallback Office-to-PDF
+renderer. LibreOffice source code is primarily made available under the
+Mozilla Public License 2.0, with additional component-specific licenses.
+
+Official license text:
+https://www.mozilla.org/MPL/2.0/
+
+LibreOffice licensing information and source:
+https://www.libreoffice.org/about-us/licenses/
+https://www.libreoffice.org/download/download-libreoffice/
+
+Installing or removing LibreOffice is independent from AnyDoc Assistant.
