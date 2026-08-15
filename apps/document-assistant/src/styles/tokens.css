@@ -1,0 +1,70 @@
+@font-face {
+  font-family: 'Suisse Intl';
+  src: url('/assets/anydoc/fonts/SuisseIntl-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Suisse Intl';
+  src: url('/assets/anydoc/fonts/SuisseIntl-500.woff2') format('woff2');
+  font-weight: 500 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/assets/anydoc/fonts/GeistMono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --heat: #fa5d19;
+  --heat-hover: #e94f10;
+  --heat-soft: #fff1e9;
+  --bg: #f9f9f9;
+  --surface: #ffffff;
+  --text: #262626;
+  --text-muted: rgba(38, 38, 38, 0.58);
+  --alpha-4: rgba(0, 0, 0, 0.04);
+  --border-faint: #ededed;
+  --border-muted: #e2e2e2;
+  --shadow-soft: 0 18px 48px rgba(34, 22, 16, 0.07);
+  --sans: 'Suisse Intl', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', 'Cascadia Code', Consolas, monospace;
+  font-family: var(--sans);
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 50% -12%, rgba(250, 93, 25, 0.09), transparent 32rem),
+    var(--bg);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 3px solid rgba(250, 93, 25, 0.28);
+  outline-offset: 3px;
+}
