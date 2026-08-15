@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+pub mod analysis;
 mod commands;
 pub mod credentials;
 pub mod db;
