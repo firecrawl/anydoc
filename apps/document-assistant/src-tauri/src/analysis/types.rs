@@ -83,4 +83,5 @@ pub struct DocumentSummary {
 pub struct CitedAnswer {
     pub answer: String,
     pub citations: Vec<EvidenceRef>,
+    pub grounded: bool,
 }

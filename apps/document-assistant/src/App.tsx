@@ -187,6 +187,7 @@ export function App({ anyDocClient }: AppProps = {}) {
               canAnalyze={canAnalyze}
               onRequestAnalysis={() => setConsentOpen(true)}
               onNavigateToPage={() => setActiveView('source')}
+              documentId={documentId}
             />
           </div>
         </section>

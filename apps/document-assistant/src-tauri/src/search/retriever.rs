@@ -16,6 +16,18 @@ pub struct ContextPage {
 }
 
 impl SearchIndex {
+    pub fn all_context(&self, document_id: &str) -> Result<Vec<ContextPage>> {
+        let connection =
+            self.connection.lock().map_err(|_| anyhow::anyhow!("search index lock poisoned"))?;
+        let mut statement = connection.prepare(
+            "SELECT document_id, page_number, heading, text, visual_summary, 0.0
+             FROM search_pages WHERE document_id = ?1 ORDER BY page_number",
+        )?;
+        Ok(statement
+            .query_map([document_id], context_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn retrieve_context(
         &self,
         document_id: &str,

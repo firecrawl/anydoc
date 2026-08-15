@@ -60,4 +60,5 @@ export interface DocumentSummary {
 export interface CitedAnswer {
   answer: string;
   citations: EvidenceRef[];
+  grounded: boolean;
 }

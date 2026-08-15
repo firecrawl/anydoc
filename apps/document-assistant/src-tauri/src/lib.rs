@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 pub mod analysis;
+pub mod chat;
 mod commands;
 pub mod credentials;
 pub mod db;
@@ -44,6 +45,8 @@ pub fn run() {
             commands::test_model_profile,
             commands::analyze_document,
             commands::get_document_analysis,
+            commands::ask_document,
+            commands::get_conversation_messages,
             commands::start_document_task,
             commands::get_task,
             commands::list_recoverable_tasks,

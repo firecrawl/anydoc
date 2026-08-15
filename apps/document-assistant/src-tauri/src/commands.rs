@@ -17,13 +17,18 @@ use crate::{
         AnalysisPipelineInput, DocumentSummary as AnalysisDocumentSummary, VisionAnalyzer,
         run_analysis_pipeline,
     },
+    chat::{ChatService, ChatTurn},
     credentials::{SecretStore, WindowsSecretStore},
-    db::{DocumentRecord, DocumentRepository, ModelProfile, ModelProfileRepository},
+    db::{
+        ConversationMessage, ConversationRepository, DocumentRecord, DocumentRepository,
+        ModelProfile, ModelProfileRepository,
+    },
     models::{ContentPart, ModelClient, ModelMessage, ModelRequest, OpenAiCompatibleClient},
     rendering::{
         DocumentRenderer, RenderBackend, Renderer, libreoffice::LibreOfficeConverter,
         office::MicrosoftOfficeConverter, pdf::PdfiumPageRenderer,
     },
+    search::SearchIndex,
     storage::{cache_paths, compute_document_id, directory_size, remove_document_cache},
     tasks::{PageCheckpoint, ProgressSink, TaskRecord, TaskRepository, TaskStage},
 };
@@ -542,6 +547,80 @@ pub fn get_document_analysis(
         .document_summary(&document_id)
         .map_err(|error| error.to_string())?;
     json.map(|value| serde_json::from_str(&value).map_err(|error| error.to_string())).transpose()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn ask_document(
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+    conversation_id: String,
+    question: String,
+) -> Result<crate::analysis::CitedAnswer, String> {
+    if question.trim().is_empty() {
+        return Err("问题不能为空".into());
+    }
+    let consent = state
+        .repository
+        .lock()
+        .map_err(|_| "document repository lock poisoned".to_owned())?
+        .analysis_consent(&document_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "请先完成文档分析并确认模型数据发送".to_owned())?;
+    let profile = state
+        .model_profiles
+        .lock()
+        .map_err(|_| "model profile repository lock poisoned".to_owned())?
+        .list()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|profile| profile.id == consent.text_profile_id)
+        .ok_or_else(|| "已选文本模型配置不存在".to_owned())?;
+    let api_key = state
+        .secret_store
+        .get(&profile.id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "文本模型 API Key 不存在".to_owned())?;
+    let client: Arc<dyn ModelClient> =
+        Arc::new(OpenAiCompatibleClient::new(profile, api_key).map_err(|error| error.to_string())?);
+    let conversations =
+        ConversationRepository::open(&state.database_path).map_err(|error| error.to_string())?;
+    let recent = conversations
+        .list_messages(&conversation_id, 8)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|message| ChatTurn { role: message.role, content: message.content })
+        .collect::<Vec<_>>();
+    let service = ChatService::new(
+        SearchIndex::open(&state.database_path).map_err(|error| error.to_string())?,
+        client,
+    );
+    let answer = service
+        .ask(&document_id, question.trim(), &recent)
+        .await
+        .map_err(|error| error.to_string())?;
+    conversations
+        .ensure_conversation(&conversation_id, &document_id, question.trim())
+        .and_then(|_| conversations.add_message(&conversation_id, "user", question.trim(), &[]))
+        .and_then(|_| {
+            conversations.add_message(
+                &conversation_id,
+                "assistant",
+                &answer.answer,
+                &answer.citations,
+            )
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(answer)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_conversation_messages(
+    state: tauri::State<'_, AppState>,
+    conversation_id: String,
+) -> Result<Vec<ConversationMessage>, String> {
+    ConversationRepository::open(&state.database_path)
+        .and_then(|repository| repository.list_messages(&conversation_id, 100))
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn create_document_task_for_test(

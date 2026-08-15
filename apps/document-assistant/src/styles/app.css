@@ -767,6 +767,98 @@
   margin-bottom: 14px;
 }
 
+.document-chat {
+  display: grid;
+  gap: 16px;
+}
+
+.chat-heading,
+.chat-composer,
+.chat-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-heading h2,
+.chat-heading p,
+.chat-message p {
+  margin: 0;
+}
+
+.chat-heading p,
+.chat-empty {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.chat-heading button,
+.chat-error button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.chat-messages {
+  display: grid;
+  min-height: 250px;
+  align-content: start;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border-faint);
+  border-radius: 12px;
+  background: #fbfaf9;
+}
+
+.chat-message {
+  max-width: 82%;
+  padding: 12px 14px;
+  border: 1px solid var(--border-faint);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.chat-message--user {
+  justify-self: end;
+  color: white;
+  border-color: var(--heat);
+  background: var(--heat);
+}
+
+.chat-message strong {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 11px;
+}
+
+.chat-composer textarea {
+  flex: 1;
+  resize: vertical;
+  padding: 11px;
+  border: 1px solid var(--border-muted);
+  border-radius: 10px;
+  font: inherit;
+}
+
+.chat-composer > button {
+  min-width: 74px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 9px;
+  color: white;
+  background: var(--heat);
+  cursor: pointer;
+}
+
+.chat-composer > button:disabled {
+  opacity: 0.5;
+}
+
 @media (max-width: 640px) {
   .app-shell {
     width: min(100% - 24px, 1180px);

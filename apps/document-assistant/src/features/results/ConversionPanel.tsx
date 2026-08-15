@@ -3,6 +3,7 @@ import type { ResultView } from './ResultTabs';
 import type { DocumentSummary } from '../../lib/analysis/types';
 import { InsightsView } from './InsightsView';
 import { StructuredJsonView } from './StructuredJsonView';
+import { DocumentChat } from '../chat/DocumentChat';
 
 interface ConversionPanelProps {
   state: ConversionState;
@@ -13,6 +14,7 @@ interface ConversionPanelProps {
   canAnalyze?: boolean;
   onRequestAnalysis?: () => void;
   onNavigateToPage?: (pageNumber: number) => void;
+  documentId?: string | null;
 }
 
 const VIEW_HINTS: Record<ResultView, string> = {
@@ -37,6 +39,7 @@ export function ConversionPanel({
   canAnalyze = false,
   onRequestAnalysis,
   onNavigateToPage = () => undefined,
+  documentId,
 }: ConversionPanelProps) {
   if (state.status === 'reading' || state.status === 'converting') {
     return (
@@ -112,6 +115,8 @@ export function ConversionPanel({
         </div>
       ) : activeView === 'json' ? (
         <StructuredJsonView value={summary ?? { schemaVersion: 1, anyDocDocument: result.document }} />
+      ) : activeView === 'chat' && documentId && summary ? (
+        <DocumentChat documentId={documentId} onNavigateToPage={onNavigateToPage} />
       ) : (
         <div className="empty-result compact">
           <div>{VIEW_HINTS[activeView]}</div>
