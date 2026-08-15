@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+    xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0"
+    xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+    office:version="1.3"
+    office:mimetype="application/vnd.oasis.opendocument.spreadsheet">
+  <office:automatic-styles>
+    <number:percentage-style style:name="NPct">
+      <number:number number:decimal-places="1" number:min-integer-digits="1"/>
+      <number:text>%</number:text>
+    </number:percentage-style>
+    <number:currency-style style:name="NCur">
+      <number:currency-symbol number:language="en" number:country="US">$</number:currency-symbol>
+      <number:number number:decimal-places="2" number:min-integer-digits="1" number:grouping="true"/>
+    </number:currency-style>
+    <number:number-style style:name="NThou">
+      <number:number number:decimal-places="0" number:min-integer-digits="1" number:grouping="true"/>
+    </number:number-style>
+    <number:date-style style:name="NDate">
+      <number:year number:style="long"/><number:text>-</number:text>
+      <number:month number:style="long"/><number:text>-</number:text>
+      <number:day number:style="long"/>
+    </number:date-style>
+    <number:time-style style:name="NDur" number:truncate-on-overflow="false">
+      <number:hours number:style="long"/><number:text>:</number:text>
+      <number:minutes number:style="long"/><number:text>:</number:text>
+      <number:seconds number:style="long"/>
+    </number:time-style>
+    <style:style style:name="CPct" style:family="table-cell" style:data-style-name="NPct"/>
+    <style:style style:name="CCur" style:family="table-cell" style:data-style-name="NCur"/>
+    <style:style style:name="CThou" style:family="table-cell" style:data-style-name="NThou"/>
+    <style:style style:name="CDate" style:family="table-cell" style:data-style-name="NDate"/>
+    <style:style style:name="CDur" style:family="table-cell" style:data-style-name="NDur"/>
+  </office:automatic-styles>
+  <office:body>
+    <office:spreadsheet>
+      <table:table table:name="Values">
+        <table:table-column table:number-columns-repeated="3"/>
+        <table:table-row>
+          <table:table-cell office:value-type="string"><text:p>Kind</text:p></table:table-cell>
+          <table:table-cell office:value-type="string"><text:p>Value</text:p></table:table-cell>
+          <table:table-cell office:value-type="string"><text:p>Note</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell office:value-type="string"><text:p>Percent</text:p></table:table-cell>
+          <table:table-cell table:style-name="CPct" office:value-type="percentage" office:value="0.155"/>
+          <table:table-cell office:value-type="string"><text:p>fifteen and a half</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell office:value-type="string"><text:p>Currency</text:p></table:table-cell>
+          <table:table-cell table:style-name="CCur" office:value-type="currency" office:currency="USD" office:value="1234.5"/>
+          <table:table-cell office:value-type="string"><text:p>dollars</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell office:value-type="string"><text:p>Thousands</text:p></table:table-cell>
+          <table:table-cell table:style-name="CThou" office:value-type="float" office:value="9876543"/>
+          <table:table-cell office:value-type="string"><text:p>grouped</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell office:value-type="string"><text:p>Date</text:p></table:table-cell>
+          <table:table-cell table:style-name="CDate" office:value-type="date" office:date-value="2026-03-15"/>
+          <table:table-cell office:value-type="string"><text:p>ides of March</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell office:value-type="string"><text:p>Duration</text:p></table:table-cell>
+          <table:table-cell table:style-name="CDur" office:value-type="time" office:time-value="PT26H30M15S"/>
+          <table:table-cell office:value-type="string"><text:p>over a day</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell office:value-type="string"><text:p>Tiny</text:p></table:table-cell>
+          <table:table-cell office:value-type="float" office:value="0.0000004"/>
+          <table:table-cell office:value-type="string"><text:p>four ten-millionths</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell office:value-type="string"><text:p>Boolean</text:p></table:table-cell>
+          <table:table-cell office:value-type="boolean" office:boolean-value="true"/>
+          <table:table-cell office:value-type="string"><text:p>yes</text:p></table:table-cell>
+        </table:table-row>
+      </table:table>
+      <table:table table:name="Merged Grid">
+        <table:table-column table:number-columns-repeated="3"/>
+        <table:table-row>
+          <table:table-cell table:number-columns-spanned="2" table:number-rows-spanned="1" office:value-type="string"><text:p>Span two</text:p></table:table-cell>
+          <table:covered-table-cell/>
+          <table:table-cell office:value-type="string"><text:p>Right</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell office:value-type="float" office:value="1"/>
+          <table:table-cell office:value-type="float" office:value="2"/>
+          <table:table-cell office:value-type="float" office:value="3"/>
+        </table:table-row>
+      </table:table>
+    </office:spreadsheet>
+  </office:body>
+</office:document>

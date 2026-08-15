@@ -1,0 +1,2 @@
+# Fixture bytes are snapshot ground truth: never EOL-convert them.
+tests/fixtures/** -text

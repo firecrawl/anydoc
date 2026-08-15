@@ -1,0 +1,25 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Deck Title Slide
+
+- Top level point
+
+  - Nested detail
+
+- Second point with emphasis
+
+> Speaker note for the intro slide.
+
+Numbers Slide
+
+| Region | Total |
+| --- | --- |
+| North | 42 |
+
+Grouped shapes below.
+
+Inside a group shape.
+
+> Second slide notes mention the table.

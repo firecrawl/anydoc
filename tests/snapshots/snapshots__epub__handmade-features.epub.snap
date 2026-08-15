@@ -1,0 +1,46 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Feature Book
+
+<a id="oebps-ch1-xhtml"></a>
+
+# Feature Chapter
+
+**Inline-styled bold paragraph.**
+
+~~Struck via class.~~
+
+|  |  |
+| --- | --- |
+| Tall | B1 |
+|  | B2 |
+| A3 | B3 |
+
+3. three
+
+2. two
+
+1. one
+
+- a. alpha one
+
+- e. jumps to five
+- f. six
+
+- -1. minus one
+- 0\. zero
+- 1\. one
+
+- 1\. one
+- 0\. zero
+- -1. minus one
+
+See [the marked span](#oebps-ch2-xhtml-target-span) in chapter two, or [an external page](https://example.com/x), or [a relative resource](notes.txt).
+
+# Second Chapter
+
+Leading text. <a id="oebps-ch2-xhtml-target-span"></a>This span is the anchor target.
+
+Back to [chapter one's start](#oebps-ch1-xhtml).

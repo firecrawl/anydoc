@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+    xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+    xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
+    office:version="1.3"
+    office:mimetype="application/vnd.oasis.opendocument.text">
+  <office:styles>
+    <style:style style:name="Heading_20_1" style:display-name="Heading 1" style:family="paragraph" style:default-outline-level="1">
+      <style:text-properties fo:font-size="18pt" fo:font-weight="bold"/>
+    </style:style>
+    <style:style style:name="Heading_20_2" style:display-name="Heading 2" style:family="paragraph" style:default-outline-level="2">
+      <style:text-properties fo:font-size="15pt" fo:font-weight="bold"/>
+    </style:style>
+    <style:style style:name="Heading_20_3" style:display-name="Heading 3" style:family="paragraph" style:default-outline-level="3">
+      <style:text-properties fo:font-size="13pt" fo:font-weight="bold"/>
+    </style:style>
+    <style:style style:name="StrongPara" style:family="paragraph">
+      <style:text-properties fo:font-weight="bold"/>
+    </style:style>
+    <style:style style:name="NotBold" style:family="text">
+      <style:text-properties fo:font-weight="normal"/>
+    </style:style>
+    <style:style style:name="Bold" style:family="text">
+      <style:text-properties fo:font-weight="bold"/>
+    </style:style>
+    <style:style style:name="Italic" style:family="text">
+      <style:text-properties fo:font-style="italic"/>
+    </style:style>
+    <style:style style:name="Struck" style:family="text">
+      <style:text-properties style:text-line-through-style="solid"/>
+    </style:style>
+    <text:list-style style:name="NumList">
+      <text:list-level-style-number text:level="1" style:num-format="1" style:num-suffix="."/>
+      <text:list-level-style-number text:level="2" style:num-format="a" style:num-suffix=")"/>
+      <text:list-level-style-number text:level="3" style:num-format="i" style:num-suffix="."/>
+    </text:list-style>
+    <text:list-style style:name="BulList">
+      <text:list-level-style-bullet text:level="1" text:bullet-char="•"/>
+      <text:list-level-style-bullet text:level="2" text:bullet-char="◦"/>
+    </text:list-style>
+    <text:list-style style:name="RomanList">
+      <text:list-level-style-number text:level="1" style:num-format="I" style:num-suffix="."/>
+    </text:list-style>
+  </office:styles>
+  <office:body>
+    <office:text>
+      <text:h text:style-name="Heading_20_1" text:outline-level="1">Fixture Document</text:h>
+      <text:p>Plain paragraph with <text:span text:style-name="Bold">bold</text:span>, <text:span text:style-name="Italic">italic</text:span>, and <text:span text:style-name="Struck">struck</text:span> runs.</text:p>
+      <text:p text:style-name="StrongPara">Style-bold paragraph with a <text:span text:style-name="NotBold">NotBold-styled span</text:span> inside.</text:p>
+      <text:h text:style-name="Heading_20_2" text:outline-level="2">Lists</text:h>
+      <text:list text:style-name="NumList">
+        <text:list-item><text:p>First numbered</text:p></text:list-item>
+        <text:list-item><text:p>Second numbered</text:p>
+          <text:list>
+            <text:list-item><text:p>Alpha sub one</text:p></text:list-item>
+            <text:list-item><text:p>Alpha sub two</text:p>
+              <text:list>
+                <text:list-item><text:p>Roman sub sub</text:p></text:list-item>
+              </text:list>
+            </text:list-item>
+          </text:list>
+        </text:list-item>
+        <text:list-item><text:p>Third numbered</text:p></text:list-item>
+      </text:list>
+      <text:p>Interrupting paragraph between lists.</text:p>
+      <text:list text:style-name="NumList" text:continue-numbering="true">
+        <text:list-item><text:p>Fourth, continuing the count</text:p></text:list-item>
+      </text:list>
+      <text:list text:style-name="RomanList">
+        <text:list-item text:start-value="4"><text:p>Roman starting at four</text:p></text:list-item>
+        <text:list-item><text:p>Roman five</text:p></text:list-item>
+      </text:list>
+      <text:list text:style-name="BulList">
+        <text:list-item><text:p>Bullet one</text:p></text:list-item>
+        <text:list-item><text:p>Bullet two</text:p>
+          <text:list>
+            <text:list-item><text:p>Nested bullet</text:p></text:list-item>
+          </text:list>
+        </text:list-item>
+      </text:list>
+      <text:h text:style-name="Heading_20_2" text:outline-level="2">Table</text:h>
+      <table:table table:name="Merged">
+        <table:table-column table:number-columns-repeated="3"/>
+        <table:table-row>
+          <table:table-cell table:number-columns-spanned="2"><text:p>Wide head</text:p></table:table-cell>
+          <table:covered-table-cell/>
+          <table:table-cell><text:p>End</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell table:number-rows-spanned="2"><text:p>Tall</text:p></table:table-cell>
+          <table:table-cell><text:p>B2</text:p></table:table-cell>
+          <table:table-cell><text:p>C2</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:covered-table-cell/>
+          <table:table-cell><text:p>B3</text:p></table:table-cell>
+          <table:table-cell><text:p>C3</text:p></table:table-cell>
+        </table:table-row>
+      </table:table>
+      <text:h text:style-name="Heading_20_2" text:outline-level="2">Notes and special text</text:h>
+      <text:p>Music clef 𝄞 appears before this footnote<text:note text:id="ftn1" text:note-class="footnote"><text:note-citation>1</text:note-citation><text:note-body><text:p>Footnote after an astral character.</text:p></text:note-body></text:note> reference.</text:p>
+      <text:p>An endnote follows here<text:note text:id="edn1" text:note-class="endnote"><text:note-citation>i</text:note-citation><text:note-body><text:p>Endnote body text.</text:p></text:note-body></text:note>.</text:p>
+      <text:p>Persian with ZWNJ: می‌خواهم. Family emoji: 👨‍👩‍👧.</text:p>
+      <text:p>Markdown specials: *stars* _under_ [bracket] `tick` #hash 1. dotted | pipe.</text:p>
+      <text:h text:style-name="Heading_20_2" text:outline-level="2">Links and anchors</text:h>
+      <text:p>External link to <text:a xlink:href="https://example.com/page">example</text:a>.</text:p>
+      <text:p>Relative link to <text:a xlink:href="sibling.odt">a sibling file</text:a>.</text:p>
+      <text:p><text:bookmark text:name="plainmark"/>This plain paragraph carries a bookmark.</text:p>
+      <text:p>Jump to <text:a xlink:href="#plainmark">the bookmarked paragraph</text:a>.</text:p>
+      <text:h text:style-name="Heading_20_2" text:outline-level="2">Objects</text:h>
+      <text:p>Inline image: <draw:frame draw:name="Dot" text:anchor-type="as-char" svg:width="0.3cm" svg:height="0.3cm"><draw:image><office:binary-data>iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==</office:binary-data></draw:image><svg:desc>tiny red dot</svg:desc></draw:frame> done.</text:p>
+      <text:p>Text box: <draw:frame draw:name="Box" text:anchor-type="as-char" svg:width="5cm" svg:height="2cm"><draw:text-box><text:p>Inside the text box.</text:p></draw:text-box></draw:frame> after the box.</text:p>
+      <text:h text:style-name="Heading_20_2" text:outline-level="2">Quote and code</text:h>
+      <text:p>Value below one millionth: 0.0000004 should survive.</text:p>
+    </office:text>
+  </office:body>
+</office:document>

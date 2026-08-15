@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Привет, мир!
+
+Второй абзац по-русски.

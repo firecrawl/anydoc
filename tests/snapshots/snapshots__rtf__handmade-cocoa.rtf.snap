@@ -1,0 +1,20 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+**Release notes**
+
+TextEdit ends every paragraph with a backslash before the line break.
+
+A second paragraph, terminated with a CRLF pair.
+
+- First item
+- Second item
+
+Body text immediately before a table.
+
+| Name | Value |
+| --- | --- |
+| Retries | 3 |
+
+Body text after the table.

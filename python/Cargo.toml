@@ -1,0 +1,19 @@
+# The wheel version: pyproject.toml reads `version` from here (maturin's
+# dynamic version), so bump it together with the workspace release version.
+[package]
+name = "anydoc-python"
+version = "0.1.9"
+edition = "2024"
+description = "Python bindings for anydoc"
+license = "MIT"
+repository = "https://github.com/firecrawl/anydoc"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anydoc = { path = ".." }
+# abi3-py310 pins the stable ABI: one wheel per platform covers every
+# CPython from 3.10 up.
+pyo3 = { version = "0.29", features = ["abi3-py310", "extension-module"] }

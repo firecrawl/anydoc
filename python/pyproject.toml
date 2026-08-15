@@ -1,0 +1,30 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+# The distribution installs as `firecrawl-anydoc` (the bare `anydoc` name on
+# PyPI is held by an unrelated package) and imports as `anydoc`.
+[project]
+name = "firecrawl-anydoc"
+description = "Convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+keywords = ["markdown", "docx", "pdf", "pptx", "xlsx", "epub", "converter", "document"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Text Processing :: Markup :: Markdown",
+    "Typing :: Typed",
+]
+# The version comes from Cargo.toml `package.version`.
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/firecrawl/anydoc#readme"
+Repository = "https://github.com/firecrawl/anydoc"
+Issues = "https://github.com/firecrawl/anydoc/issues"
+
+[tool.maturin]
+module-name = "anydoc._anydoc"

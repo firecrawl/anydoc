@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Header without a marker
+
+- 1 one
+- 2 two
+
+- 10 ten via restart
+- 11 eleven
+
+Interruption paragraph.
+
+- 12 twelve continues lstA

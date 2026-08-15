@@ -1,0 +1,4 @@
+markitdown[all]
+pymupdf
+requests
+markdownify

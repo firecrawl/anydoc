@@ -1,0 +1,64 @@
+{
+  "name": "@firecrawl/anydoc",
+  "version": "0.1.9",
+  "description": "Convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown",
+  "license": "MIT",
+  "homepage": "https://github.com/firecrawl/anydoc#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/firecrawl/anydoc.git",
+    "directory": "node"
+  },
+  "bugs": {
+    "url": "https://github.com/firecrawl/anydoc/issues"
+  },
+  "keywords": [
+    "markdown",
+    "docx",
+    "pdf",
+    "pptx",
+    "xlsx",
+    "epub",
+    "converter",
+    "document"
+  ],
+  "main": "index.js",
+  "types": "index.d.ts",
+  "bin": {
+    "anydoc": "cli.js"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "cli.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">= 20"
+  },
+  "napi": {
+    "binaryName": "anydoc",
+    "packageName": "@firecrawl/anydoc",
+    "dtsHeaderFile": "dts-header.d.ts",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-musl",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm --no-gh-release",
+    "test": "node --test",
+    "version": "napi version"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.8.2"
+  }
+}

@@ -1,0 +1,474 @@
+# PyPI trusted publishing is registered against this exact filename (release.yml);
+# renaming the file breaks the PyPI publisher.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Manual dispatch is a dry run: everything builds and tests, publish steps
+  # run in their respective dry-run modes and nothing reaches a registry.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Version gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: All five version locations agree (and match the tag)
+        id: check
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version=$(sh scripts/check-versions.sh "$GITHUB_REF_NAME")
+          else
+            version=$(sh scripts/check-versions.sh)
+          fi
+          echo "Releasing version $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  test-rust:
+    name: Rust tests
+    needs: gate
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Root package only: the cdylib binding crates cannot link test harnesses
+      # outside a Node/Python host; the addon and wheel matrices cover them.
+      - run: cargo test --locked
+
+  build-node:
+    name: Build Node addon (${{ matrix.target }})
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+          - target: aarch64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+          - target: x86_64-pc-windows-msvc
+            host: blacksmith-8vcpu-windows-2025
+          # napi-cross links the gnu builds against glibc 2.17 so the binaries
+          # run on old distros regardless of the build host's glibc.
+          - target: x86_64-unknown-linux-gnu
+            host: blacksmith-8vcpu-ubuntu-2404
+            build_args: --use-napi-cross
+          - target: aarch64-unknown-linux-gnu
+            host: blacksmith-8vcpu-ubuntu-2404
+            build_args: --use-napi-cross
+          # musl targets cross-compile with the Zig toolchain.
+          - target: x86_64-unknown-linux-musl
+            host: blacksmith-8vcpu-ubuntu-2404
+            build_args: --cross-compile
+            zig: true
+          - target: aarch64-unknown-linux-musl
+            host: blacksmith-8vcpu-ubuntu-2404
+            build_args: --cross-compile
+            zig: true
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: node/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: mlugg/setup-zig@v2
+        if: matrix.zig == true
+        with:
+          version: 0.14.1
+      - run: npm ci
+        working-directory: node
+      - run: npm run build -- --target ${{ matrix.target }} ${{ matrix.build_args || '' }}
+        working-directory: node
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bindings-${{ matrix.target }}
+          path: node/anydoc.*.node
+          if-no-files-found: error
+
+  test-node:
+    name: Test Node addon (${{ matrix.target }})
+    needs: build-node
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+          # Apple Silicon runs x64 Node through Rosetta, which loads the x64 addon.
+          - target: x86_64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+            node_arch: x64
+          - target: x86_64-pc-windows-msvc
+            host: blacksmith-4vcpu-windows-2025
+          # The Linux flavors test through `docker run` rather than container:
+          # jobs — JavaScript actions cannot run inside Alpine containers on
+          # arm64 runners.
+          - target: x86_64-unknown-linux-gnu
+            host: blacksmith-4vcpu-ubuntu-2404
+            image: node:26-slim
+          - target: aarch64-unknown-linux-gnu
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            image: node:26-slim
+          - target: x86_64-unknown-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404
+            image: node:26-alpine
+          - target: aarch64-unknown-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            image: node:26-alpine
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        if: ${{ !matrix.image }}
+        with:
+          node-version: 26
+          architecture: ${{ matrix.node_arch || '' }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: bindings-${{ matrix.target }}
+          path: node
+      # The tests run against the downloaded prebuilt addon; no npm install needed.
+      - name: Test
+        if: ${{ !matrix.image }}
+        run: npm test
+        working-directory: node
+      - name: Test in container
+        if: ${{ matrix.image }}
+        run: >
+          docker run --rm -v ${{ github.workspace }}:/build -w /build/node
+          ${{ matrix.image }} npm test
+
+  publish-npm:
+    name: Publish npm
+    needs: [gate, test-node]
+    # npm rejects provenance attestations minted on self-hosted runners
+    # (Blacksmith counts as self-hosted), so publishing runs GitHub-hosted.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+        working-directory: node
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: bindings-*
+          path: node/artifacts
+      - run: npx napi create-npm-dirs
+        working-directory: node
+      - run: npm run artifacts
+        working-directory: node
+      - name: Skip if this version is already on npm
+        id: probe
+        run: |
+          version='${{ needs.gate.outputs.version }}'
+          if npm view "@firecrawl/anydoc@$version" version > /dev/null 2>&1; then
+            echo "@firecrawl/anydoc@$version is already published; skipping."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish
+        if: github.event_name == 'push' && steps.probe.outputs.published == 'false'
+        run: npm publish --access public
+        working-directory: node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+      - name: Publish (dry run)
+        # Skipped when the version is live: npm refuses even a --dry-run
+        # publish over an existing version.
+        if: github.event_name == 'workflow_dispatch' && steps.probe.outputs.published == 'false'
+        # --ignore-scripts keeps the dry run side-effect free: napi prepublish
+        # would otherwise publish the per-platform packages and cut a GitHub release.
+        run: npm publish --dry-run --ignore-scripts --access public
+        working-directory: node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-npm-wasm:
+    name: Publish npm (wasm)
+    needs: [gate, test-rust]
+    # npm rejects provenance attestations minted on self-hosted runners
+    # (Blacksmith counts as self-hosted), so build and publish run GitHub-hosted.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32-unknown-unknown
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          registry-url: 'https://registry.npmjs.org'
+      - name: Install wasm-pack
+        run: >
+          curl -sSfL https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz
+          | tar xz --strip-components=1 -C /usr/local/bin wasm-pack-v0.15.0-x86_64-unknown-linux-musl/wasm-pack
+      # --scope turns the anydoc-wasm crate into @firecrawl/anydoc-wasm.
+      - run: wasm-pack build wasm --release --target web --scope firecrawl
+      - name: Smoke test the built package
+        run: node --test wasm/test.mjs
+      - name: Skip if this version is already on npm
+        id: probe
+        run: |
+          version='${{ needs.gate.outputs.version }}'
+          if npm view "@firecrawl/anydoc-wasm@$version" version > /dev/null 2>&1; then
+            echo "@firecrawl/anydoc-wasm@$version is already published; skipping."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish
+        if: github.event_name == 'push' && steps.probe.outputs.published == 'false'
+        run: npm publish --access public
+        working-directory: wasm/pkg
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+      - name: Publish (dry run)
+        if: github.event_name == 'workflow_dispatch' && steps.probe.outputs.published == 'false'
+        run: npm publish --dry-run --access public
+        working-directory: wasm/pkg
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-crates:
+    name: Publish crates.io
+    needs: [gate, test-rust]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Skip if this version is already on crates.io
+        id: probe
+        # Sparse-index probe keeps re-runs of a partially failed release green.
+        run: |
+          version='${{ needs.gate.outputs.version }}'
+          index=$(curl -fsSL https://index.crates.io/an/yd/anydoc || true)
+          if printf '%s' "$index" | grep -q "\"vers\":\"$version\""; then
+            echo "anydoc $version is already on crates.io; skipping."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish
+        if: github.event_name == 'push' && steps.probe.outputs.published == 'false'
+        run: cargo publish -p anydoc --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Publish (dry run)
+        if: github.event_name == 'workflow_dispatch' && steps.probe.outputs.published == 'false'
+        run: cargo publish -p anydoc --locked --dry-run
+
+  build-sdist:
+    name: Build sdist
+    needs: gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --manifest-path python/Cargo.toml --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build-wheels:
+    name: Build wheel (${{ matrix.target }})
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # manylinux2014 keeps the same glibc 2.17 floor as the Node builds.
+          # aarch64 wheels build natively on arm runners (no QEMU/cross needed).
+          - target: x86_64-unknown-linux-gnu
+            host: blacksmith-8vcpu-ubuntu-2404
+            manylinux: '2014'
+          - target: aarch64-unknown-linux-gnu
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            manylinux: '2014'
+          - target: x86_64-unknown-linux-musl
+            host: blacksmith-8vcpu-ubuntu-2404
+            manylinux: musllinux_1_2
+          - target: aarch64-unknown-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            manylinux: musllinux_1_2
+          - target: x86_64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+          - target: aarch64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+          - target: x86_64-pc-windows-msvc
+            host: blacksmith-8vcpu-windows-2025
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        if: runner.os != 'Linux'
+        with:
+          python-version: '3.13'
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || '' }}
+          args: --release --locked --manifest-path python/Cargo.toml --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  test-wheels:
+    name: Test wheel (${{ matrix.target }})
+    needs: build-wheels
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+          - target: x86_64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+            macos_x64: true
+          - target: x86_64-pc-windows-msvc
+            host: blacksmith-4vcpu-windows-2025
+          # The Linux flavors test through `docker run` rather than container:
+          # jobs — JavaScript actions cannot run inside Alpine containers on
+          # arm64 runners.
+          - target: x86_64-unknown-linux-gnu
+            host: blacksmith-4vcpu-ubuntu-2404
+            image: python:3.13-slim
+          - target: aarch64-unknown-linux-gnu
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            image: python:3.13-slim
+          - target: x86_64-unknown-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404
+            image: python:3.13-alpine
+          - target: aarch64-unknown-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            image: python:3.13-alpine
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        if: ${{ !matrix.image }}
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist
+      # Tests must run from the repo root: with python/ as cwd, the source
+      # anydoc/ package dir shadows the installed compiled module.
+      - name: Install wheel and run tests
+        if: ${{ !matrix.image && !matrix.macos_x64 }}
+        run: |
+          python -m pip install --no-index --find-links dist firecrawl-anydoc
+          python -m unittest discover -s python/tests
+      - name: Install wheel and run tests in container
+        if: ${{ matrix.image }}
+        run: >
+          docker run --rm -v ${{ github.workspace }}:/build -w /build
+          ${{ matrix.image }} sh -c
+          "pip install --no-index --find-links dist firecrawl-anydoc &&
+          python -m unittest discover -s python/tests"
+      # setup-python's macOS builds are universal2 and launch as arm64 on Apple
+      # Silicon, where pip refuses x86_64 wheels; arch -x86_64 forces the x64
+      # slice so pip and the tests both run as x86_64 under Rosetta.
+      - name: Install wheel and run tests (x86_64 via Rosetta)
+        if: ${{ matrix.macos_x64 }}
+        run: |
+          arch -x86_64 python -m pip install --no-index --find-links dist firecrawl-anydoc
+          arch -x86_64 python -m unittest discover -s python/tests
+
+  publish-pypi:
+    name: Publish PyPI
+    needs: [gate, test-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # PyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - name: Check distributions (dry run)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          ls -l dist
+          pipx run twine check dist/*
+      - name: Publish
+        if: github.event_name == 'push'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          # Tolerate re-running a release where PyPI already got some files.
+          skip-existing: true
+
+  # The release page appears last: only once every registry publish has
+  # succeeded, carrying the Node addons, the wheels, and the sdist.
+  github-release:
+    name: GitHub release
+    needs: [publish-npm, publish-npm-wasm, publish-crates, publish-pypi]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: bindings-*
+          path: assets
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          path: assets
+          merge-multiple: true
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # --clobber keeps a re-run green when some assets already uploaded.
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" assets/* --clobber

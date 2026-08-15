@@ -1,0 +1,5 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Seventy references to one image follow.

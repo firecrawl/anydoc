@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+こんにちは世界。
+
+日本語の段落です。

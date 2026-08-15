@@ -1,0 +1,19 @@
+[package]
+name = "anydoc-node"
+version = "0.1.0"
+edition = "2024"
+description = "Node.js bindings for anydoc"
+license = "MIT"
+repository = "https://github.com/firecrawl/anydoc"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anydoc = { path = ".." }
+napi = { version = "3", default-features = false, features = ["napi4"] }
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"

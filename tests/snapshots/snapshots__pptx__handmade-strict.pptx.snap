@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+## Strict slide title
+
+Strict body text

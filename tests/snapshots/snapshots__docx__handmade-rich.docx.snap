@@ -1,0 +1,22 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Rich objects follow.
+
+**Quarterly Widgets**
+
+| Quarter | Widgets |
+| --- | --- |
+| Q1 | 10 |
+| Q2 | 14 |
+
+- Plan
+- Build
+- Ship
+
+tiny dot image
+
+Embedded object: Excel.Sheet.12
+
+After the objects.

@@ -1,0 +1,2 @@
+use_small_heuristics = "Max"
+single_line_let_else_max_width = 100

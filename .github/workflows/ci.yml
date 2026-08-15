@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # Root package only: the node/ and python/ binding crates are cdylib-only
+      # and their test harnesses cannot link outside a Node/Python host; they
+      # are covered by the node and python jobs instead.
+      - run: cargo test --locked
+
+  node:
+    name: Node bindings
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: node/package-lock.json
+      - run: npm ci
+        working-directory: node
+      - run: npm run build
+        working-directory: node
+      - run: npm test
+        working-directory: node
+      - name: Committed bindings are up to date
+        # `npm run build` regenerates index.js / index.d.ts; any diff means the
+        # committed generated bindings are stale and must be rebuilt and committed.
+        run: |
+          if ! git diff --exit-code -- node/index.js node/index.d.ts; then
+            echo "::error::node/index.js or node/index.d.ts is out of date. Run 'npm run build' in node/ and commit the result."
+            exit 1
+          fi
+
+  wasm:
+    name: Wasm bindings
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32-unknown-unknown
+      - run: cargo clippy -p anydoc-wasm --target wasm32-unknown-unknown -- -D warnings
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - name: Install wasm-pack
+        run: >
+          curl -sSfL https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz
+          | tar xz --strip-components=1 -C /usr/local/bin wasm-pack-v0.15.0-x86_64-unknown-linux-musl/wasm-pack
+      - run: wasm-pack build wasm --release --target web --scope firecrawl
+      - run: node --test wasm/test.mjs
+
+  python:
+    name: Python bindings
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: pip install maturin
+      - run: maturin build --release --locked --manifest-path python/Cargo.toml --out dist
+      - run: pip install --no-index --find-links dist firecrawl-anydoc
+      # Must run from the repo root: with python/ as cwd, the source anydoc/
+      # package dir shadows the installed compiled module.
+      - run: python -m unittest discover -s python/tests

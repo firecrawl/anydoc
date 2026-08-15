@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+    xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+    xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"
+    xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+    xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
+    office:version="1.3"
+    office:mimetype="application/vnd.oasis.opendocument.presentation">
+  <office:automatic-styles>
+    <style:page-layout style:name="PL1">
+      <style:page-layout-properties fo:page-width="28cm" fo:page-height="21cm" style:print-orientation="landscape"/>
+    </style:page-layout>
+  </office:automatic-styles>
+  <office:master-styles>
+    <style:master-page style:name="Master1" style:page-layout-name="PL1"/>
+  </office:master-styles>
+  <office:body>
+    <office:presentation>
+      <draw:page draw:name="Intro" draw:master-page-name="Master1">
+        <draw:frame presentation:class="title" svg:x="2cm" svg:y="1cm" svg:width="24cm" svg:height="3cm">
+          <draw:text-box><text:p>Deck Title Slide</text:p></draw:text-box>
+        </draw:frame>
+        <draw:frame presentation:class="outline" svg:x="2cm" svg:y="5cm" svg:width="24cm" svg:height="14cm">
+          <draw:text-box>
+            <text:list>
+              <text:list-item><text:p>Top level point</text:p>
+                <text:list>
+                  <text:list-item><text:p>Nested detail</text:p></text:list-item>
+                </text:list>
+              </text:list-item>
+              <text:list-item><text:p>Second point with <text:span text:style-name="Bold">emphasis</text:span></text:p></text:list-item>
+            </text:list>
+          </draw:text-box>
+        </draw:frame>
+        <presentation:notes>
+          <draw:frame presentation:class="notes" svg:x="2cm" svg:y="1cm" svg:width="16cm" svg:height="10cm">
+            <draw:text-box><text:p>Speaker note for the intro slide.</text:p></draw:text-box>
+          </draw:frame>
+        </presentation:notes>
+      </draw:page>
+      <draw:page draw:name="Data" draw:master-page-name="Master1">
+        <draw:frame presentation:class="title" svg:x="2cm" svg:y="1cm" svg:width="24cm" svg:height="3cm">
+          <draw:text-box><text:p>Numbers Slide</text:p></draw:text-box>
+        </draw:frame>
+        <draw:frame svg:x="2cm" svg:y="5cm" svg:width="20cm" svg:height="8cm">
+          <table:table table:name="SlideTable">
+            <table:table-column table:number-columns-repeated="2"/>
+            <table:table-row>
+              <table:table-cell office:value-type="string"><text:p>Region</text:p></table:table-cell>
+              <table:table-cell office:value-type="string"><text:p>Total</text:p></table:table-cell>
+            </table:table-row>
+            <table:table-row>
+              <table:table-cell office:value-type="string"><text:p>North</text:p></table:table-cell>
+              <table:table-cell office:value-type="string"><text:p>42</text:p></table:table-cell>
+            </table:table-row>
+          </table:table>
+        </draw:frame>
+        <draw:frame svg:x="2cm" svg:y="14cm" svg:width="20cm" svg:height="4cm">
+          <draw:text-box><text:p>Grouped shapes below.</text:p></draw:text-box>
+        </draw:frame>
+        <draw:g draw:name="Group1">
+          <draw:frame svg:x="2cm" svg:y="18cm" svg:width="8cm" svg:height="2cm">
+            <draw:text-box><text:p>Inside a group shape.</text:p></draw:text-box>
+          </draw:frame>
+        </draw:g>
+        <presentation:notes>
+          <draw:frame presentation:class="notes" svg:x="2cm" svg:y="1cm" svg:width="16cm" svg:height="10cm">
+            <draw:text-box><text:p>Second slide notes mention the table.</text:p></draw:text-box>
+          </draw:frame>
+        </presentation:notes>
+      </draw:page>
+    </office:presentation>
+  </office:body>
+</office:document>

@@ -1,0 +1,5 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+ERROR: malformed document: not an OLE2 compound file: Malformed FAT (FAT has 39 entries, but file has only 7 sectors)

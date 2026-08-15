@@ -1,0 +1,19 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Body before.
+
+```
+fn main() {
+    println!("ok");
+}
+```
+
+Body between.
+
+> A quotation.
+>
+> Its second paragraph.
+
+Body after.

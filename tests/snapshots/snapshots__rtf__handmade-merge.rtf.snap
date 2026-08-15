@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+## Inherited heading
+
+Plain paragraph between tables.
+
+|  |  |  |  |
+| --- | --- | --- | --- |
+| A1 | B1 |  | C1 |
+|  | Wide B2 |  |  |
+| A3 wide |  | B3 wide |  |
+| stray continuation |  | X |  |

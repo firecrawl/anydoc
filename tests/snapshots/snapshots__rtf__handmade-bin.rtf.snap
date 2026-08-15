@@ -1,0 +1,26 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Heading via style
+
+Before the binary blob.
+
+After the binary blob: braces stay balanced.
+
+- iv. Roman four via list table
+- v. Roman five
+
+- x. Roman ten via start override
+- xi. Roman eleven
+
+7. Decimal seven via format override
+
+| Wide header |  |
+| --- | --- |
+| L | R |
+| outer second<br>nested A / nested B |  |
+
+Да
+
+Persian join: می‌خ

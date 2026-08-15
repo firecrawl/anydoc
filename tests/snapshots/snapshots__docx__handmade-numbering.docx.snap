@@ -1,0 +1,49 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+1. One-one
+
+2. One-two
+
+   - i) One-two-a roman
+
+   - ii) One-two-b roman
+
+         - Deep bullet
+
+3. One-three
+
+Interruption paragraph.
+
+4. One-four continues the count
+
+1. Two-one independent counter
+
+10. Ten-start via override
+
+- A: Letter-A via numStyleLink
+
+- G) Level replaced and start overridden together
+
+Suppressed numbering paragraph
+
+5. Style-numbered paragraph
+
+1. pStyle-bound level one
+
+   - a. pStyle-bound level two
+
+2. pStyle-bound level one again
+
+## Inherited subheading
+
+**Bold here, and style-false keeps it bold**
+
+toggled off by a true in the character style
+
+double toggle cancels to plain
+
+direct off wins absolutely
+
+*direct on makes this italic*

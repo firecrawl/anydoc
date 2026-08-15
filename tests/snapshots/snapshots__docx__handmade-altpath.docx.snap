@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Relocated heading
+
+Body found via rels[^1]
+
+[^1]: A relocated footnote

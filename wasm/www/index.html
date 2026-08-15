@@ -1,0 +1,896 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>anydoc by Firecrawl</title>
+    <meta
+      name="description"
+      content="Convert doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, and csv to GitHub-Flavored Markdown, entirely in your browser."
+    />
+    <meta property="og:title" content="anydoc by Firecrawl" />
+    <meta
+      property="og:description"
+      content="An open source Rust library that turns any office document into clean GitHub-Flavored Markdown, with bindings for Node.js, Python, and the browser. Try it here: the conversion runs as WebAssembly, in your browser."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://firecrawl.github.io/anydoc/" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+    <style>
+      @font-face {
+        font-family: 'Suisse Intl';
+        src: url('assets/fonts/SuisseIntl-400.woff2') format('woff2');
+        font-weight: 400;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Suisse Intl';
+        src: url('assets/fonts/SuisseIntl-450.woff2') format('woff2');
+        font-weight: 450;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Suisse Intl';
+        src: url('assets/fonts/SuisseIntl-500.woff2') format('woff2');
+        font-weight: 500;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Geist Mono';
+        src: url('assets/fonts/GeistMono-400.woff2') format('woff2');
+        font-weight: 400;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Geist Mono';
+        src: url('assets/fonts/GeistMono-500.woff2') format('woff2');
+        font-weight: 500;
+        font-display: swap;
+      }
+
+      :root {
+        --heat: #fa5d19;
+        --heat-4: rgba(250, 93, 25, 0.04);
+        --bg: #f9f9f9;
+        --surface: #ffffff;
+        --text: #262626;
+        --text-muted: rgba(38, 38, 38, 0.56);
+        --alpha-4: rgba(0, 0, 0, 0.04);
+        --alpha-72: rgba(38, 38, 38, 0.72);
+        --border-faint: #ededed;
+        --border-muted: #e8e8e8;
+        --border-loud: #e6e6e6;
+        --error: #eb3424;
+        --sans: 'Suisse Intl', system-ui, -apple-system, 'Segoe UI', sans-serif;
+        --mono:
+          'Geist Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas,
+          monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0a0a0a;
+          --surface: #171717;
+          --text: #f5f5f5;
+          --text-muted: rgba(255, 255, 255, 0.56);
+          --alpha-4: rgba(255, 255, 255, 0.04);
+          --alpha-72: rgba(255, 255, 255, 0.72);
+          --border-faint: #2a2a2a;
+          --border-muted: #333333;
+          --border-loud: #404040;
+          --error: #ff7b6e;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 15px;
+        font-weight: 400;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+      .page {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 0 20px;
+      }
+      a {
+        color: inherit;
+      }
+      a:hover {
+        color: var(--heat);
+      }
+      :focus-visible {
+        outline: 2px solid var(--heat);
+        outline-offset: 2px;
+        border-radius: 2px;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+      }
+
+      header.top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 26px 40px;
+      }
+      .lockup {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        text-decoration: none;
+      }
+      .lockup img {
+        height: 22px;
+        width: auto;
+        display: block;
+      }
+      .lockup .wordmark {
+        font-size: 15px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        color: var(--text);
+      }
+      .lockup .wordmark .by {
+        font-weight: 400;
+        color: var(--text-muted);
+      }
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px 16px;
+        font-size: 13px;
+        font-weight: 450;
+      }
+      nav a {
+        color: var(--text-muted);
+        text-decoration: none;
+      }
+      @media (max-width: 575px) {
+        nav a.pkg {
+          display: none;
+        }
+      }
+
+      /* Header, main, and footer are three compartments stacked flush on one
+         pair of hairline rails, with Firecrawl curvy corners at the junctions.
+         The outer horizontal edges stay open: no line above the header, none
+         below the footer. The rails and the corner glyphs are all SVG, never
+         CSS borders: at fractional device pixel ratios a border snaps to
+         whole device pixels while SVG antialiases at geometric position, so
+         mixing the two makes the glyph arms render thicker than the rails
+         (or open hairline seams where they abut). With everything SVG the
+         whole frame rasterizes identically at any scale. */
+      .rail {
+        position: relative;
+      }
+      .rail > svg.frame {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        color: var(--border-faint);
+        pointer-events: none;
+      }
+      .rail > svg.frame line,
+      svg.junction line {
+        stroke: currentColor;
+        stroke-width: 1;
+      }
+      /* Each junction between two compartments is a single svg strip holding
+         the full-width line and all four curvy fillets, so the connector
+         rasterizes as one element: no cross-element subpixel snapping and no
+         CSS-transform layers to resample. The strip straddles the boundary:
+         21px tall, line on the 10-11 band, fillets curving 10px up into the
+         compartment above and down into the one below. Fillets extend to the
+         outer edges over their own span, overlapping the line and the rails
+         (opaque, same color), which can never seam. */
+      svg.junction {
+        position: absolute;
+        left: 0;
+        width: 100%;
+        height: 21px;
+        display: block;
+        color: var(--border-faint);
+        pointer-events: none;
+      }
+      svg.junction.top {
+        top: -10px;
+      }
+      svg.junction.bottom {
+        bottom: -10px;
+      }
+
+      section.band {
+        padding: 40px;
+      }
+      section.band + section.band {
+        border-top: 1px solid var(--border-faint);
+      }
+      @media (max-width: 575px) {
+        section.band {
+          padding: 28px 20px;
+        }
+        header.top {
+          padding: 20px;
+        }
+        footer {
+          padding: 20px;
+        }
+      }
+
+      h1 {
+        margin: 0 0 16px;
+        font-size: clamp(34px, 6vw, 52px);
+        line-height: 1.08;
+        letter-spacing: -0.01em;
+        font-weight: 500;
+      }
+      h1 .heat {
+        color: var(--heat);
+      }
+      h2 {
+        margin: 0 0 12px;
+        font-size: 20px;
+        line-height: 28px;
+        letter-spacing: -0.01em;
+        font-weight: 500;
+      }
+      .lede {
+        color: var(--alpha-72);
+        font-size: 16px;
+        line-height: 24px;
+        max-width: 60ch;
+        margin: 0;
+      }
+      .lede strong {
+        color: var(--text);
+        font-weight: 450;
+      }
+
+      /* Registry badges */
+      .badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 24px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .badges a {
+        display: flex;
+        border: 1px solid var(--border-muted);
+        border-radius: 8px;
+        background: var(--surface);
+        overflow: hidden;
+        text-decoration: none;
+        font-size: 12px;
+        line-height: 20px;
+        transition:
+          border-color 0.15s,
+          color 0.15s;
+      }
+      .badges a:hover {
+        border-color: var(--heat);
+        color: inherit;
+      }
+      .badges .key {
+        padding: 3px 9px;
+        color: var(--text-muted);
+        background: var(--alpha-4);
+        border-right: 1px solid var(--border-faint);
+      }
+      .badges .value {
+        padding: 3px 9px;
+        font-family: var(--mono);
+        font-weight: 500;
+      }
+      .badges a:hover .value {
+        color: var(--heat);
+      }
+
+      /* Converter */
+      .drop {
+        width: 100%;
+        border: 1px dashed var(--border-loud);
+        border-radius: 12px;
+        background: var(--surface);
+        padding: 44px 24px;
+        text-align: center;
+        cursor: pointer;
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+      }
+      .drop:hover,
+      .drop.over {
+        border-color: var(--heat);
+        background: var(--heat-4);
+      }
+      .drop .big {
+        display: block;
+        font-size: 16px;
+        font-weight: 450;
+        margin-bottom: 6px;
+      }
+      .drop .small {
+        color: var(--text-muted);
+        font-size: 13px;
+      }
+      .drop .small u {
+        text-decoration-color: var(--heat);
+        text-underline-offset: 3px;
+      }
+
+      .samples {
+        margin: 14px 0 0;
+        color: var(--text-muted);
+        font-size: 13px;
+      }
+      .samples button {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 500;
+        background: var(--surface);
+        border: 1px solid var(--border-loud);
+        border-radius: 8px;
+        padding: 4px 10px;
+        cursor: pointer;
+        transition:
+          color 0.15s,
+          border-color 0.15s;
+      }
+      .samples button:hover {
+        border-color: var(--heat);
+        color: var(--heat);
+      }
+
+      .result[hidden] {
+        display: none;
+      }
+      .result-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--text-muted);
+        margin-bottom: 12px;
+      }
+      .result-bar .name {
+        color: var(--text);
+        font-weight: 500;
+        overflow-wrap: anywhere;
+      }
+      .result-bar .arrow {
+        color: var(--heat);
+      }
+      .result-bar .spacer {
+        flex: 1;
+      }
+      .result-bar button {
+        font-family: var(--sans);
+        font-size: 13px;
+        font-weight: 450;
+        background: var(--surface);
+        border: 1px solid var(--border-loud);
+        border-radius: 8px;
+        padding: 4px 12px;
+        cursor: pointer;
+        transition:
+          color 0.15s,
+          border-color 0.15s;
+      }
+      .result-bar button:hover {
+        border-color: var(--heat);
+        color: var(--heat);
+      }
+
+      pre.output {
+        margin: 0;
+        background: var(--surface);
+        border: 1px solid var(--border-faint);
+        border-radius: 12px;
+        padding: 20px;
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 20px;
+        overflow: auto;
+        max-height: 60vh;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      pre.output.error {
+        color: var(--error);
+      }
+
+      /* About and install */
+      .prose {
+        margin: 0;
+        color: var(--alpha-72);
+        font-size: 15px;
+        line-height: 24px;
+        max-width: 70ch;
+      }
+      .prose + .prose {
+        margin-top: 12px;
+      }
+      .prose strong {
+        color: var(--text);
+        font-weight: 450;
+      }
+
+      /* Label on the left, one fact on the right, hairline between rows. */
+      .facts {
+        display: grid;
+        grid-template-columns: 108px 1fr;
+        margin: 0;
+      }
+      .facts dt,
+      .facts dd {
+        padding: 12px 0;
+        border-top: 1px solid var(--border-faint);
+      }
+      .facts dt:first-of-type,
+      .facts dt:first-of-type + dd {
+        padding-top: 0;
+        border-top: 0;
+      }
+      .facts dt {
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 450;
+      }
+      .facts dd {
+        margin: 0;
+        color: var(--alpha-72);
+        font-size: 14px;
+        line-height: 20px;
+        letter-spacing: 0.14px;
+        max-width: 68ch;
+      }
+      .facts dd strong {
+        color: var(--text);
+        font-weight: 450;
+      }
+      @media (max-width: 575px) {
+        .facts {
+          grid-template-columns: 1fr;
+        }
+        .facts dt {
+          padding-bottom: 2px;
+        }
+        .facts dd {
+          padding-top: 0;
+          border-top: 0;
+        }
+      }
+
+      .installs {
+        display: grid;
+        grid-template-columns: 108px 1fr;
+        gap: 8px 16px;
+        margin: 0;
+        align-items: baseline;
+      }
+      @media (max-width: 575px) {
+        .installs {
+          grid-template-columns: 1fr;
+          gap: 2px;
+        }
+        .installs dd + dt {
+          margin-top: 12px;
+        }
+      }
+      .installs dt {
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 450;
+      }
+      .installs dd {
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 20px;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .installs dd .dollar {
+        color: var(--heat);
+        user-select: none;
+      }
+      /* Click anywhere on a command to select the whole thing, minus the $. */
+      .installs dd .cmd {
+        font: inherit;
+        -webkit-user-select: all;
+        user-select: all;
+      }
+
+      footer {
+        padding: 26px 40px;
+        color: var(--text-muted);
+        font-size: 13px;
+        line-height: 20px;
+        font-weight: 450;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 18px;
+      }
+      footer a {
+        text-decoration: none;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="top rail">
+        <svg class="frame" aria-hidden="true">
+          <line x1="0.5" y1="0" x2="0.5" y2="100%" />
+          <line x1="100%" y1="0" x2="100%" y2="100%" transform="translate(-0.5 0)" />
+        </svg>
+        <a
+          class="lockup"
+          href="https://github.com/firecrawl/anydoc"
+          aria-label="anydoc by Firecrawl"
+        >
+          <picture>
+            <source
+              srcset="assets/logo-light.svg"
+              media="(prefers-color-scheme: dark)"
+            />
+            <img src="assets/logo.svg" alt="" width="15" height="22" />
+          </picture>
+          <span class="wordmark"
+            >anydoc <span class="by">by Firecrawl</span></span
+          >
+        </a>
+        <nav>
+          <a href="https://github.com/firecrawl/anydoc">GitHub</a>
+          <a class="pkg" href="https://www.npmjs.com/package/@firecrawl/anydoc"
+            >npm</a
+          >
+          <a class="pkg" href="https://crates.io/crates/anydoc">crates.io</a>
+          <a class="pkg" href="https://pypi.org/project/firecrawl-anydoc/"
+            >PyPI</a
+          >
+        </nav>
+      </header>
+
+      <main class="rail">
+        <svg class="frame" aria-hidden="true">
+          <line x1="0.5" y1="0" x2="0.5" y2="100%" />
+          <line x1="100%" y1="0" x2="100%" y2="100%" transform="translate(-0.5 0)" />
+        </svg>
+        <svg class="junction top" aria-hidden="true">
+          <line x1="0" y1="10.5" x2="100%" y2="10.5" />
+          <path d="M4 0H11V7H10C10 3.68629 7.31371 1 4 1V0Z" fill="currentColor" transform="rotate(180 5.5 5.5)" />
+          <path d="M4 0H11V7H10C10 3.68629 7.31371 1 4 1V0Z" fill="currentColor" transform="translate(0 10) rotate(-90 5.5 5.5)" />
+          <svg x="100%" overflow="visible">
+            <path d="M4 0H11V7H10C10 3.68629 7.31371 1 4 1V0Z" fill="currentColor" transform="translate(-11 0) rotate(90 5.5 5.5)" />
+            <path d="M4 0H11V7H10C10 3.68629 7.31371 1 4 1V0Z" fill="currentColor" transform="translate(-11 10)" />
+          </svg>
+        </svg>
+        <svg class="junction bottom" aria-hidden="true">
+          <line x1="0" y1="10.5" x2="100%" y2="10.5" />
+          <path d="M4 0H11V7H10C10 3.68629 7.31371 1 4 1V0Z" fill="currentColor" transform="rotate(180 5.5 5.5)" />
+          <path d="M4 0H11V7H10C10 3.68629 7.31371 1 4 1V0Z" fill="currentColor" transform="translate(0 10) rotate(-90 5.5 5.5)" />
+          <svg x="100%" overflow="visible">
+            <path d="M4 0H11V7H10C10 3.68629 7.31371 1 4 1V0Z" fill="currentColor" transform="translate(-11 0) rotate(90 5.5 5.5)" />
+            <path d="M4 0H11V7H10C10 3.68629 7.31371 1 4 1V0Z" fill="currentColor" transform="translate(-11 10)" />
+          </svg>
+        </svg>
+
+        <section class="band">
+          <h1>Any document in.<br /><span class="heat">Markdown out.</span></h1>
+          <p class="lede">
+            Open source Rust library that converts Word, PowerPoint, Excel,
+            PDF, and more to GitHub-Flavored Markdown. Node, Python, browser,
+            and CLI bindings. It runs here in your browser:
+            <strong>files never leave your machine</strong>.
+          </p>
+          <ul class="badges">
+            <li>
+              <a href="https://crates.io/crates/anydoc">
+                <span class="key">crates.io</span
+                ><span class="value">anydoc</span>
+              </a>
+            </li>
+            <li>
+              <a href="https://www.npmjs.com/package/@firecrawl/anydoc">
+                <span class="key">npm</span
+                ><span class="value">@firecrawl/anydoc</span>
+              </a>
+            </li>
+            <li>
+              <a href="https://pypi.org/project/firecrawl-anydoc/">
+                <span class="key">PyPI</span
+                ><span class="value">firecrawl-anydoc</span>
+              </a>
+            </li>
+            <li>
+              <a href="https://skills.sh/firecrawl/anydoc">
+                <span class="key">skills.sh</span
+                ><span class="value">firecrawl/anydoc</span>
+              </a>
+            </li>
+            <li>
+              <a href="https://github.com/firecrawl/anydoc/blob/main/LICENSE">
+                <span class="key">license</span><span class="value">MIT</span>
+              </a>
+            </li>
+          </ul>
+        </section>
+
+        <section class="band">
+          <button class="drop" id="drop" aria-describedby="drop-hint">
+            <span class="big" id="drop-title"
+              >Loading the converter&hellip;</span
+            >
+            <span class="small" id="drop-hint"
+              >a few MB of WebAssembly, downloaded once</span
+            >
+          </button>
+          <input type="file" id="file" hidden />
+          <p class="samples">
+            No document at hand? Try a sample:
+            <button id="sample-rtf">notes.rtf</button>
+            <button id="sample-csv">report.csv</button>
+          </p>
+        </section>
+
+        <section class="band result" id="result" hidden aria-live="polite">
+          <div class="result-bar">
+            <span class="name" id="result-name"></span>
+            <span class="arrow" id="result-arrow" hidden>&rarr;</span>
+            <span id="result-stats"></span>
+            <span class="spacer"></span>
+            <button id="copy" hidden>Copy</button>
+            <button id="download" hidden>Download .md</button>
+          </div>
+          <pre class="output" id="output"></pre>
+        </section>
+
+        <section class="band">
+          <h2>About</h2>
+          <dl class="facts">
+            <dt>One model</dt>
+            <dd>
+              <strong>Every format parses into the same document model</strong>
+              and renders through the same Markdown serializer, so headings,
+              nested lists, merged table cells, and footnotes come out the same
+              from a .doc written in 2003 as from yesterday's .pptx.
+            </dd>
+
+            <dt>Detection</dt>
+            <dd>
+              The format is read from the bytes, not the extension, so
+              mislabeled files still convert.
+            </dd>
+
+            <dt>Speed</dt>
+            <dd>
+              Pure Rust, no ML models, no services: median conversion is under
+              5&nbsp;ms. Of seven converters
+              <a href="https://github.com/firecrawl/anydoc#benchmark"
+                >benchmarked</a
+              >
+              on 100 documents, anydoc was the only one to handle all fourteen
+              formats.
+            </dd>
+
+            <dt>PDF</dt>
+            <dd>
+              Text-based PDFs convert locally through
+              <a href="https://github.com/firecrawl/pdf-inspector"
+                >pdf-inspector</a
+              >. Scanned pages need OCR, which
+              <a href="https://firecrawl.dev/parse">Firecrawl Parse</a> adds on
+              top of this same conversion.
+            </dd>
+
+            <dt>This page</dt>
+            <dd>
+              The converter above is
+              <a href="https://www.npmjs.com/package/@firecrawl/anydoc-wasm"
+                >@firecrawl/anydoc-wasm</a
+              >, anydoc compiled to WebAssembly. Drop it into your own app the
+              same way.
+            </dd>
+          </dl>
+        </section>
+
+        <section class="band">
+          <h2>Install</h2>
+          <dl class="installs">
+            <dt>Rust</dt>
+            <dd>
+              <span class="dollar">$</span>
+              <code class="cmd">cargo add anydoc</code>
+            </dd>
+            <dt>Node.js</dt>
+            <dd>
+              <span class="dollar">$</span>
+              <code class="cmd">npm install @firecrawl/anydoc</code>
+            </dd>
+            <dt>Python</dt>
+            <dd>
+              <span class="dollar">$</span>
+              <code class="cmd">pip install firecrawl-anydoc</code>
+            </dd>
+            <dt>Browser</dt>
+            <dd>
+              <span class="dollar">$</span>
+              <code class="cmd">npm install @firecrawl/anydoc-wasm</code>
+            </dd>
+            <dt>CLI</dt>
+            <dd>
+              <span class="dollar">$</span>
+              <code class="cmd">npx @firecrawl/anydoc report.docx</code>
+            </dd>
+            <dt>Agent skill</dt>
+            <dd>
+              <span class="dollar">$</span>
+              <code class="cmd">npx skills add firecrawl/anydoc</code>
+            </dd>
+          </dl>
+          <p class="prose" style="margin-top: 16px">
+            The API is the same everywhere: convert from a path or from bytes,
+            or stop at the document model and keep the embedded assets. See the
+            <a href="https://github.com/firecrawl/anydoc#quick-start">README</a
+            >.
+          </p>
+        </section>
+      </main>
+
+      <footer class="rail">
+        <svg class="frame" aria-hidden="true">
+          <line x1="0.5" y1="0" x2="0.5" y2="100%" />
+          <line x1="100%" y1="0" x2="100%" y2="100%" transform="translate(-0.5 0)" />
+        </svg>
+        <span>MIT license</span>
+        <a href="https://github.com/firecrawl/anydoc">Source</a>
+        <a href="https://github.com/firecrawl/anydoc/issues">Issues</a>
+        <a href="https://firecrawl.dev">Built by Firecrawl</a>
+      </footer>
+    </div>
+
+    <script type="module">
+      import init, {
+        formatFromBytes,
+        formatFromPath,
+        toMarkdownBytes,
+      } from './pkg/anydoc_wasm.js';
+
+      const $ = (id) => document.getElementById(id);
+      const dropTitle = $('drop-title');
+      const dropHint = $('drop-hint');
+      const output = $('output');
+
+      let markdown = '';
+      let baseName = 'document';
+
+      function showResult(name, format, stats, text, isError) {
+        $('result').hidden = false;
+        $('result-name').textContent = name;
+        $('result-arrow').hidden = isError;
+        $('result-stats').textContent = isError ? '' : `${format} · ${stats}`;
+        $('copy').hidden = isError;
+        $('download').hidden = isError;
+        output.textContent = text;
+        output.classList.toggle('error', isError);
+        $('result').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      function convert(name, bytes) {
+        const format = formatFromBytes(bytes) ?? formatFromPath(name);
+        baseName = name.replace(/\.[^.]*$/, '') || 'document';
+        try {
+          const started = performance.now();
+          markdown = toMarkdownBytes(bytes, format);
+          const ms = Math.max(1, Math.round(performance.now() - started));
+          const chars = markdown.length.toLocaleString('en-US');
+          showResult(
+            name,
+            format,
+            `${chars} chars · ${ms} ms`,
+            markdown,
+            false,
+          );
+        } catch (error) {
+          showResult(
+            name,
+            format,
+            '',
+            `Could not convert this file: ${error.message ?? error}`,
+            true,
+          );
+        }
+      }
+
+      async function convertFile(file) {
+        convert(file.name, new Uint8Array(await file.arrayBuffer()));
+      }
+
+      const SAMPLE_RTF = String.raw`{\rtf1\ansi\deff0{\fonttbl{\f0 Times New Roman;}}
+\pard\sa200 anydoc reads the {\b formatting}, the {\i emphasis}, and the {\b\i structure} of a document, then writes the Markdown that says the same thing.\par
+\pard\sa200 This paragraph came from a tiny RTF file assembled right on this page. Drop one of your own to see a real conversion.\par
+}`;
+      const SAMPLE_CSV =
+        'format,kind,since\ndocx,WordprocessingML,0.1.0\nepub,EPUB 2 and 3,0.1.0\nxlsx,Excel workbook,0.1.0\npdf,via pdf-inspector,0.1.0\n';
+
+      const drop = $('drop');
+      const file = $('file');
+      drop.addEventListener('click', () => file.click());
+      file.addEventListener('change', () => {
+        if (file.files[0]) convertFile(file.files[0]);
+      });
+
+      for (const eventName of ['dragover', 'drop']) {
+        window.addEventListener(eventName, (event) => event.preventDefault());
+      }
+      drop.addEventListener('dragover', () => drop.classList.add('over'));
+      drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+      drop.addEventListener('drop', (event) => {
+        drop.classList.remove('over');
+        const dropped = event.dataTransfer?.files?.[0];
+        if (dropped) convertFile(dropped);
+      });
+
+      $('sample-rtf').addEventListener('click', () =>
+        convert('notes.rtf', new TextEncoder().encode(SAMPLE_RTF)),
+      );
+      $('sample-csv').addEventListener('click', () =>
+        convert('report.csv', new TextEncoder().encode(SAMPLE_CSV)),
+      );
+
+      $('copy').addEventListener('click', async () => {
+        await navigator.clipboard.writeText(markdown);
+        $('copy').textContent = 'Copied';
+        setTimeout(() => {
+          $('copy').textContent = 'Copy';
+        }, 1200);
+      });
+
+      $('download').addEventListener('click', () => {
+        const url = URL.createObjectURL(
+          new Blob([markdown], { type: 'text/markdown' }),
+        );
+        const a = Object.assign(document.createElement('a'), {
+          href: url,
+          download: `${baseName}.md`,
+        });
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      try {
+        await init();
+        dropTitle.textContent = 'Drop a document here';
+        dropHint.innerHTML =
+          'or <u>browse</u> for one. Conversion happens locally, nothing is uploaded.';
+      } catch (error) {
+        dropTitle.textContent = 'The converter failed to load';
+        dropHint.textContent = String(error?.message ?? error);
+      }
+    </script>
+  </body>
+</html>
