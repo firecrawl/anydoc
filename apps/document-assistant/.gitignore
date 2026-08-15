@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+src-tauri/gen/
+src-tauri/target/
+src-tauri/icons/android/
+src-tauri/icons/ios/
+src-tauri/icons/icon.icns
