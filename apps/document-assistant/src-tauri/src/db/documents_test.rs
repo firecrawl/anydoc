@@ -51,3 +51,21 @@ fn deleting_history_does_not_delete_source_file() {
     assert!(source.exists());
     assert!(repo.get_document("doc-1").expect("lookup succeeds").is_none());
 }
+
+#[test]
+fn persists_success_and_failure_for_individual_page_analyses() {
+    let repo = DocumentRepository::open_in_memory().expect("repository opens");
+    repo.upsert_document(&sample_document("doc-1", "hash-1", PathBuf::from("slides.pptx")))
+        .expect("document inserts");
+
+    repo.save_page_analysis("doc-1", 1, r#"{"summary":"ok"}"#).expect("analysis saves");
+    repo.save_page_analysis_failure("doc-1", 2, "not-json", "schema mismatch")
+        .expect("failure saves");
+    repo.set_visual_content_analyzed("doc-1", false).expect("capability saves");
+    let records = repo.list_page_analyses("doc-1").expect("analyses list");
+
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].status, "completed");
+    assert_eq!(records[1].raw_response.as_deref(), Some("not-json"));
+    assert_eq!(repo.visual_content_analyzed("doc-1").expect("capability reads"), Some(false));
+}

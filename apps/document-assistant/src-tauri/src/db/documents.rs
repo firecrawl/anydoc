@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use super::DocumentRecord;
+use super::{ANALYSIS_MIGRATION, DocumentRecord, PageAnalysisRecord};
 
 const INITIAL_MIGRATION: &str = include_str!("../../migrations/0001_init.sql");
 
@@ -31,6 +31,7 @@ impl DocumentRepository {
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.execute_batch(INITIAL_MIGRATION)?;
+        connection.execute_batch(ANALYSIS_MIGRATION)?;
         Ok(Self { connection })
     }
 
@@ -91,6 +92,97 @@ impl DocumentRepository {
         self.connection.execute("DELETE FROM documents WHERE id = ?1", [id])?;
         Ok(())
     }
+
+    pub fn save_page_analysis(
+        &self,
+        document_id: &str,
+        page_number: u32,
+        analysis_json: &str,
+    ) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO page_analyses (
+                document_id, page_number, analysis_json, raw_response, status, error, updated_at
+             ) VALUES (?1, ?2, ?3, NULL, 'completed', NULL, ?4)
+             ON CONFLICT(document_id, page_number) DO UPDATE SET
+                analysis_json = excluded.analysis_json,
+                raw_response = NULL,
+                status = 'completed',
+                error = NULL,
+                updated_at = excluded.updated_at",
+            params![document_id, page_number, analysis_json, now()],
+        )?;
+        Ok(())
+    }
+
+    pub fn save_page_analysis_failure(
+        &self,
+        document_id: &str,
+        page_number: u32,
+        raw_response: &str,
+        error: &str,
+    ) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO page_analyses (
+                document_id, page_number, analysis_json, raw_response, status, error, updated_at
+             ) VALUES (?1, ?2, NULL, ?3, 'failed', ?4, ?5)
+             ON CONFLICT(document_id, page_number) DO UPDATE SET
+                analysis_json = NULL,
+                raw_response = excluded.raw_response,
+                status = 'failed',
+                error = excluded.error,
+                updated_at = excluded.updated_at",
+            params![document_id, page_number, raw_response, error, now()],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_page_analyses(&self, document_id: &str) -> Result<Vec<PageAnalysisRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT document_id, page_number, analysis_json, raw_response, status, error, updated_at
+             FROM page_analyses WHERE document_id = ?1 ORDER BY page_number",
+        )?;
+        Ok(statement
+            .query_map([document_id], |row| {
+                Ok(PageAnalysisRecord {
+                    document_id: row.get(0)?,
+                    page_number: row.get(1)?,
+                    analysis_json: row.get(2)?,
+                    raw_response: row.get(3)?,
+                    status: row.get(4)?,
+                    error: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn set_visual_content_analyzed(&self, document_id: &str, analyzed: bool) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO document_analysis (document_id, visual_content_analyzed, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(document_id) DO UPDATE SET
+                visual_content_analyzed = excluded.visual_content_analyzed,
+                updated_at = excluded.updated_at",
+            params![document_id, analyzed, now()],
+        )?;
+        Ok(())
+    }
+
+    pub fn visual_content_analyzed(&self, document_id: &str) -> Result<Option<bool>> {
+        self.connection
+            .query_row(
+                "SELECT visual_content_analyzed FROM document_analysis WHERE document_id = ?1",
+                [document_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+}
+
+fn now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()
+        as i64
 }
 
 fn path_string(path: &Path) -> String {

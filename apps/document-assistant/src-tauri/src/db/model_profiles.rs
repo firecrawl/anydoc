@@ -7,6 +7,8 @@ use anyhow::Result;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
+use super::ANALYSIS_MIGRATION;
+
 const INITIAL_MIGRATION: &str = include_str!("../../migrations/0001_init.sql");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +48,7 @@ impl ModelProfileRepository {
         let connection = Connection::open(path)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.execute_batch(INITIAL_MIGRATION)?;
+        connection.execute_batch(ANALYSIS_MIGRATION)?;
         Ok(Self { connection })
     }
 

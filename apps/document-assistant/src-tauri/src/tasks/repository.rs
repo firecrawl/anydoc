@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::model::{PageCheckpoint, TaskRecord, TaskStage, unix_timestamp};
+use crate::db::ANALYSIS_MIGRATION;
 
 const INITIAL_MIGRATION: &str = include_str!("../../migrations/0001_init.sql");
 
@@ -20,6 +21,7 @@ impl TaskRepository {
              PRAGMA journal_mode = WAL;",
         )?;
         connection.execute_batch(INITIAL_MIGRATION)?;
+        connection.execute_batch(ANALYSIS_MIGRATION)?;
         Ok(Self { connection })
     }
 
