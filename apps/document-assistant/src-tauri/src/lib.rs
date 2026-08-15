@@ -6,6 +6,7 @@ pub mod db;
 pub mod events;
 pub mod rendering;
 pub mod storage;
+pub mod tasks;
 
 #[cfg(test)]
 mod storage_test;
@@ -35,6 +36,13 @@ pub fn run() {
             commands::has_api_key,
             commands::delete_api_key,
             commands::list_model_profiles,
+            commands::start_document_task,
+            commands::get_task,
+            commands::list_recoverable_tasks,
+            commands::pause_task,
+            commands::cancel_task,
+            commands::resume_task,
+            commands::retry_failed_pages,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AnyDoc Assistant");

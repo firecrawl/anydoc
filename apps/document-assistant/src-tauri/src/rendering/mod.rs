@@ -48,6 +48,10 @@ pub trait PdfPageRenderer: Send + Sync {
     fn render_pages(&self, pdf: &Path, output_dir: &Path) -> Result<Vec<RenderedPage>>;
 }
 
+pub trait DocumentRenderer: Send + Sync {
+    fn render(&self, source: &Path, output_dir: &Path) -> Result<RenderManifest>;
+}
+
 pub struct Renderer {
     office_converters: Vec<Arc<dyn OfficeConverter>>,
     pdf_renderer: Arc<dyn PdfPageRenderer>,
@@ -98,6 +102,12 @@ impl Renderer {
         }
 
         Ok(text_only_manifest())
+    }
+}
+
+impl DocumentRenderer for Renderer {
+    fn render(&self, source: &Path, output_dir: &Path) -> Result<RenderManifest> {
+        Renderer::render(self, source, output_dir)
     }
 }
 

@@ -2,6 +2,78 @@
   min-height: 100vh;
 }
 
+.task-progress {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-muted);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.task-progress__heading,
+.task-progress__heading > div,
+.task-progress__actions {
+  display: flex;
+  align-items: center;
+}
+
+.task-progress__heading {
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.task-progress__heading > div,
+.task-progress__actions {
+  gap: 0.6rem;
+}
+
+.status-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--heat);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--heat) 14%, transparent);
+}
+
+.status-dot[data-stage='failed'] {
+  background: #d64a4a;
+}
+
+.task-progress__track {
+  height: 8px;
+  margin: 0.8rem 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border-muted);
+}
+
+.task-progress__track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--heat), #ff9f6e);
+  transition: width 180ms ease;
+}
+
+.task-progress__failed {
+  color: #b93838;
+}
+
+.task-progress__actions {
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.task-progress__actions button {
+  min-height: 36px;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--border-muted);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
 .app-shell {
   width: min(1180px, calc(100% - 40px));
   margin: 0 auto;
