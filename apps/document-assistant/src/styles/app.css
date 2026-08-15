@@ -946,6 +946,38 @@
   border-radius: 9px;
 }
 
+.export-area {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 11px;
+  border: 1px solid var(--border-faint);
+  border-radius: 10px;
+  background: #fbfaf9;
+}
+
+.export-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.export-buttons button {
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border-muted);
+  border-radius: 7px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.export-area [role='status'] {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .source-error {
   display: flex;
   align-items: center;

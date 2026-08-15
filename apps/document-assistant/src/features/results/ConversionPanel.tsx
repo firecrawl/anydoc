@@ -5,6 +5,7 @@ import { InsightsView } from './InsightsView';
 import { StructuredJsonView } from './StructuredJsonView';
 import { DocumentChat } from '../chat/DocumentChat';
 import { SourceViewer, type SourcePage } from '../source/SourceViewer';
+import { ExportButtons } from '../export/ExportButtons';
 
 interface ConversionPanelProps {
   state: ConversionState;
@@ -107,6 +108,8 @@ export function ConversionPanel({
           </a>
         </div>
       </div>
+
+      {documentId && summary ? <ExportButtons documentId={documentId} /> : null}
 
       {activeView === 'markdown' ? (
         <pre className="markdown-output">{result.markdown}</pre>

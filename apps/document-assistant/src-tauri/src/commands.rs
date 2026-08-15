@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use image::ImageEncoder;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{Emitter, Manager};
 
@@ -23,13 +23,16 @@ use crate::{
         ConversationMessage, ConversationRepository, DocumentRecord, DocumentRepository,
         ModelProfile, ModelProfileRepository,
     },
+    export::{ExportMetadata, ExportPayload, render_enhanced_markdown, render_json},
     models::{ContentPart, ModelClient, ModelMessage, ModelRequest, OpenAiCompatibleClient},
     rendering::{
         DocumentRenderer, RenderBackend, Renderer, libreoffice::LibreOfficeConverter,
         office::MicrosoftOfficeConverter, pdf::PdfiumPageRenderer,
     },
     search::SearchIndex,
-    storage::{cache_paths, compute_document_id, directory_size, remove_document_cache},
+    storage::{
+        cache_paths, compute_document_id, directory_size, remove_document_cache, write_atomic,
+    },
     tasks::{PageCheckpoint, ProgressSink, TaskRecord, TaskRepository, TaskStage},
 };
 
@@ -140,6 +143,21 @@ pub struct SourcePageData {
     pub status: String,
     pub analysis: Option<serde_json::Value>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportFormat {
+    OriginalMarkdown,
+    EnhancedMarkdown,
+    StructuredJson,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportReceipt {
+    pub destination: String,
+    pub bytes_written: u64,
 }
 
 pub(crate) fn app_info_for_test(app_data_dir: String) -> AppInfo {
@@ -663,6 +681,121 @@ pub fn get_conversation_messages(
     ConversationRepository::open(&state.database_path)
         .and_then(|repository| repository.list_messages(&conversation_id, 100))
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn export_document(
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+    format: ExportFormat,
+    destination: Option<String>,
+) -> Result<Option<ExportReceipt>, String> {
+    let (document, summary, page_analysis_records, consent, analysis_at) = {
+        let repository =
+            state.repository.lock().map_err(|_| "document repository lock poisoned".to_owned())?;
+        let document = repository
+            .get_document(&document_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("document not found: {document_id}"))?;
+        let summary_json = repository
+            .document_summary(&document_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "文档尚未生成结构化分析".to_owned())?;
+        let summary: AnalysisDocumentSummary =
+            serde_json::from_str(&summary_json).map_err(|error| error.to_string())?;
+        let page_analyses =
+            repository.list_page_analyses(&document_id).map_err(|error| error.to_string())?;
+        let consent = repository
+            .analysis_consent(&document_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "文档没有模型分析记录".to_owned())?;
+        let analysis_at = repository
+            .document_analysis_updated_at(&document_id)
+            .map_err(|error| error.to_string())?
+            .unwrap_or(document.updated_at);
+        (document, summary, page_analyses, consent, analysis_at)
+    };
+    let profiles = state
+        .model_profiles
+        .lock()
+        .map_err(|_| "model profile repository lock poisoned".to_owned())?
+        .list()
+        .map_err(|error| error.to_string())?;
+    let profile_name = |id: &str| {
+        profiles
+            .iter()
+            .find(|profile| profile.id == id)
+            .map(|profile| profile.model.clone())
+            .unwrap_or_else(|| id.to_owned())
+    };
+    let original_markdown = document
+        .markdown_path
+        .as_ref()
+        .filter(|path| path.exists())
+        .map(std::fs::read_to_string)
+        .transpose()
+        .map_err(|error| error.to_string())?
+        .unwrap_or_default();
+    let failed_pages = page_analysis_records
+        .iter()
+        .filter(|record| record.status == "failed")
+        .map(|record| record.page_number)
+        .collect::<Vec<_>>();
+    let parsed_pages = page_analysis_records
+        .iter()
+        .filter_map(|record| record.analysis_json.as_deref())
+        .map(serde_json::from_str::<crate::analysis::PageAnalysis>)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let payload = ExportPayload {
+        schema_version: 1,
+        metadata: ExportMetadata {
+            file_name: document.file_name.clone(),
+            format: document.format.clone(),
+            analysis_at,
+            vision_model: consent.vision_profile_id.as_deref().map(profile_name),
+            text_model: profile_name(&consent.text_profile_id),
+        },
+        original_markdown: original_markdown.clone(),
+        summary,
+        page_analyses: parsed_pages,
+        failed_pages,
+    };
+    let (contents, extension, label) = match format {
+        ExportFormat::OriginalMarkdown => (original_markdown, "md", "原始 Markdown"),
+        ExportFormat::EnhancedMarkdown => (
+            render_enhanced_markdown(&payload).map_err(|error| error.to_string())?,
+            "md",
+            "增强 Markdown",
+        ),
+        ExportFormat::StructuredJson => {
+            (render_json(&payload).map_err(|error| error.to_string())?, "json", "结构化 JSON")
+        }
+    };
+    let target = if let Some(destination) = destination {
+        PathBuf::from(destination)
+    } else {
+        let base_name = Path::new(&document.file_name)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("document");
+        let file_name = format!("{base_name}-analysis.{extension}");
+        let selected = tauri::async_runtime::spawn_blocking(move || {
+            rfd::FileDialog::new()
+                .add_filter(label, &[extension])
+                .set_file_name(&file_name)
+                .save_file()
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+        let Some(path) = selected else { return Ok(None) };
+        path
+    };
+    write_atomic(&target, contents.as_bytes()).map_err(|error| error.to_string())?;
+    Ok(Some(ExportReceipt {
+        destination: target.to_string_lossy().into_owned(),
+        bytes_written: contents.len() as u64,
+    }))
 }
 
 pub(crate) fn create_document_task_for_test(

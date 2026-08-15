@@ -205,6 +205,17 @@ impl DocumentRepository {
             .map_err(Into::into)
     }
 
+    pub fn document_analysis_updated_at(&self, document_id: &str) -> Result<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT updated_at FROM document_analysis WHERE document_id = ?1",
+                [document_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     pub fn list_pages(&self, document_id: &str) -> Result<Vec<DocumentPageRecord>> {
         let mut statement = self.connection.prepare(
             "SELECT page_number, image_path, width, height, markdown, status

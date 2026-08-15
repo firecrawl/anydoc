@@ -6,6 +6,7 @@ mod commands;
 pub mod credentials;
 pub mod db;
 pub mod events;
+pub mod export;
 pub mod models;
 pub mod rendering;
 pub mod search;
@@ -48,6 +49,7 @@ pub fn run() {
             commands::get_document_analysis,
             commands::ask_document,
             commands::get_conversation_messages,
+            commands::export_document,
             commands::start_document_task,
             commands::get_task,
             commands::list_recoverable_tasks,
