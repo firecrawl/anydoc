@@ -7,11 +7,13 @@ use std::{
 
 use anyhow::{Context, Result};
 use serde::Serialize;
+use serde_json::json;
 use tauri::{Emitter, Manager};
 
 use crate::{
     credentials::{SecretStore, WindowsSecretStore},
     db::{DocumentRecord, DocumentRepository, ModelProfile, ModelProfileRepository},
+    models::{ContentPart, ModelClient, ModelMessage, ModelRequest, OpenAiCompatibleClient},
     rendering::{
         DocumentRenderer, RenderBackend, Renderer, libreoffice::LibreOfficeConverter,
         office::MicrosoftOfficeConverter, pdf::PdfiumPageRenderer,
@@ -95,6 +97,13 @@ pub struct ModelProfileStatus {
     #[serde(flatten)]
     pub profile: ModelProfile,
     pub has_api_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelTestResult {
+    pub ok: bool,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -280,6 +289,54 @@ pub fn list_model_profiles(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ModelProfileStatus>, String> {
     list_model_profiles_for_test(&state).map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn test_model_profile(
+    state: tauri::State<'_, AppState>,
+    profile_id: String,
+) -> Result<ModelTestResult, String> {
+    let profile = state
+        .model_profiles
+        .lock()
+        .map_err(|_| "model profile repository lock poisoned".to_owned())?
+        .list()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|profile| profile.id == profile_id)
+        .ok_or_else(|| format!("model profile not found: {profile_id}"))?;
+    let api_key = state
+        .secret_store
+        .get(&profile_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "请先保存 API Key".to_owned())?;
+    let client =
+        OpenAiCompatibleClient::new(profile, api_key).map_err(|error| error.to_string())?;
+    let response = client
+        .chat(ModelRequest {
+            messages: vec![ModelMessage {
+                role: "user".into(),
+                content: vec![ContentPart::Text {
+                    text: "Return exactly this JSON object and nothing else: {\"ok\":true}".into(),
+                }],
+            }],
+            response_schema: Some(json!({
+                "type": "object",
+                "properties": {"ok": {"const": true}},
+                "required": ["ok"],
+                "additionalProperties": false
+            })),
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    let valid = serde_json::from_str::<serde_json::Value>(&response.content)
+        .ok()
+        .and_then(|value| value.get("ok").and_then(|ok| ok.as_bool()))
+        == Some(true);
+    if !valid {
+        return Err("模型连通，但没有返回约定的 JSON".into());
+    }
+    Ok(ModelTestResult { ok: true, message: "连接成功".into() })
 }
 
 pub(crate) fn create_document_task_for_test(

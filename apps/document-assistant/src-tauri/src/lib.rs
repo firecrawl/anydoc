@@ -4,6 +4,7 @@ mod commands;
 pub mod credentials;
 pub mod db;
 pub mod events;
+pub mod models;
 pub mod rendering;
 pub mod storage;
 pub mod tasks;
@@ -36,6 +37,7 @@ pub fn run() {
             commands::has_api_key,
             commands::delete_api_key,
             commands::list_model_profiles,
+            commands::test_model_profile,
             commands::start_document_task,
             commands::get_task,
             commands::list_recoverable_tasks,
