@@ -178,6 +178,29 @@ impl DocumentRepository {
             .optional()
             .map_err(Into::into)
     }
+
+    pub fn save_document_summary(&self, document_id: &str, summary_json: &str) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO document_analysis (document_id, summary_json, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(document_id) DO UPDATE SET
+                summary_json = excluded.summary_json,
+                updated_at = excluded.updated_at",
+            params![document_id, summary_json, now()],
+        )?;
+        Ok(())
+    }
+
+    pub fn document_summary(&self, document_id: &str) -> Result<Option<String>> {
+        self.connection
+            .query_row(
+                "SELECT summary_json FROM document_analysis WHERE document_id = ?1",
+                [document_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
 }
 
 fn now() -> i64 {

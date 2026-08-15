@@ -23,3 +23,18 @@ pub fn build_repair_prompt(page_number: u32, raw: &str, validation_error: &str) 
 校验错误：{validation_error}\n原输出：\n{raw}"
     )
 }
+
+pub fn build_document_prompt(context: &str, total_pages: u32) -> String {
+    format!(
+        "你是文档分析师。基于以下本地解析内容与逐页视觉分析，生成严格符合 JSON Schema 的文档总结。\
+每个可验证事实、风险和行动项都要保留 evidence 页码；页码必须在 1..={total_pages}。\
+不要把推测写成事实。只输出 JSON。\n\n{context}"
+    )
+}
+
+pub fn build_section_prompt(section_number: usize, content: &str) -> String {
+    format!(
+        "请压缩下面第 {section_number} 个连续文档片段，保留标题、关键事实、风险、行动项及所有页码线索。\
+不要补充片段外信息。输出简洁的结构化文字，供下一轮综合。\n\n{content}"
+    )
+}

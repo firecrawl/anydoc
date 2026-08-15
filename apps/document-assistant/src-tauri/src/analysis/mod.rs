@@ -1,5 +1,6 @@
 pub mod prompts;
 pub mod schema;
+pub mod synthesis;
 pub mod types;
 pub mod vision;
 
@@ -14,3 +15,6 @@ mod schema_test;
 
 #[cfg(test)]
 mod vision_test;
+
+#[cfg(test)]
+mod synthesis_test;

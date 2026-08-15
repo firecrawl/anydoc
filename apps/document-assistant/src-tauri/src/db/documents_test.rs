@@ -62,10 +62,15 @@ fn persists_success_and_failure_for_individual_page_analyses() {
     repo.save_page_analysis_failure("doc-1", 2, "not-json", "schema mismatch")
         .expect("failure saves");
     repo.set_visual_content_analyzed("doc-1", false).expect("capability saves");
+    repo.save_document_summary("doc-1", r#"{"schemaVersion":1}"#).expect("summary saves");
     let records = repo.list_page_analyses("doc-1").expect("analyses list");
 
     assert_eq!(records.len(), 2);
     assert_eq!(records[0].status, "completed");
     assert_eq!(records[1].raw_response.as_deref(), Some("not-json"));
     assert_eq!(repo.visual_content_analyzed("doc-1").expect("capability reads"), Some(false));
+    assert_eq!(
+        repo.document_summary("doc-1").expect("summary reads").as_deref(),
+        Some(r#"{"schemaVersion":1}"#)
+    );
 }
