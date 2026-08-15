@@ -21,6 +21,8 @@ import { useTaskProgress } from './features/tasks/useTaskProgress';
 import { TaskProgress } from './features/tasks/TaskProgress';
 import { analyzeDocument } from './lib/analysis/analysisApi';
 import type { DocumentSummary } from './lib/analysis/types';
+import { getDocumentPages } from './features/source/sourceApi';
+import type { SourcePage } from './features/source/SourceViewer';
 import type { AnyDocClient } from './lib/anydoc/types';
 import './styles/tokens.css';
 import './styles/app.css';
@@ -64,6 +66,8 @@ export function App({ anyDocClient }: AppProps = {}) {
   const [consentOpen, setConsentOpen] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'running' | 'failed'>('idle');
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [sourcePages, setSourcePages] = useState<SourcePage[]>([]);
+  const [selectedPage, setSelectedPage] = useState(1);
   const { state, convert } = useDocumentConversion(anyDocClient);
   const progress = useTaskProgress(taskId);
   const activeProfile = profiles[settingsRole];
@@ -84,11 +88,23 @@ export function App({ anyDocClient }: AppProps = {}) {
     }).catch(() => undefined);
   }, [anyDocClient]);
 
+  useEffect(() => {
+    if (!documentId || (taskId && progress.task?.stage !== 'completed')) return;
+    void getDocumentPages(documentId).then((pages) => {
+      setSourcePages(pages);
+      if (pages.length > 0) {
+        setSelectedPage((current) => pages.some((page) => page.pageNumber === current) ? current : pages[0].pageNumber);
+      }
+    }).catch(() => undefined);
+  }, [documentId, progress.task?.stage, summary, taskId]);
+
   const browseWindowsDocument = async () => {
     try {
       const selected = await pickAndRegisterDocument();
       if (!selected) return;
       setDocumentId(selected.document.id);
+      setSourcePages([]);
+      setSelectedPage(1);
       setSummary(null);
       setAnalysisStatus('idle');
       const file = new File([new Uint8Array(selected.bytes)], selected.document.fileName);
@@ -186,8 +202,14 @@ export function App({ anyDocClient }: AppProps = {}) {
               analysisError={analysisError}
               canAnalyze={canAnalyze}
               onRequestAnalysis={() => setConsentOpen(true)}
-              onNavigateToPage={() => setActiveView('source')}
+              onNavigateToPage={(pageNumber) => {
+                setSelectedPage(pageNumber);
+                setActiveView('source');
+              }}
               documentId={documentId}
+              sourcePages={sourcePages}
+              selectedPage={selectedPage}
+              onSelectPage={setSelectedPage}
             />
           </div>
         </section>

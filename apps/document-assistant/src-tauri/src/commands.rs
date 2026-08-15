@@ -131,6 +131,17 @@ pub struct SelectedDocument {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourcePageData {
+    pub page_number: u32,
+    pub image_path: Option<String>,
+    pub text: Option<String>,
+    pub status: String,
+    pub analysis: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
 pub(crate) fn app_info_for_test(app_data_dir: String) -> AppInfo {
     AppInfo { version: env!("CARGO_PKG_VERSION").to_owned(), app_data_dir }
 }
@@ -247,6 +258,37 @@ pub fn save_document_markdown(
         .map_err(|_| "document repository lock poisoned".to_owned())?
         .save_markdown(&document_id, &markdown)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_document_pages(
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+) -> Result<Vec<SourcePageData>, String> {
+    let repository =
+        state.repository.lock().map_err(|_| "document repository lock poisoned".to_owned())?;
+    let analyses =
+        repository.list_page_analyses(&document_id).map_err(|error| error.to_string())?;
+    repository
+        .list_pages(&document_id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|page| {
+            let analysis = analyses.iter().find(|item| item.page_number == page.page_number);
+            Ok(SourcePageData {
+                page_number: page.page_number,
+                image_path: page.image_path.map(|path| path.to_string_lossy().into_owned()),
+                text: page.markdown,
+                status: analysis.map(|item| item.status.clone()).unwrap_or(page.status),
+                analysis: analysis
+                    .and_then(|item| item.analysis_json.as_deref())
+                    .map(serde_json::from_str)
+                    .transpose()
+                    .map_err(|error| error.to_string())?,
+                error: analysis.and_then(|item| item.error.clone()),
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]

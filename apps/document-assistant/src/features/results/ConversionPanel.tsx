@@ -4,6 +4,7 @@ import type { DocumentSummary } from '../../lib/analysis/types';
 import { InsightsView } from './InsightsView';
 import { StructuredJsonView } from './StructuredJsonView';
 import { DocumentChat } from '../chat/DocumentChat';
+import { SourceViewer, type SourcePage } from '../source/SourceViewer';
 
 interface ConversionPanelProps {
   state: ConversionState;
@@ -15,6 +16,9 @@ interface ConversionPanelProps {
   onRequestAnalysis?: () => void;
   onNavigateToPage?: (pageNumber: number) => void;
   documentId?: string | null;
+  sourcePages?: SourcePage[];
+  selectedPage?: number;
+  onSelectPage?: (pageNumber: number) => void;
 }
 
 const VIEW_HINTS: Record<ResultView, string> = {
@@ -40,6 +44,9 @@ export function ConversionPanel({
   onRequestAnalysis,
   onNavigateToPage = () => undefined,
   documentId,
+  sourcePages = [],
+  selectedPage = 1,
+  onSelectPage = () => undefined,
 }: ConversionPanelProps) {
   if (state.status === 'reading' || state.status === 'converting') {
     return (
@@ -117,6 +124,13 @@ export function ConversionPanel({
         <StructuredJsonView value={summary ?? { schemaVersion: 1, anyDocDocument: result.document }} />
       ) : activeView === 'chat' && documentId && summary ? (
         <DocumentChat documentId={documentId} onNavigateToPage={onNavigateToPage} />
+      ) : activeView === 'source' ? (
+        <SourceViewer
+          pages={sourcePages}
+          selectedPage={selectedPage}
+          onSelectPage={onSelectPage}
+          onRetryPage={() => undefined}
+        />
       ) : (
         <div className="empty-result compact">
           <div>{VIEW_HINTS[activeView]}</div>

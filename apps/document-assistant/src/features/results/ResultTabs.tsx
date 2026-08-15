@@ -8,7 +8,7 @@ interface ResultTabsProps {
 const RESULT_VIEWS: ReadonlyArray<{ id: ResultView; label: string }> = [
   { id: 'insights', label: '智能解读' },
   { id: 'markdown', label: 'Markdown' },
-  { id: 'source', label: '原文预览' },
+  { id: 'source', label: '原页核对' },
   { id: 'chat', label: '文档问答' },
   { id: 'json', label: '结构数据' },
 ];

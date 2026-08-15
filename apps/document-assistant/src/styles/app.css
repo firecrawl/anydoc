@@ -859,6 +859,106 @@
   opacity: 0.5;
 }
 
+.source-viewer {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.thumbnail-rail {
+  display: grid;
+  max-height: 660px;
+  align-content: start;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.thumbnail-rail button {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.thumbnail-rail button[aria-current='page'] {
+  border-color: var(--heat);
+  color: var(--heat);
+}
+
+.thumbnail-rail img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: #eee;
+}
+
+.source-stage {
+  min-width: 0;
+}
+
+.source-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+}
+
+.source-toolbar button,
+.source-error button {
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border-muted);
+  border-radius: 7px;
+  background: var(--surface);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.page-canvas {
+  max-height: 660px;
+  overflow: auto;
+  border: 1px solid var(--border-faint);
+  border-radius: 10px;
+  background: #efedeb;
+  text-align: center;
+}
+
+.page-canvas img {
+  display: block;
+  min-width: 50%;
+  max-width: 200%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.text-only-page,
+.source-error,
+.source-detail {
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-faint);
+  border-radius: 9px;
+}
+
+.source-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #b52d1e;
+  background: #fff7f5;
+}
+
+.source-detail {
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 640px) {
   .app-shell {
     width: min(100% - 24px, 1180px);
@@ -904,5 +1004,15 @@
 
   .insight-grid {
     grid-template-columns: 1fr;
+  }
+
+  .source-viewer {
+    grid-template-columns: 1fr;
+  }
+
+  .thumbnail-rail {
+    grid-auto-flow: column;
+    grid-auto-columns: 92px;
+    overflow-x: auto;
   }
 }

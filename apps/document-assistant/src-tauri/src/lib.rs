@@ -34,6 +34,7 @@ pub fn run() {
             commands::register_document,
             commands::pick_and_register_document,
             commands::save_document_markdown,
+            commands::get_document_pages,
             commands::list_documents,
             commands::delete_document_cache,
             commands::clear_all_document_caches,
