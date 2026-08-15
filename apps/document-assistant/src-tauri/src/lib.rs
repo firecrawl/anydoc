@@ -7,6 +7,7 @@ pub mod db;
 pub mod events;
 pub mod models;
 pub mod rendering;
+pub mod search;
 pub mod storage;
 pub mod tasks;
 

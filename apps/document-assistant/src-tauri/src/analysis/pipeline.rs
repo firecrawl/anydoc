@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use crate::{
     db::{DocumentPageRecord, DocumentRepository},
     models::ModelClient,
+    search::{PageIndexEntry, SearchIndex},
 };
 
 use super::{
@@ -82,6 +83,33 @@ pub async fn run_analysis_pipeline(input: AnalysisPipelineInput) -> Result<Docum
     failed_pages.dedup();
     DocumentRepository::open(&input.database_path)?
         .set_visual_content_analyzed(&input.document_id, vision_enabled)?;
+
+    let has_page_text = input
+        .pages
+        .iter()
+        .any(|page| page.markdown.as_deref().is_some_and(|text| !text.trim().is_empty()));
+    let search_pages = input
+        .pages
+        .iter()
+        .map(|page| {
+            let analysis =
+                successful.iter().find(|analysis| analysis.page_number == page.page_number);
+            PageIndexEntry {
+                page_number: page.page_number,
+                heading: analysis.and_then(|analysis| analysis.title.clone()),
+                text: page.markdown.clone().unwrap_or_else(|| {
+                    if !has_page_text && page.page_number == 1 {
+                        input.markdown.clone()
+                    } else {
+                        String::new()
+                    }
+                }),
+                visual_summary: analysis.map(|analysis| analysis.summary.clone()),
+            }
+        })
+        .collect::<Vec<_>>();
+    SearchIndex::open(&input.database_path)?
+        .index_document_pages(&input.document_id, &search_pages)?;
 
     let synthesizer = DocumentSynthesizer::new(input.text_model, ContextBudget::new(50_000));
     let summary = synthesizer
