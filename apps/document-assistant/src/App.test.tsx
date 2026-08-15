@@ -38,4 +38,13 @@ describe('App', () => {
 
     expect(await screen.findByText('# Local conversion')).toBeVisible();
   });
+
+  it('opens model configuration inside the application', async () => {
+    render(<App />);
+
+    await userEvent.click(screen.getByRole('button', { name: '模型设置' }));
+
+    expect(screen.getByRole('dialog', { name: '模型设置' })).toBeVisible();
+    expect(screen.getByLabelText('API Base URL')).toBeVisible();
+  });
 });

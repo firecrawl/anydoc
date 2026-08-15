@@ -4,7 +4,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,11 +39,7 @@ pub fn compute_document_id(path: &Path) -> Result<DocumentIdentity> {
     }
 
     let sha256 = format!("{:x}", hasher.finalize());
-    Ok(DocumentIdentity {
-        id: sha256.clone(),
-        sha256,
-        size,
-    })
+    Ok(DocumentIdentity { id: sha256.clone(), sha256, size })
 }
 
 pub fn cache_paths(app_data: &Path, document_id: &str) -> Result<CachePaths> {
@@ -61,12 +57,7 @@ pub fn cache_paths(app_data: &Path, document_id: &str) -> Result<CachePaths> {
         bail!("cache path escaped the application data directory");
     }
 
-    Ok(CachePaths {
-        markdown: root.join("document.md"),
-        root,
-        pages,
-        assets,
-    })
+    Ok(CachePaths { markdown: root.join("document.md"), root, pages, assets })
 }
 
 pub fn remove_document_cache(app_data: &Path, document_id: &str) -> Result<()> {
@@ -112,9 +103,9 @@ fn validate_document_id(document_id: &str) -> Result<()> {
     let safe_characters = document_id
         .chars()
         .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'));
-    let has_path_components = Path::new(document_id).components().any(|component| {
-        !matches!(component, Component::Normal(_))
-    });
+    let has_path_components = Path::new(document_id)
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)));
     if document_id.is_empty() || !safe_characters || has_path_components {
         bail!("invalid document id");
     }

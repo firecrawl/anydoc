@@ -5,7 +5,7 @@ export function invokeCommand<T>(
   command: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
-  return invoke<T>(command, args);
+  return args === undefined ? invoke<T>(command) : invoke<T>(command, args);
 }
 
 export function getAppInfo(): Promise<AppInfo> {

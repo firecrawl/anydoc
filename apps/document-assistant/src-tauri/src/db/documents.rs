@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use super::DocumentRecord;
 
@@ -81,19 +81,14 @@ impl DocumentRepository {
                     markdown_path, created_at, updated_at
              FROM documents ORDER BY updated_at DESC, id ASC",
         )?;
-        let records = statement
-            .query_map([], document_from_row)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let records =
+            statement.query_map([], document_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(records)
     }
 
     pub fn delete_cache_record(&self, id: &str) -> Result<()> {
-        self.connection.execute(
-            "DELETE FROM page_search WHERE document_id = ?1",
-            [id],
-        )?;
-        self.connection
-            .execute("DELETE FROM documents WHERE id = ?1", [id])?;
+        self.connection.execute("DELETE FROM page_search WHERE document_id = ?1", [id])?;
+        self.connection.execute("DELETE FROM documents WHERE id = ?1", [id])?;
         Ok(())
     }
 }

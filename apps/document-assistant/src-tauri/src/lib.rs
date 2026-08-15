@@ -1,12 +1,16 @@
 use tauri::Manager;
 
 mod commands;
+pub mod credentials;
 pub mod db;
 pub mod events;
 pub mod storage;
 
 #[cfg(test)]
 mod storage_test;
+
+#[cfg(test)]
+mod credentials_test;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -22,6 +26,11 @@ pub fn run() {
             commands::list_documents,
             commands::delete_document_cache,
             commands::clear_all_document_caches,
+            commands::save_model_profile,
+            commands::set_api_key,
+            commands::has_api_key,
+            commands::delete_api_key,
+            commands::list_model_profiles,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AnyDoc Assistant");

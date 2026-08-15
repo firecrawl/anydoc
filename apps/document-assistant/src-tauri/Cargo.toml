@@ -18,6 +18,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 anyhow = "1"
+keyring = { version = "4.1", default-features = false, features = ["v1", "windows-native-keyring-store"] }
 rusqlite = { version = "0.37", features = ["bundled-full"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"

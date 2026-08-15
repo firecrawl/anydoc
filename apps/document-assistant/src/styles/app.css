@@ -379,6 +379,135 @@
   color: inherit;
 }
 
+.dialog-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(22, 18, 16, 0.42);
+  backdrop-filter: blur(8px);
+}
+
+.settings-dialog {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 48px);
+  padding: 26px;
+  overflow: auto;
+  border: 1px solid var(--border-faint);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 28px 90px rgba(20, 12, 8, 0.24);
+}
+
+.dialog-heading,
+.profile-switch,
+.settings-role,
+.model-settings label,
+.toggle-row {
+  display: flex;
+}
+
+.dialog-heading {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.dialog-heading .eyebrow {
+  margin-bottom: 8px;
+}
+
+.dialog-heading h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.dialog-heading > button {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--alpha-4);
+  cursor: pointer;
+  font-size: 22px;
+}
+
+.profile-switch,
+.settings-role {
+  gap: 6px;
+  margin-top: 22px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--alpha-4);
+}
+
+.profile-switch button,
+.settings-role button {
+  flex: 1;
+  min-height: 36px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.profile-switch button[aria-selected='true'],
+.settings-role button[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.model-settings {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.model-settings label {
+  flex-direction: column;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.model-settings label input:not([type='checkbox']) {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.model-settings .toggle-row {
+  flex-direction: row;
+  align-items: center;
+}
+
+.credential-status {
+  color: #21864b;
+  font-size: 12px;
+}
+
+.model-settings [role='alert'] {
+  margin: 0;
+  color: #b52d1e;
+  font-size: 13px;
+}
+
+.model-settings > button[type='submit'] {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  color: white;
+  background: var(--heat);
+  cursor: pointer;
+}
+
 @media (max-width: 640px) {
   .app-shell {
     width: min(100% - 24px, 1180px);
