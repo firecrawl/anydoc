@@ -29,6 +29,10 @@ flate2 = "1"
 encoding_rs = "0.8.35"
 log = "0.4"
 pdf-inspector = "1.14.2"
+# RUSTSEC-2026-0187: pdf-inspector -> lopdf <0.42.0 is vulnerable to a stack
+# overflow DoS via deeply nested PDF objects (SIGABRT, not catchable). Pin the
+# transitive dependency to the patched version to prevent resolution regressions.
+lopdf = "0.42.0"
 quick-xml = "0.41.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
