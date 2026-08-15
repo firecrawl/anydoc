@@ -58,8 +58,8 @@ export function App({ anyDocClient }: AppProps = {}) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsRole, setSettingsRole] = useState<ModelRole>('vision');
   const [profiles, setProfiles] = useState<Record<ModelRole, ModelProfileStatus>>({
-    vision: { ...DEFAULT_PROFILES.vision, hasApiKey: false },
-    text: { ...DEFAULT_PROFILES.text, hasApiKey: false },
+    vision: { ...DEFAULT_PROFILES.vision, hasApiKey: false, capabilityTested: false },
+    text: { ...DEFAULT_PROFILES.text, hasApiKey: false, capabilityTested: false },
   });
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -75,7 +75,8 @@ export function App({ anyDocClient }: AppProps = {}) {
   const activeProfile = profiles[settingsRole];
   const canAnalyze = Boolean(
     documentId &&
-    profiles.text.baseUrl && profiles.text.model && profiles.text.hasApiKey &&
+    profiles.text.baseUrl && profiles.text.model && profiles.text.hasApiKey && profiles.text.capabilityTested &&
+    (!profiles.vision.baseUrl || !profiles.vision.hasApiKey || profiles.vision.capabilityTested) &&
     (!taskId || progress.task?.stage === 'completed'),
   );
 
@@ -125,7 +126,7 @@ export function App({ anyDocClient }: AppProps = {}) {
     await saveModelProfile(profile);
     setProfiles((current) => ({
       ...current,
-      [profile.role]: { ...profile, hasApiKey: current[profile.role].hasApiKey },
+      [profile.role]: { ...profile, hasApiKey: current[profile.role].hasApiKey, capabilityTested: false },
     }));
   };
 
@@ -267,13 +268,18 @@ export function App({ anyDocClient }: AppProps = {}) {
             <ModelSettings
               key={activeProfile.id}
               profile={activeProfile}
-              hasApiKey={false}
+              hasApiKey={activeProfile.hasApiKey}
+              capabilityTested={activeProfile.capabilityTested}
               onSave={saveProfile}
               onSetApiKey={setProfileKey}
               onTest={async (profile, apiKey) => {
                 await saveProfile(profile);
                 if (apiKey) await setProfileKey(apiKey);
                 await testModelProfile(profile.id);
+                setProfiles((current) => ({
+                  ...current,
+                  [profile.role]: { ...current[profile.role], capabilityTested: true },
+                }));
               }}
             />
           </section>

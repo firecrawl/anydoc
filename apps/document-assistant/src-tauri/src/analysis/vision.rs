@@ -1,4 +1,10 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use thiserror::Error;
@@ -131,17 +137,35 @@ impl VisionAnalyzer {
     ) -> Vec<(u32, Result<PageAnalysis, AnalysisError>)> {
         let concurrency = self.profile.max_concurrency.clamp(1, 8) as usize;
         let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
+        let authorization_rejected = Arc::new(AtomicBool::new(false));
         let mut workers = JoinSet::new();
         for input in inputs {
             let analyzer = self.clone();
             let semaphore = semaphore.clone();
+            let authorization_rejected = authorization_rejected.clone();
             workers.spawn(async move {
                 let page_number = input.page_number;
                 let permit = semaphore
                     .acquire_owned()
                     .await
                     .map_err(|error| AnalysisError::Worker(error.to_string()))?;
+                if authorization_rejected.load(Ordering::Acquire) {
+                    drop(permit);
+                    return Ok((
+                        page_number,
+                        Err(AnalysisError::Worker(
+                            "skipped because model authorization was rejected".into(),
+                        )),
+                    ));
+                }
                 let result = analyzer.analyze_page(input).await;
+                if matches!(
+                    &result,
+                    Err(AnalysisError::Model(ModelError::HttpStatus { status, .. }))
+                        if matches!(*status, 401 | 403)
+                ) {
+                    authorization_rejected.store(true, Ordering::Release);
+                }
                 drop(permit);
                 Ok::<_, AnalysisError>((page_number, result))
             });

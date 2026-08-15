@@ -4,6 +4,7 @@ import type { ModelProfile } from './modelProfile';
 interface ModelSettingsProps {
   profile: ModelProfile;
   hasApiKey: boolean;
+  capabilityTested?: boolean;
   onSave: (profile: ModelProfile) => Promise<void>;
   onSetApiKey: (apiKey: string) => Promise<void>;
   onTest?: (profile: ModelProfile, apiKey: string) => Promise<void>;
@@ -24,6 +25,7 @@ function endpointError(baseUrl: string) {
 export function ModelSettings({
   profile,
   hasApiKey,
+  capabilityTested = false,
   onSave,
   onSetApiKey,
   onTest,
@@ -96,6 +98,7 @@ export function ModelSettings({
         />
       </label>
       {hasApiKey ? <span className="credential-status">密钥已安全保存</span> : null}
+      {capabilityTested ? <span className="credential-status">此配置已通过能力测试</span> : null}
 
       <div className="model-settings__numbers">
         <label>

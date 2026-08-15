@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::Result;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use super::ANALYSIS_MIGRATION;
@@ -78,6 +78,8 @@ impl ModelProfileRepository {
                 now,
             ],
         )?;
+        self.connection
+            .execute("DELETE FROM model_capability_tests WHERE profile_id = ?1", [&profile.id])?;
         Ok(())
     }
 
@@ -101,5 +103,31 @@ impl ModelProfileRepository {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(profiles)
+    }
+
+    pub fn mark_capability_tested(&self, profile_id: &str, supports_vision: bool) -> Result<()> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+        self.connection.execute(
+            "INSERT INTO model_capability_tests (profile_id, supports_vision, tested_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(profile_id) DO UPDATE SET
+                supports_vision = excluded.supports_vision,
+                tested_at = excluded.tested_at",
+            params![profile_id, supports_vision, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn capability_tested(&self, profile_id: &str, supports_vision: bool) -> Result<bool> {
+        self.connection
+            .query_row(
+                "SELECT 1 FROM model_capability_tests
+             WHERE profile_id = ?1 AND supports_vision = ?2",
+                params![profile_id, supports_vision],
+                |_| Ok(true),
+            )
+            .optional()
+            .map(|value| value.unwrap_or(false))
+            .map_err(Into::into)
     }
 }

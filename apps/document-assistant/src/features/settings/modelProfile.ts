@@ -14,6 +14,7 @@ export interface ModelProfile {
 
 export interface ModelProfileStatus extends ModelProfile {
   hasApiKey: boolean;
+  capabilityTested: boolean;
 }
 
 export function saveModelProfile(profile: ModelProfile) {

@@ -21,3 +21,9 @@ CREATE TABLE IF NOT EXISTS document_analysis (
 
 CREATE INDEX IF NOT EXISTS idx_page_analyses_document
     ON page_analyses(document_id, page_number);
+
+CREATE TABLE IF NOT EXISTS model_capability_tests (
+    profile_id TEXT PRIMARY KEY NOT NULL REFERENCES model_profiles(id) ON DELETE CASCADE,
+    supports_vision INTEGER NOT NULL,
+    tested_at INTEGER NOT NULL
+);

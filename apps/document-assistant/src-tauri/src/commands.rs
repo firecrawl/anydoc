@@ -111,6 +111,7 @@ pub struct ModelProfileStatus {
     #[serde(flatten)]
     pub profile: ModelProfile,
     pub has_api_key: bool,
+    pub capability_tested: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -355,15 +356,18 @@ pub(crate) fn set_api_key_for_test(
 }
 
 pub(crate) fn list_model_profiles_for_test(state: &AppState) -> Result<Vec<ModelProfileStatus>> {
-    state
+    let repository = state
         .model_profiles
         .lock()
-        .map_err(|_| anyhow::anyhow!("model profile repository lock poisoned"))?
+        .map_err(|_| anyhow::anyhow!("model profile repository lock poisoned"))?;
+    repository
         .list()?
         .into_iter()
         .map(|profile| {
             let has_api_key = state.secret_store.get(&profile.id)?.is_some();
-            Ok(ModelProfileStatus { profile, has_api_key })
+            let capability_tested =
+                repository.capability_tested(&profile.id, profile.supports_vision)?;
+            Ok(ModelProfileStatus { profile, has_api_key, capability_tested })
         })
         .collect()
 }
@@ -441,6 +445,12 @@ pub async fn test_model_profile(
     if !valid {
         return Err("模型连通，但没有返回约定的 JSON".into());
     }
+    state
+        .model_profiles
+        .lock()
+        .map_err(|_| "model profile repository lock poisoned".to_owned())?
+        .mark_capability_tested(&profile_id, expects_vision_label)
+        .map_err(|error| error.to_string())?;
     Ok(ModelTestResult { ok: true, message: "连接成功".into() })
 }
 
@@ -537,6 +547,15 @@ pub async fn analyze_document(
         .find(|profile| profile.id == text_profile_id)
         .cloned()
         .ok_or_else(|| format!("text model profile not found: {text_profile_id}"))?;
+    let text_tested = state
+        .model_profiles
+        .lock()
+        .map_err(|_| "model profile repository lock poisoned".to_owned())?
+        .capability_tested(&text_profile_id, text_profile.supports_vision)
+        .map_err(|error| error.to_string())?;
+    if !text_tested {
+        return Err("请先在模型设置中通过文本模型能力测试".into());
+    }
     let text_key = state
         .secret_store
         .get(&text_profile_id)
@@ -554,6 +573,15 @@ pub async fn analyze_document(
             .ok_or_else(|| format!("vision model profile not found: {profile_id}"))?;
         if !profile.supports_vision {
             return Err("所选视觉模型配置未启用视觉能力".into());
+        }
+        let vision_tested = state
+            .model_profiles
+            .lock()
+            .map_err(|_| "model profile repository lock poisoned".to_owned())?
+            .capability_tested(&profile_id, true)
+            .map_err(|error| error.to_string())?;
+        if !vision_tested {
+            return Err("请先在模型设置中通过视觉模型能力测试".into());
         }
         let key = state
             .secret_store
@@ -1179,7 +1207,16 @@ mod tests {
 
         assert_eq!(statuses.len(), 1);
         assert!(statuses[0].has_api_key);
+        assert!(!statuses[0].capability_tested);
         assert!(!json.contains("sk-test"));
+
+        state
+            .model_profiles
+            .lock()
+            .expect("profile lock")
+            .mark_capability_tested(&profile.id, true)
+            .expect("capability marks");
+        assert!(list_model_profiles_for_test(&state).expect("profiles list")[0].capability_tested);
     }
 
     #[test]
