@@ -16,13 +16,14 @@ import {
 } from './features/settings/modelProfile';
 import { testModelProfile } from './features/settings/modelTestApi';
 import { pickAndRegisterDocument, saveDocumentMarkdown } from './features/import/desktopImportApi';
-import { startDocumentTask } from './features/tasks/taskApi';
+import { listRecoverableTasks, startDocumentTask, taskApi, type DocumentTask } from './features/tasks/taskApi';
 import { useTaskProgress } from './features/tasks/useTaskProgress';
 import { TaskProgress } from './features/tasks/TaskProgress';
 import { analyzeDocument } from './lib/analysis/analysisApi';
 import type { DocumentSummary } from './lib/analysis/types';
 import { getDocumentPages } from './features/source/sourceApi';
 import type { SourcePage } from './features/source/SourceViewer';
+import { RecoveryDialog } from './features/tasks/RecoveryDialog';
 import type { AnyDocClient } from './lib/anydoc/types';
 import './styles/tokens.css';
 import './styles/app.css';
@@ -68,6 +69,7 @@ export function App({ anyDocClient }: AppProps = {}) {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [sourcePages, setSourcePages] = useState<SourcePage[]>([]);
   const [selectedPage, setSelectedPage] = useState(1);
+  const [recoverableTasks, setRecoverableTasks] = useState<DocumentTask[]>([]);
   const { state, convert } = useDocumentConversion(anyDocClient);
   const progress = useTaskProgress(taskId);
   const activeProfile = profiles[settingsRole];
@@ -86,6 +88,7 @@ export function App({ anyDocClient }: AppProps = {}) {
         return next;
       });
     }).catch(() => undefined);
+    void listRecoverableTasks().then(setRecoverableTasks).catch(() => undefined);
   }, [anyDocClient]);
 
   useEffect(() => {
@@ -283,6 +286,23 @@ export function App({ anyDocClient }: AppProps = {}) {
           textModel={profiles.text.model}
           onCancel={() => setConsentOpen(false)}
           onConfirm={() => void runAnalysis()}
+        />
+      ) : null}
+
+      {recoverableTasks.length > 0 ? (
+        <RecoveryDialog
+          tasks={recoverableTasks}
+          onLater={() => setRecoverableTasks([])}
+          onResume={(id) => {
+            setTaskId(id);
+            setRecoverableTasks([]);
+            void taskApi.resumeTask(id);
+          }}
+          onCancel={(id) => {
+            void taskApi.cancelTask(id).then(() => {
+              setRecoverableTasks((current) => current.filter((task) => task.id !== id));
+            });
+          }}
         />
       ) : null}
     </div>

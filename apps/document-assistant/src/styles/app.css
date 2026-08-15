@@ -978,6 +978,71 @@
   font-size: 11px;
 }
 
+.error-notice,
+.recovery-dialog {
+  padding: 22px;
+  border: 1px solid #ffd5cc;
+  border-radius: 14px;
+  background: #fff7f5;
+}
+
+.error-notice p {
+  color: var(--text-muted);
+}
+
+.recovery-dialog {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border-color: var(--border-faint);
+  background: var(--surface);
+  box-shadow: 0 28px 90px rgba(20, 12, 8, 0.24);
+}
+
+.recovery-dialog h2 {
+  margin: 0;
+}
+
+.recovery-list {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.recovery-list article {
+  padding: 14px;
+  border: 1px solid var(--border-faint);
+  border-radius: 10px;
+}
+
+.recovery-list article > div:first-child,
+.recovery-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recovery-list span,
+.recovery-list p {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.recovery-actions {
+  justify-content: flex-end;
+}
+
+.recovery-dialog button,
+.error-notice button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
 .source-error {
   display: flex;
   align-items: center;
