@@ -1,21 +1,15 @@
 import { useState } from 'react';
 import { AppHeader } from './components/AppHeader';
 import { DocumentDropZone } from './features/import/DocumentDropZone';
+import { useDocumentConversion } from './features/import/useDocumentConversion';
+import { ConversionPanel } from './features/results/ConversionPanel';
 import { ResultTabs, type ResultView } from './features/results/ResultTabs';
 import './styles/tokens.css';
 import './styles/app.css';
 
-const VIEW_HINTS: Record<ResultView, string> = {
-  insights: '视觉模型与文本模型将在这里协作整理文档内容。',
-  markdown: '导入文档后，这里会显示 AnyDoc 转换出的 Markdown。',
-  source: '原始页面渲染与定位引用将在这里展示。',
-  chat: '完成解析后，可以围绕当前文档连续提问。',
-  json: '文档结构、页面和资源数据将在这里展示。',
-};
-
 export function App() {
   const [activeView, setActiveView] = useState<ResultView>('markdown');
-  const [selectedFile, setSelectedFile] = useState<File>();
+  const { state, convert } = useDocumentConversion();
 
   return (
     <div id="top" className="app-shell">
@@ -33,7 +27,7 @@ export function App() {
           </p>
         </section>
 
-        <DocumentDropZone onFile={setSelectedFile} />
+        <DocumentDropZone onFile={(file) => void convert(file)} />
 
         <section className="workspace" aria-label="文档工作区">
           <ResultTabs active={activeView} onChange={setActiveView} />
@@ -43,15 +37,7 @@ export function App() {
             role="tabpanel"
             aria-labelledby={`tab-${activeView}`}
           >
-            {selectedFile ? (
-              <div className="selected-file">已选择 · {selectedFile.name}</div>
-            ) : null}
-            <div className="empty-result">
-              <div>
-                <strong>等待导入文档</strong>
-                {VIEW_HINTS[activeView]}
-              </div>
-            </div>
+            <ConversionPanel state={state} activeView={activeView} />
           </div>
         </section>
       </main>
