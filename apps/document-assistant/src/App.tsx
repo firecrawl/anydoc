@@ -4,12 +4,17 @@ import { DocumentDropZone } from './features/import/DocumentDropZone';
 import { useDocumentConversion } from './features/import/useDocumentConversion';
 import { ConversionPanel } from './features/results/ConversionPanel';
 import { ResultTabs, type ResultView } from './features/results/ResultTabs';
+import type { AnyDocClient } from './lib/anydoc/types';
 import './styles/tokens.css';
 import './styles/app.css';
 
-export function App() {
+interface AppProps {
+  anyDocClient?: AnyDocClient;
+}
+
+export function App({ anyDocClient }: AppProps = {}) {
   const [activeView, setActiveView] = useState<ResultView>('markdown');
-  const { state, convert } = useDocumentConversion();
+  const { state, convert } = useDocumentConversion(anyDocClient);
 
   return (
     <div id="top" className="app-shell">
