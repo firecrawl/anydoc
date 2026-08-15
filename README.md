@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://skills.sh/b/firecrawl/anydoc)](https://skills.sh/firecrawl/anydoc)
 
-Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
+Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly). Community bindings are listed [below](#community-bindings).
 
 Built by [Firecrawl](https://firecrawl.dev) to turn any office document into LLM-ready Markdown in single-digit milliseconds, with one consistent output no matter which format goes in. It powers [Firecrawl Parse](https://firecrawl.dev/parse), so if you'd rather not run it yourself, the hosted API gives you the same conversion plus our OCR models for the scanned pages anydoc can't read on its own.
 
@@ -123,6 +123,22 @@ let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Csv)?;
 
 // Or stop at the document model, which also carries embedded assets:
 let document = anydoc::to_document(&bytes, None)?;
+```
+
+## Community bindings
+
+These are maintained outside this repository and are not official Firecrawl packages.
+
+### Java
+
+[anydoc-java](https://github.com/lihongjie0209/anydoc-java) is a JNI binding for Java 8+ (`toMarkdown` / `toDocument`). The fat JAR is on [Maven Central](https://central.sonatype.com/artifact/io.github.lihongjie0209/anydoc):
+
+```xml
+<dependency>
+  <groupId>io.github.lihongjie0209</groupId>
+  <artifactId>anydoc</artifactId>
+  <version>0.1.10</version>
+</dependency>
 ```
 
 ## Features
