@@ -1,0 +1,12 @@
+PDFium runtime source
+====================
+
+Project: bblanchon/pdfium-binaries
+PDFium build: chromium/7881 (NuGet 151.0.7881)
+Package: bblanchon.PDFium.Win32
+Package URL: https://api.nuget.org/v3-flatcontainer/bblanchon.pdfium.win32/151.0.7881/bblanchon.pdfium.win32.151.0.7881.nupkg
+Package SHA-512: 91131fc8e91dba44e8ce54012fdf4be7e242737e68b9e626a07cfbb55bb3a3fc930932fce5ffb545d9dcfa41f34bce788319219c50b46e4489d869402c8ef8a1
+Original GitHub x64 archive SHA-256: 73cc0de638ac2095e7445bf56a38200a5b7c7ca0e9f4ba144598f2457377ac08
+
+The runtime is bundled so PDF rendering works offline. Third-party notices and
+licenses are collected with the Windows delivery artifacts.

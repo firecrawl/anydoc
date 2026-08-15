@@ -4,6 +4,7 @@ mod commands;
 pub mod credentials;
 pub mod db;
 pub mod events;
+pub mod rendering;
 pub mod storage;
 
 #[cfg(test)]
@@ -11,6 +12,9 @@ mod storage_test;
 
 #[cfg(test)]
 mod credentials_test;
+
+#[cfg(test)]
+mod rendering_test;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

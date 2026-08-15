@@ -26,6 +26,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"]
+    "targets": ["nsis"],
+    "resources": ["resources/pdfium.dll", "resources/PDFIUM-SOURCE.txt"]
   }
 }

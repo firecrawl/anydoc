@@ -18,7 +18,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
 keyring = { version = "4.1", default-features = false, features = ["v1", "windows-native-keyring-store"] }
+pdfium-render = "0.9.3"
 rusqlite = { version = "0.37", features = ["bundled-full"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
