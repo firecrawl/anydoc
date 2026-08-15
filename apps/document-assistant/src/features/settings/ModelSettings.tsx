@@ -6,6 +6,7 @@ interface ModelSettingsProps {
   hasApiKey: boolean;
   onSave: (profile: ModelProfile) => Promise<void>;
   onSetApiKey: (apiKey: string) => Promise<void>;
+  onTest?: (profile: ModelProfile, apiKey: string) => Promise<void>;
 }
 
 function endpointError(baseUrl: string) {
@@ -25,11 +26,31 @@ export function ModelSettings({
   hasApiKey,
   onSave,
   onSetApiKey,
+  onTest,
 }: ModelSettingsProps) {
   const [draft, setDraft] = useState(profile);
   const [apiKey, setApiKey] = useState('');
   const [reuseTextProfile, setReuseTextProfile] = useState(false);
   const [error, setError] = useState<string>();
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'passed'>('idle');
+
+  const testConnection = async () => {
+    const validationError = endpointError(draft.baseUrl);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    if (!onTest) return;
+    setError(undefined);
+    setTestStatus('testing');
+    try {
+      await onTest(draft, apiKey.trim());
+      setTestStatus('passed');
+    } catch (cause) {
+      setTestStatus('idle');
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -48,22 +69,7 @@ export function ModelSettings({
 
   return (
     <form className="model-settings" onSubmit={(event) => void submit(event)}>
-      <div className="settings-role" role="group" aria-label="模型角色">
-        <button
-          type="button"
-          aria-pressed={draft.role === 'vision'}
-          onClick={() => setDraft({ ...draft, role: 'vision', supportsVision: true })}
-        >
-          视觉模型
-        </button>
-        <button
-          type="button"
-          aria-pressed={draft.role === 'text'}
-          onClick={() => setDraft({ ...draft, role: 'text' })}
-        >
-          文本模型
-        </button>
-      </div>
+      <h3>{draft.role === 'vision' ? '视觉模型' : '文本模型'}</h3>
 
       <label>
         API Base URL
@@ -91,17 +97,65 @@ export function ModelSettings({
       </label>
       {hasApiKey ? <span className="credential-status">密钥已安全保存</span> : null}
 
-      <label className="toggle-row">
-        <input
-          type="checkbox"
-          checked={reuseTextProfile}
-          onChange={(event) => setReuseTextProfile(event.target.checked)}
-        />
-        复用文本模型配置
-      </label>
+      <div className="model-settings__numbers">
+        <label>
+          超时（秒）
+          <input
+            type="number"
+            min={1}
+            max={600}
+            value={draft.timeoutSecs}
+            onChange={(event) => setDraft({ ...draft, timeoutSecs: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          最大并发
+          <input
+            type="number"
+            min={1}
+            max={8}
+            value={draft.maxConcurrency}
+            onChange={(event) => setDraft({ ...draft, maxConcurrency: Number(event.target.value) })}
+          />
+        </label>
+      </div>
+
+      {draft.role === 'vision' ? (
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={draft.supportsVision}
+            onChange={(event) => setDraft({ ...draft, supportsVision: event.target.checked })}
+          />
+          此配置支持图片输入
+        </label>
+      ) : null}
+
+      {draft.role === 'vision' ? (
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={reuseTextProfile}
+            onChange={(event) => setReuseTextProfile(event.target.checked)}
+          />
+          该服务同时用于文本模型（可在文本模型页填入相同配置）
+        </label>
+      ) : null}
 
       {error ? <p role="alert">{error}</p> : null}
-      <button type="submit">保存模型配置</button>
+      <div className="settings-actions">
+        {onTest ? (
+          <button type="button" disabled={testStatus === 'testing'} onClick={() => void testConnection()}>
+            {testStatus === 'testing'
+              ? '正在测试…'
+              : draft.role === 'vision'
+                ? '测试视觉能力'
+                : '测试文本能力'}
+          </button>
+        ) : null}
+        <button type="submit">保存模型配置</button>
+      </div>
+      {testStatus === 'passed' ? <p className="test-success" role="status">连接及能力测试通过</p> : null}
     </form>
   );
 }

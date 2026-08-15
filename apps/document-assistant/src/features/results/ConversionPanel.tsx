@@ -1,9 +1,18 @@
 import type { ConversionState } from '../import/useDocumentConversion';
 import type { ResultView } from './ResultTabs';
+import type { DocumentSummary } from '../../lib/analysis/types';
+import { InsightsView } from './InsightsView';
+import { StructuredJsonView } from './StructuredJsonView';
 
 interface ConversionPanelProps {
   state: ConversionState;
   activeView: ResultView;
+  summary?: DocumentSummary | null;
+  analysisStatus?: 'idle' | 'running' | 'failed';
+  analysisError?: string | null;
+  canAnalyze?: boolean;
+  onRequestAnalysis?: () => void;
+  onNavigateToPage?: (pageNumber: number) => void;
 }
 
 const VIEW_HINTS: Record<ResultView, string> = {
@@ -19,7 +28,16 @@ function markdownFileName(fileName: string) {
   return `${baseName}.md`;
 }
 
-export function ConversionPanel({ state, activeView }: ConversionPanelProps) {
+export function ConversionPanel({
+  state,
+  activeView,
+  summary,
+  analysisStatus = 'idle',
+  analysisError,
+  canAnalyze = false,
+  onRequestAnalysis,
+  onNavigateToPage = () => undefined,
+}: ConversionPanelProps) {
   if (state.status === 'reading' || state.status === 'converting') {
     return (
       <div className="conversion-progress" role="status">
@@ -82,8 +100,18 @@ export function ConversionPanel({ state, activeView }: ConversionPanelProps) {
 
       {activeView === 'markdown' ? (
         <pre className="markdown-output">{result.markdown}</pre>
+      ) : activeView === 'insights' && summary ? (
+        <InsightsView summary={summary} onNavigateToPage={onNavigateToPage} />
+      ) : activeView === 'insights' ? (
+        <div className="analysis-callout">
+          <strong>{analysisStatus === 'running' ? '正在进行双模型分析' : '生成智能解读'}</strong>
+          <p>{analysisError ?? (canAnalyze ? '视觉模型理解逐页画面，文本模型再整理全文逻辑。' : '请先用 Windows 文件选择器导入，并等待逐页渲染完成。')}</p>
+          <button type="button" disabled={!canAnalyze || analysisStatus === 'running'} onClick={onRequestAnalysis}>
+            {analysisStatus === 'running' ? '分析中…' : '开始智能分析'}
+          </button>
+        </div>
       ) : activeView === 'json' ? (
-        <pre className="markdown-output">{JSON.stringify(result.document, null, 2)}</pre>
+        <StructuredJsonView value={summary ?? { schemaVersion: 1, anyDocDocument: result.document }} />
       ) : (
         <div className="empty-result compact">
           <div>{VIEW_HINTS[activeView]}</div>

@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use super::{ANALYSIS_MIGRATION, DocumentRecord, PageAnalysisRecord};
+use super::{
+    ANALYSIS_MIGRATION, AnalysisConsentRecord, DocumentPageRecord, DocumentRecord,
+    PageAnalysisRecord,
+};
 
 const INITIAL_MIGRATION: &str = include_str!("../../migrations/0001_init.sql");
 
@@ -200,6 +203,90 @@ impl DocumentRepository {
             )
             .optional()
             .map_err(Into::into)
+    }
+
+    pub fn list_pages(&self, document_id: &str) -> Result<Vec<DocumentPageRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT page_number, image_path, width, height, markdown, status
+             FROM pages WHERE document_id = ?1 ORDER BY page_number",
+        )?;
+        Ok(statement
+            .query_map([document_id], |row| {
+                let image_path: Option<String> = row.get(1)?;
+                Ok(DocumentPageRecord {
+                    page_number: row.get(0)?,
+                    image_path: image_path.map(PathBuf::from),
+                    width: row.get(2)?,
+                    height: row.get(3)?,
+                    markdown: row.get(4)?,
+                    status: row.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn record_analysis_consent(
+        &self,
+        document_id: &str,
+        vision_profile_id: Option<&str>,
+        text_profile_id: &str,
+    ) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO document_analysis (
+                document_id, consent_at, vision_profile_id, text_profile_id, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?2)
+             ON CONFLICT(document_id) DO UPDATE SET
+                consent_at = excluded.consent_at,
+                vision_profile_id = excluded.vision_profile_id,
+                text_profile_id = excluded.text_profile_id,
+                updated_at = excluded.updated_at",
+            params![document_id, now(), vision_profile_id, text_profile_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn analysis_consent(&self, document_id: &str) -> Result<Option<AnalysisConsentRecord>> {
+        self.connection
+            .query_row(
+                "SELECT consent_at, vision_profile_id, text_profile_id
+                 FROM document_analysis
+                 WHERE document_id = ?1 AND consent_at IS NOT NULL AND text_profile_id IS NOT NULL",
+                [document_id],
+                |row| {
+                    Ok(AnalysisConsentRecord {
+                        consent_at: row.get(0)?,
+                        vision_profile_id: row.get(1)?,
+                        text_profile_id: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn save_markdown(&mut self, document_id: &str, markdown: &str) -> Result<()> {
+        let document = self
+            .get_document(document_id)?
+            .with_context(|| format!("document not found: {document_id}"))?;
+        let markdown_path = document
+            .markdown_path
+            .with_context(|| format!("document has no markdown cache path: {document_id}"))?;
+        if let Some(parent) = markdown_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&markdown_path, markdown)?;
+        let transaction = self.connection.transaction()?;
+        transaction.execute("DELETE FROM page_search WHERE document_id = ?1", [document_id])?;
+        transaction.execute(
+            "INSERT INTO page_search (document_id, page_number, content) VALUES (?1, 0, ?2)",
+            params![document_id, markdown],
+        )?;
+        transaction.execute(
+            "UPDATE documents SET status = 'parsed', updated_at = ?2 WHERE id = ?1",
+            params![document_id, now()],
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 }
 

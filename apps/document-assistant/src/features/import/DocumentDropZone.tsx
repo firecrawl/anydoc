@@ -2,6 +2,7 @@ import { useRef, type ChangeEvent, type DragEvent, type KeyboardEvent } from 're
 
 interface DocumentDropZoneProps {
   onFile: (file: File) => void;
+  onBrowse?: () => void;
 }
 
 const ACCEPTED_DOCUMENTS = [
@@ -19,7 +20,7 @@ const ACCEPTED_DOCUMENTS = [
   '.epub',
 ].join(',');
 
-export function DocumentDropZone({ onFile }: DocumentDropZoneProps) {
+export function DocumentDropZone({ onFile, onBrowse }: DocumentDropZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const acceptFirstFile = (files: FileList | null) => {
@@ -49,8 +50,15 @@ export function DocumentDropZone({ onFile }: DocumentDropZoneProps) {
       className="drop-zone"
       role="button"
       tabIndex={0}
-      onClick={() => inputRef.current?.click()}
-      onKeyDown={handleKeyDown}
+      onClick={() => onBrowse ? onBrowse() : inputRef.current?.click()}
+      onKeyDown={(event) => {
+        if (onBrowse && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          onBrowse();
+        } else {
+          handleKeyDown(event);
+        }
+      }}
       onDragOver={(event) => event.preventDefault()}
       onDrop={handleDrop}
     >

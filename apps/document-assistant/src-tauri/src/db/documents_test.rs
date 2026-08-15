@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::{DocumentRecord, DocumentRepository};
+use crate::tasks::{PageCheckpoint, TaskRecord, TaskRepository, TaskStage};
 
 fn sample_document(id: &str, sha256: &str, source_path: PathBuf) -> DocumentRecord {
     DocumentRecord {
@@ -73,4 +74,39 @@ fn persists_success_and_failure_for_individual_page_analyses() {
         repo.document_summary("doc-1").expect("summary reads").as_deref(),
         Some(r#"{"schemaVersion":1}"#)
     );
+}
+
+#[test]
+fn loads_rendered_pages_and_persists_remote_analysis_consent() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let database = directory.path().join("assistant.db");
+    let repo = DocumentRepository::open(&database).expect("repository opens");
+    repo.upsert_document(&sample_document("doc-1", "hash-1", PathBuf::from("slides.pptx")))
+        .expect("document inserts");
+    let mut tasks = TaskRepository::open(&database).expect("task repository opens");
+    tasks
+        .create_task(&TaskRecord::new("task-1", "doc-1", TaskStage::Rendering, 1))
+        .expect("task creates");
+    tasks
+        .checkpoint_page(
+            "task-1",
+            &PageCheckpoint {
+                page_number: 1,
+                image_path: Some(PathBuf::from("page-0001.png")),
+                width: Some(1600),
+                height: Some(900),
+                markdown: Some("本页文本".into()),
+            },
+        )
+        .expect("page saves");
+
+    repo.record_analysis_consent("doc-1", Some("vision-primary"), "text-primary")
+        .expect("consent saves");
+    let pages = repo.list_pages("doc-1").expect("pages load");
+    let consent = repo.analysis_consent("doc-1").expect("consent loads").expect("consent exists");
+
+    assert_eq!(pages[0].markdown.as_deref(), Some("本页文本"));
+    assert_eq!(consent.vision_profile_id.as_deref(), Some("vision-primary"));
+    assert_eq!(consent.text_profile_id, "text-primary");
+    assert!(consent.consent_at > 0);
 }

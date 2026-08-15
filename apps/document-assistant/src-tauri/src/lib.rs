@@ -30,6 +30,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_app_info,
             commands::register_document,
+            commands::pick_and_register_document,
+            commands::save_document_markdown,
             commands::list_documents,
             commands::delete_document_cache,
             commands::clear_all_document_caches,
@@ -39,6 +41,8 @@ pub fn run() {
             commands::delete_api_key,
             commands::list_model_profiles,
             commands::test_model_profile,
+            commands::analyze_document,
+            commands::get_document_analysis,
             commands::start_document_task,
             commands::get_task,
             commands::list_recoverable_tasks,

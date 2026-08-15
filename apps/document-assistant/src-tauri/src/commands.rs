@@ -6,11 +6,17 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use image::ImageEncoder;
 use serde::Serialize;
 use serde_json::json;
 use tauri::{Emitter, Manager};
 
 use crate::{
+    analysis::{
+        AnalysisPipelineInput, DocumentSummary as AnalysisDocumentSummary, VisionAnalyzer,
+        run_analysis_pipeline,
+    },
     credentials::{SecretStore, WindowsSecretStore},
     db::{DocumentRecord, DocumentRepository, ModelProfile, ModelProfileRepository},
     models::{ContentPart, ModelClient, ModelMessage, ModelRequest, OpenAiCompatibleClient},
@@ -113,6 +119,13 @@ pub struct AppInfo {
     pub app_data_dir: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedDocument {
+    pub document: DocumentSummary,
+    pub bytes: Vec<u8>,
+}
+
 pub(crate) fn app_info_for_test(app_data_dir: String) -> AppInfo {
     AppInfo { version: env!("CARGO_PKG_VERSION").to_owned(), app_data_dir }
 }
@@ -192,6 +205,43 @@ pub fn register_document(
     source_path: String,
 ) -> Result<DocumentSummary, String> {
     register_document_at(&state, Path::new(&source_path)).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn pick_and_register_document(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<SelectedDocument>, String> {
+    let selected = tauri::async_runtime::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .add_filter(
+                "文档",
+                &[
+                    "doc", "docx", "ppt", "pptx", "pdf", "rtf", "odt", "odp", "xls", "xlsx", "csv",
+                    "epub",
+                ],
+            )
+            .pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let Some(path) = selected else { return Ok(None) };
+    let document = register_document_at(&state, &path).map_err(|error| error.to_string())?;
+    let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+    Ok(Some(SelectedDocument { document, bytes }))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn save_document_markdown(
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+    markdown: String,
+) -> Result<(), String> {
+    state
+        .repository
+        .lock()
+        .map_err(|_| "document repository lock poisoned".to_owned())?
+        .save_markdown(&document_id, &markdown)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -310,10 +360,28 @@ pub async fn test_model_profile(
         .get(&profile_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "请先保存 API Key".to_owned())?;
+    let expects_vision_label = profile.supports_vision;
+    let request = model_capability_test_request(&profile).map_err(|error| error.to_string())?;
     let client =
         OpenAiCompatibleClient::new(profile, api_key).map_err(|error| error.to_string())?;
-    let response = client
-        .chat(ModelRequest {
+    let response = client.chat(request).await.map_err(|error| error.to_string())?;
+    let parsed = serde_json::from_str::<serde_json::Value>(&response.content).ok();
+    let valid = parsed.as_ref().and_then(|value| value.get("ok").and_then(|ok| ok.as_bool()))
+        == Some(true)
+        && (!expects_vision_label
+            || parsed
+                .as_ref()
+                .and_then(|value| value.get("label").and_then(|label| label.as_str()))
+                == Some("orange"));
+    if !valid {
+        return Err("模型连通，但没有返回约定的 JSON".into());
+    }
+    Ok(ModelTestResult { ok: true, message: "连接成功".into() })
+}
+
+fn model_capability_test_request(profile: &ModelProfile) -> Result<ModelRequest> {
+    if !profile.supports_vision {
+        return Ok(ModelRequest {
             messages: vec![ModelMessage {
                 role: "user".into(),
                 content: vec![ContentPart::Text {
@@ -326,17 +394,154 @@ pub async fn test_model_profile(
                 "required": ["ok"],
                 "additionalProperties": false
             })),
-        })
-        .await
-        .map_err(|error| error.to_string())?;
-    let valid = serde_json::from_str::<serde_json::Value>(&response.content)
-        .ok()
-        .and_then(|value| value.get("ok").and_then(|ok| ok.as_bool()))
-        == Some(true);
-    if !valid {
-        return Err("模型连通，但没有返回约定的 JSON".into());
+        });
     }
-    Ok(ModelTestResult { ok: true, message: "连接成功".into() })
+
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png).write_image(
+        &[255, 102, 0, 255],
+        1,
+        1,
+        image::ExtendedColorType::Rgba8,
+    )?;
+    Ok(ModelRequest {
+        messages: vec![ModelMessage {
+            role: "user".into(),
+            content: vec![
+                ContentPart::Text {
+                    text: "The attached one-pixel image is orange. Return exactly {\"ok\":true,\"label\":\"orange\"}.".into(),
+                },
+                ContentPart::ImageUrl {
+                    url: format!("data:image/png;base64,{}", STANDARD.encode(png)),
+                },
+            ],
+        }],
+        response_schema: Some(json!({
+            "type": "object",
+            "properties": {"ok": {"const": true}, "label": {"const": "orange"}},
+            "required": ["ok", "label"],
+            "additionalProperties": false
+        })),
+    })
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn analyze_document(
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+    vision_profile_id: Option<String>,
+    text_profile_id: String,
+    confirm_remote_processing: bool,
+) -> Result<AnalysisDocumentSummary, String> {
+    let (document, pages, prior_consent) = {
+        let repository =
+            state.repository.lock().map_err(|_| "document repository lock poisoned".to_owned())?;
+        let document = repository
+            .get_document(&document_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("document not found: {document_id}"))?;
+        let pages = repository.list_pages(&document_id).map_err(|error| error.to_string())?;
+        let consent =
+            repository.analysis_consent(&document_id).map_err(|error| error.to_string())?;
+        (document, pages, consent)
+    };
+
+    let consent_matches = prior_consent.as_ref().is_some_and(|consent| {
+        consent.vision_profile_id == vision_profile_id && consent.text_profile_id == text_profile_id
+    });
+    if !confirm_remote_processing && !consent_matches {
+        return Err("需要先确认将提取文本和页面图像发送到所选模型服务".into());
+    }
+    if confirm_remote_processing {
+        state
+            .repository
+            .lock()
+            .map_err(|_| "document repository lock poisoned".to_owned())?
+            .record_analysis_consent(&document_id, vision_profile_id.as_deref(), &text_profile_id)
+            .map_err(|error| error.to_string())?;
+    }
+
+    let profiles = state
+        .model_profiles
+        .lock()
+        .map_err(|_| "model profile repository lock poisoned".to_owned())?
+        .list()
+        .map_err(|error| error.to_string())?;
+    let text_profile = profiles
+        .iter()
+        .find(|profile| profile.id == text_profile_id)
+        .cloned()
+        .ok_or_else(|| format!("text model profile not found: {text_profile_id}"))?;
+    let text_key = state
+        .secret_store
+        .get(&text_profile_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "文本模型尚未保存 API Key".to_owned())?;
+    let text_model: Arc<dyn ModelClient> = Arc::new(
+        OpenAiCompatibleClient::new(text_profile, text_key).map_err(|error| error.to_string())?,
+    );
+
+    let vision = if let Some(profile_id) = vision_profile_id {
+        let profile = profiles
+            .iter()
+            .find(|profile| profile.id == profile_id)
+            .cloned()
+            .ok_or_else(|| format!("vision model profile not found: {profile_id}"))?;
+        if !profile.supports_vision {
+            return Err("所选视觉模型配置未启用视觉能力".into());
+        }
+        let key = state
+            .secret_store
+            .get(&profile_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "视觉模型尚未保存 API Key".to_owned())?;
+        let client: Arc<dyn ModelClient> = Arc::new(
+            OpenAiCompatibleClient::new(profile.clone(), key).map_err(|error| error.to_string())?,
+        );
+        Some(VisionAnalyzer::new(profile, client))
+    } else {
+        None
+    };
+
+    let markdown = document
+        .markdown_path
+        .as_ref()
+        .filter(|path| path.exists())
+        .map(std::fs::read_to_string)
+        .transpose()
+        .map_err(|error| error.to_string())?
+        .unwrap_or_else(|| {
+            pages
+                .iter()
+                .filter_map(|page| page.markdown.as_deref())
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        });
+
+    run_analysis_pipeline(AnalysisPipelineInput {
+        database_path: state.database_path.clone(),
+        document_id,
+        markdown,
+        pages,
+        vision,
+        text_model,
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_document_analysis(
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+) -> Result<Option<AnalysisDocumentSummary>, String> {
+    let json = state
+        .repository
+        .lock()
+        .map_err(|_| "document repository lock poisoned".to_owned())?
+        .document_summary(&document_id)
+        .map_err(|error| error.to_string())?;
+    json.map(|value| serde_json::from_str(&value).map_err(|error| error.to_string())).transpose()
 }
 
 pub(crate) fn create_document_task_for_test(
@@ -765,5 +970,21 @@ mod tests {
         assert_eq!(completed.completed, 2);
         assert_eq!(events[events.len() - 2].completed, 2);
         assert_eq!(events.last().expect("completion event").stage, TaskStage::Completed);
+    }
+
+    #[test]
+    fn vision_profile_capability_test_contains_an_inline_image() {
+        use crate::models::ContentPart;
+        let profile = ModelProfile {
+            id: "vision-primary".into(),
+            role: ModelRole::Vision,
+            base_url: "https://api.example.com/v1".into(),
+            model: "vision".into(),
+            supports_vision: true,
+            timeout_secs: 30,
+            max_concurrency: 1,
+        };
+        let request = super::model_capability_test_request(&profile).expect("request builds");
+        assert!(request.messages[0].content.iter().any(|part| matches!(part, ContentPart::ImageUrl { url } if url.starts_with("data:image/png;base64,"))));
     }
 }

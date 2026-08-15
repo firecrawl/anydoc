@@ -23,3 +23,20 @@ pub struct PageAnalysisRecord {
     pub error: Option<String>,
     pub updated_at: i64,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentPageRecord {
+    pub page_number: u32,
+    pub image_path: Option<PathBuf>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub markdown: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisConsentRecord {
+    pub consent_at: i64,
+    pub vision_profile_id: Option<String>,
+    pub text_profile_id: String,
+}

@@ -4,7 +4,7 @@ mod models;
 
 pub use documents::DocumentRepository;
 pub use model_profiles::{ModelProfile, ModelProfileRepository, ModelRole};
-pub use models::{DocumentRecord, PageAnalysisRecord};
+pub use models::{AnalysisConsentRecord, DocumentPageRecord, DocumentRecord, PageAnalysisRecord};
 
 pub(crate) const ANALYSIS_MIGRATION: &str = include_str!("../../migrations/0002_analysis.sql");
 

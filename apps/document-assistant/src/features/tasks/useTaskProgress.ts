@@ -44,6 +44,7 @@ export function useTaskProgress(
   }, [api, taskId]);
 
   useEffect(() => {
+    if (!taskId) return undefined;
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void refresh();

@@ -38,8 +38,10 @@ export function useDocumentConversion(client?: AnyDocClient) {
           new Uint8Array(buffer),
         );
         setState({ status: 'completed', result });
+        return result;
       } catch (error) {
         setState({ status: 'failed', error: toConversionError(error) });
+        return undefined;
       }
     },
     [client],
