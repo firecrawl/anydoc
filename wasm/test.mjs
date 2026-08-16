@@ -23,10 +23,16 @@ const RICH = await readFile(fixture('docx/handmade-rich.docx'))
 const CSV = await readFile(fixture('csv/sheet.csv'))
 const PDF = await readFile(fixture('pdf/text.pdf'))
 const ENCRYPTED = await readFile(fixture('malformed/encrypted--errors.odt'))
+const ENCRYPTED_DOCX = await readFile(fixture('encrypted/password-test.docx'))
 
 test('toMarkdownBytes converts in memory', () => {
   const markdown = toMarkdownBytes(RICH, 'docx')
   assert.match(markdown, /\| Quarter \| Widgets \|/)
+})
+
+test('password-protected OOXML converts with the password', () => {
+  assert.ok(toMarkdownBytes(ENCRYPTED_DOCX, undefined, 'testPassword').length > 0)
+  assert.throws(() => toMarkdownBytes(ENCRYPTED_DOCX, undefined, 'wrong'), { code: 'encrypted' })
 })
 
 test('toMarkdownBytes detects the format when none is named', () => {

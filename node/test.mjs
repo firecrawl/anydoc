@@ -23,6 +23,7 @@ const OUTLINE = fixture('docx/handmade-outline.docx')
 const RICH = fixture('docx/handmade-rich.docx')
 const CSV = fixture('csv/sheet.csv')
 const ENCRYPTED = fixture('malformed/encrypted--errors.odt')
+const ENCRYPTED_DOCX = fixture('encrypted/password-test.docx')
 
 test('toMarkdown detects the format from the file content', async () => {
   const markdown = await toMarkdown(OUTLINE)
@@ -32,6 +33,12 @@ test('toMarkdown detects the format from the file content', async () => {
 test('toMarkdownBytes converts in memory', async () => {
   const markdown = await toMarkdownBytes(await readFile(RICH), 'docx')
   assert.match(markdown, /\| Quarter \| Widgets \|/)
+})
+
+test('password-protected OOXML converts with the password', async () => {
+  const bytes = await readFile(ENCRYPTED_DOCX)
+  assert.ok((await toMarkdownBytes(bytes, undefined, 'testPassword')).length > 0)
+  await assert.rejects(toMarkdownBytes(bytes, undefined, 'wrong'), { code: 'encrypted' })
 })
 
 test('toMarkdownBytes detects the format when none is named', async () => {
@@ -116,6 +123,18 @@ test('cli reads stdin with an explicit format', async () => {
   child.child.stdin.end(await readFile(CSV))
   const { stdout } = await child
   assert.match(stdout, /\| --- \|/)
+})
+
+test('cli decrypts OOXML with an argument or environment password', async () => {
+  const fromArgument = await runCli([ENCRYPTED_DOCX, '--password', 'testPassword'])
+  assert.equal(fromArgument.code, undefined)
+  assert.ok(fromArgument.stdout.length > 0)
+
+  const fromEnvironment = await runCli([ENCRYPTED_DOCX], {
+    env: { ...process.env, ANYDOC_PASSWORD: 'testPassword' },
+  })
+  assert.equal(fromEnvironment.code, undefined)
+  assert.ok(fromEnvironment.stdout.length > 0)
 })
 
 test('cli exits 1 when the document cannot be converted', async () => {

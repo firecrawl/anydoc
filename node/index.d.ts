@@ -271,7 +271,7 @@ export declare const enum TableKind {
  *
  * Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
  */
-export declare function toDocument(bytes: Uint8Array, format?: Format | undefined | null): Promise<Document>
+export declare function toDocument(bytes: Uint8Array, format?: Format | undefined | null, password?: string | undefined | null): Promise<Document>
 
 /**
  * Convert a document file to Markdown. The format is detected from the file
@@ -281,7 +281,7 @@ export declare function toDocument(bytes: Uint8Array, format?: Format | undefine
  * Rejects with an `Error` carrying a `ConvertErrorCode` on `code`; a file
  * that cannot be read is `'io'`.
  */
-export declare function toMarkdown(path: string): Promise<string>
+export declare function toMarkdown(path: string, password?: string | undefined | null): Promise<string>
 
 /**
  * Convert an in-memory document to Markdown. Without a format, it is
@@ -290,4 +290,4 @@ export declare function toMarkdown(path: string): Promise<string>
  *
  * Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
  */
-export declare function toMarkdownBytes(bytes: Uint8Array, format?: Format | undefined | null): Promise<string>
+export declare function toMarkdownBytes(bytes: Uint8Array, format?: Format | undefined | null, password?: string | undefined | null): Promise<string>

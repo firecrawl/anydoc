@@ -40,6 +40,9 @@ markdown = anydoc.to_markdown_bytes(data)
 # Or name it, which signature-less formats (CSV) need:
 markdown = anydoc.to_markdown_bytes(data, "csv")
 
+# Password-protected OOXML
+markdown = anydoc.to_markdown_bytes(data, password="secret")
+
 # Or stop at the document model, which also carries embedded assets:
 document = anydoc.to_document(data)
 ```

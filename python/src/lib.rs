@@ -150,18 +150,32 @@ fn format_from_path(path: PathBuf) -> Option<&'static str> {
 /// content; the extension is the fallback for signature-less formats (CSV)
 /// and unrecognizable containers.
 #[pyfunction]
-fn to_markdown(py: Python<'_>, path: PathBuf) -> PyResult<String> {
-    py.detach(|| anydoc::to_markdown(&path)).map_err(|e| convert_error(py, e))
+#[pyo3(signature = (path, password=None))]
+fn to_markdown(py: Python<'_>, path: PathBuf, password: Option<&str>) -> PyResult<String> {
+    py.detach(|| match password {
+        Some(password) => anydoc::to_markdown_with_password(&path, password),
+        None => anydoc::to_markdown(&path),
+    })
+    .map_err(|e| convert_error(py, e))
 }
 
 /// Convert an in-memory document to Markdown. Without a format, it is
 /// detected from the content, which signature-less formats (CSV) have to name
 /// explicitly.
 #[pyfunction]
-#[pyo3(signature = (data, format=None))]
-fn to_markdown_bytes(py: Python<'_>, data: Vec<u8>, format: Option<&str>) -> PyResult<String> {
+#[pyo3(signature = (data, format=None, password=None))]
+fn to_markdown_bytes(
+    py: Python<'_>,
+    data: Vec<u8>,
+    format: Option<&str>,
+    password: Option<&str>,
+) -> PyResult<String> {
     let format = format.map(parse_format).transpose()?;
-    py.detach(|| anydoc::to_markdown_bytes(&data, format)).map_err(|e| convert_error(py, e))
+    py.detach(|| match password {
+        Some(password) => anydoc::to_markdown_bytes_with_password(&data, format, password),
+        None => anydoc::to_markdown_bytes(&data, format),
+    })
+    .map_err(|e| convert_error(py, e))
 }
 
 /// Parse an in-memory document into the document model, which also carries
@@ -170,15 +184,20 @@ fn to_markdown_bytes(py: Python<'_>, data: Vec<u8>, format: Option<&str>) -> PyR
 /// Unsupported for `pdf`: PDF conversion produces Markdown directly and has
 /// no document-model form; use `to_markdown_bytes`.
 #[pyfunction]
-#[pyo3(signature = (data, format=None))]
+#[pyo3(signature = (data, format=None, password=None))]
 fn to_document(
     py: Python<'_>,
     data: Vec<u8>,
     format: Option<&str>,
+    password: Option<&str>,
 ) -> PyResult<document::Document> {
     let format = format.map(parse_format).transpose()?;
-    let parsed =
-        py.detach(|| anydoc::to_document(&data, format)).map_err(|e| convert_error(py, e))?;
+    let parsed = py
+        .detach(|| match password {
+            Some(password) => anydoc::to_document_with_password(&data, format, password),
+            None => anydoc::to_document(&data, format),
+        })
+        .map_err(|e| convert_error(py, e))?;
     document::document(py, parsed)
 }
 
