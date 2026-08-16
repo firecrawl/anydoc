@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "anydoc"
-version = "0.1.9"
+version = "2026.8.16"
 dependencies = [
  "calamine",
  "cfb",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "anydoc-python"
-version = "0.1.9"
+version = "2026.8.16"
 dependencies = [
  "anydoc",
  "pyo3",
@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "anydoc-wasm"
-version = "0.1.9"
+version = "2026.8.16"
 dependencies = [
  "anydoc",
  "js-sys",
