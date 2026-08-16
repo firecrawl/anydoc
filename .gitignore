@@ -1,5 +1,6 @@
 /target
 /samples
+.firecrawl/
 # Digests of the local `samples/` corpus: they quote converted content, so they
 # stay local like the corpus itself. Regenerate with `cargo test -- --ignored`.
 /tests/snapshots/snapshots__sample__*
