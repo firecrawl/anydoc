@@ -15,6 +15,7 @@ mod render;
 mod shared;
 
 pub use error::ConvertError;
+pub use formats::pdf::Page as PdfPage;
 
 use render::markdown::document_to_markdown;
 
@@ -135,6 +136,18 @@ pub fn to_document(
     format: impl Into<Option<Format>>,
 ) -> Result<model::Document, ConvertError> {
     formats::parse(bytes, resolve_format(bytes, format.into())?)
+}
+
+/// Extract a PDF page by page, keeping the per-page verdict on whether that
+/// page's text layer can be trusted.
+///
+/// [`to_markdown_bytes`] returns one string and cannot express a document
+/// whose pages did not all extract, so it refuses one. This returns the pages
+/// that did extract alongside the ones that did not, which is what a caller
+/// able to OCR the remainder needs. The format is not detected and not passed:
+/// this entry point is for PDFs only, and a non-PDF fails as malformed.
+pub fn pdf_pages(bytes: &[u8]) -> Result<Vec<PdfPage>, ConvertError> {
+    formats::pdf::pages(bytes)
 }
 
 fn resolve_format(bytes: &[u8], format: Option<Format>) -> Result<Format, ConvertError> {

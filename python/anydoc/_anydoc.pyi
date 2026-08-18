@@ -71,6 +71,34 @@ def to_document(data: bytes | bytearray, format: Format | None = None) -> Docume
     Unsupported for `pdf`: PDF conversion produces Markdown directly and has
     no document-model form; use `to_markdown_bytes`."""
 
+def pdf_pages(data: bytes | bytearray) -> list[PdfPage]:
+    """Extract a PDF page by page, keeping the per-page verdict on whether
+    that page's text layer can be trusted.
+
+    `to_markdown_bytes` returns one string and cannot say that some pages did
+    not extract; it logs and degrades. This returns the verdict, which is what
+    a caller able to OCR the remainder needs. Route OCR by `needs_ocr` here
+    and never by a document-level flag: the two disagree, and this one is the
+    API documented for routing.
+
+    The per-page Markdown is flatter than `to_markdown_bytes`, which sees
+    structure across a page break that a page on its own cannot.
+
+    PDFs only. Anything else raises `MalformedError`."""
+
+@final
+class PdfPage:
+    index: int
+    """0-indexed page number, in document order."""
+    markdown: str
+    """Markdown extracted from this page's text layer, empty when the text
+    layer answered for nothing."""
+    needs_ocr: bool
+    """True when the text layer cannot be trusted here: no text at all,
+    GID-encoded fonts, broken encodings, or garbage output."""
+    ocr_reason: str | None
+    """Machine-readable reason for `needs_ocr`, where the cause is known."""
+
 @final
 class Document:
     blocks: list[Block]

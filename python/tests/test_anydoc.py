@@ -12,6 +12,7 @@ FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
 OUTLINE = FIXTURES / "docx" / "handmade-outline.docx"
 RICH = FIXTURES / "docx" / "handmade-rich.docx"
 CSV = FIXTURES / "csv" / "sheet.csv"
+PDF = FIXTURES / "pdf" / "text.pdf"
 ENCRYPTED = FIXTURES / "malformed" / "encrypted--errors.odt"
 ZIPBOMB = FIXTURES / "abuse" / "zipbomb--errors.docx"
 
@@ -47,6 +48,19 @@ class AnydocTest(unittest.TestCase):
         self.assertIsInstance(image.data, bytes)
         self.assertGreater(len(image.data), 0)
         self.assertEqual(image.id, document.assets.index(image))
+
+    def test_pdf_pages_returns_a_page_at_a_time_with_its_ocr_verdict(self):
+        pages = anydoc.pdf_pages(PDF.read_bytes())
+        self.assertEqual([page.index for page in pages], [0, 1])
+        self.assertIn("Fixture Document", pages[0].markdown)
+        # Every page of this fixture has an extractable text layer, including
+        # the thin second one that the document-level flag reports otherwise.
+        self.assertEqual([page.index for page in pages if page.needs_ocr], [])
+        self.assertIsNone(pages[0].ocr_reason)
+
+    def test_pdf_pages_refuses_anything_that_is_not_a_pdf(self):
+        with self.assertRaises(anydoc.MalformedError):
+            anydoc.pdf_pages(RICH.read_bytes())
 
     def test_format_detection_reads_content_extension_and_path(self):
         self.assertEqual(anydoc.format_from_bytes(RICH.read_bytes()), "docx")

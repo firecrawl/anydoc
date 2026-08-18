@@ -182,6 +182,48 @@ fn to_document(
     document::document(py, parsed)
 }
 
+/// One page of a PDF, as its own text layer answered for it.
+#[pyclass(frozen, get_all, module = "anydoc")]
+pub struct PdfPage {
+    /// 0-indexed page number, in document order.
+    index: u32,
+    /// Markdown extracted from this page's text layer, empty when the text
+    /// layer answered for nothing.
+    markdown: String,
+    /// True when the text layer cannot be trusted here: no text at all,
+    /// GID-encoded fonts, broken encodings, or garbage output.
+    needs_ocr: bool,
+    /// Machine-readable reason for `needs_ocr`, where the cause is known.
+    ocr_reason: Option<String>,
+}
+
+/// Extract a PDF page by page, keeping the per-page verdict on whether that
+/// page's text layer can be trusted.
+///
+/// `to_markdown_bytes` returns one string and cannot say that some pages did
+/// not extract; it logs and degrades. This returns the verdict, which is what
+/// a caller able to OCR the remainder needs. Route OCR by `needs_ocr` here and
+/// never by a document-level flag: the two disagree, and this one is the API
+/// documented for routing.
+///
+/// The per-page Markdown is flatter than `to_markdown_bytes`, which sees
+/// structure across a page break that a page on its own cannot.
+///
+/// PDFs only. Anything else raises `MalformedError`.
+#[pyfunction]
+fn pdf_pages(py: Python<'_>, data: Vec<u8>) -> PyResult<Vec<PdfPage>> {
+    let pages = py.detach(|| anydoc::pdf_pages(&data)).map_err(|e| convert_error(py, e))?;
+    Ok(pages
+        .into_iter()
+        .map(|page| PdfPage {
+            index: page.index,
+            markdown: page.markdown,
+            needs_ocr: page.needs_ocr,
+            ocr_reason: page.ocr_reason,
+        })
+        .collect())
+}
+
 /// Convert documents to GitHub-Flavored Markdown.
 #[pymodule]
 fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -191,6 +233,8 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_markdown, m)?)?;
     m.add_function(wrap_pyfunction!(to_markdown_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(to_document, m)?)?;
+    m.add_function(wrap_pyfunction!(pdf_pages, m)?)?;
+    m.add_class::<PdfPage>()?;
     m.add_class::<document::Asset>()?;
     m.add_class::<document::Block>()?;
     m.add_class::<document::Cell>()?;
