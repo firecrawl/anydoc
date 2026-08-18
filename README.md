@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://skills.sh/b/firecrawl/anydoc)](https://skills.sh/firecrawl/anydoc)
 
-Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
+Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), [Kotlin/Android](kotlin/README.md), and the [browser](wasm/README.md) (WebAssembly).
 
 Built by [Firecrawl](https://firecrawl.dev) to turn any office document into LLM-ready Markdown in single-digit milliseconds, with one consistent output no matter which format goes in. It powers [Firecrawl Parse](https://firecrawl.dev/parse), so if you'd rather not run it yourself, the hosted API gives you the same conversion plus our OCR models for the scanned pages anydoc can't read on its own.
 
@@ -81,6 +81,26 @@ document = anydoc.to_document(data)
 ```
 
 > Full API reference: [python/README.md](python/README.md)
+
+### Kotlin / Android
+
+The [Kotlin Android](.github/workflows/kotlin.yml) workflow builds `dev.firecrawl:anydoc` — an AAR with the Rust parsers compiled to `.so` for `arm64-v8a`, `armeabi-v7a`, and `x86_64`. Run it, then depend on the published package or drop the AAR into `app/libs/`. See [kotlin/README.md](kotlin/README.md).
+
+```kotlin
+implementation("dev.firecrawl:anydoc:0.1.9")
+```
+
+```kotlin
+import dev.firecrawl.anydoc.Format
+import dev.firecrawl.anydoc.toDocument
+import dev.firecrawl.anydoc.toMarkdownBytes
+
+val markdown = toMarkdownBytes(bytes)
+val fromCsv = toMarkdownBytes(bytes, Format.CSV)
+val document = toDocument(bytes)
+```
+
+> Full API reference: [kotlin/README.md](kotlin/README.md)
 
 ### Browser (WebAssembly)
 
@@ -197,7 +217,7 @@ Format::from_extension("pptm"); // Some(Format::Pptx)
 Format::from_path(Path::new("report.odt")); // Some(Format::Odt)
 ```
 
-The same three functions exist in Node (`formatFromBytes`, ...) and Python (`anydoc.format_from_bytes`, ...).
+The same three functions exist in Node (`formatFromBytes`, ...), Python (`anydoc.format_from_bytes`, ...), and Kotlin (`formatFromBytes`, ...).
 
 ## Errors
 
@@ -224,7 +244,7 @@ match anydoc::to_markdown(path) {
 | `MissingPart`   | A part required for any meaningful output is absent                 |
 | `Io`            | The file could not be read, from `to_markdown` only                 |
 
-Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per variant, or `OSError` when the file cannot be read.
+Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per variant, or `OSError` when the file cannot be read. Kotlin throws one `ConvertException` subclass per variant, with the same name on `error.code`.
 
 ## How it works
 
@@ -253,15 +273,17 @@ cargo test
 cd node && npm install && npm run build && npm test
 cd python && pip install maturin && maturin develop && python -m unittest discover -s tests
 wasm-pack build wasm --release --target web --scope firecrawl && node --test wasm/test.mjs  # see wasm/README.md
+cargo test -p anydoc-kotlin && sh kotlin/scripts/generate-bindings.sh  # see kotlin/README.md
 ```
 
 A committed fixture corpus under `tests/fixtures/` is snapshot-tested, `tests/robustness.rs` mutation-tests every fixture, and `fuzz/` carries cargo-fuzz targets per format. The speed and quality benchmark lives in [`bench/`](bench/README.md).
 
-Releases are tagged `v<version>`, which publishes the crate, the npm package, and the PyPI wheels from [`.github/workflows/release.yml`](.github/workflows/release.yml). The version lives in three places, bumped together for a release:
+Releases are tagged `v<version>`, which publishes the crate, the npm package, and the PyPI wheels from [`.github/workflows/release.yml`](.github/workflows/release.yml). The version lives in these places, bumped together for a release:
 
 - [`Cargo.toml`](Cargo.toml): the crate
 - [`node/package.json`](node/package.json): the npm package
 - [`python/Cargo.toml`](python/Cargo.toml): the wheel (`python/pyproject.toml` reads it)
+- [`kotlin/Cargo.toml`](kotlin/Cargo.toml) and [`kotlin/android/gradle.properties`](kotlin/android/gradle.properties): the Android AAR
 
 ## License
 

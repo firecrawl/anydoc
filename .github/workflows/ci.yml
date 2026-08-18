@@ -96,3 +96,23 @@ jobs:
       # Must run from the repo root: with python/ as cwd, the source anydoc/
       # package dir shadows the installed compiled module.
       - run: python -m unittest discover -s python/tests
+
+  kotlin:
+    name: Kotlin bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - run: cargo test -p anydoc-kotlin --locked
+      - run: sh kotlin/scripts/generate-bindings.sh
+      - name: JVM binding tests
+        working-directory: kotlin/android/jvm-test
+        run: gradle test -Panydoc.nativeDir="${{ github.workspace }}/target/debug"

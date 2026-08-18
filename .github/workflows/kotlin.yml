@@ -1,0 +1,183 @@
+# Build the Kotlin/Android AAR and, on demand, publish it as a Maven dependency.
+#
+# Every run uploads:
+#   - anydoc-<version>.aar          drop into app/libs/
+#   - maven-repo/                   host anywhere, or consume from the artifact
+#
+# On a v* tag: attach the AAR to the GitHub Release and publish GitHub Packages.
+# On a manual run with publish=true: publish GitHub Packages only (no release).
+name: Kotlin Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the AAR to GitHub Packages and attach it to the GitHub Release
+        type: boolean
+        default: false
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'kotlin/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'tests/fixtures/**'
+      - '.github/workflows/kotlin.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kotlin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-host:
+    name: Host library and JVM tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Rust binding tests
+        run: cargo test -p anydoc-kotlin --locked
+      - name: Generate Kotlin bindings
+        run: sh kotlin/scripts/generate-bindings.sh
+      - name: JVM binding tests
+        working-directory: kotlin/android/jvm-test
+        run: gradle test -Panydoc.nativeDir="${{ github.workspace }}/target/debug"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: jvm-test-reports
+          path: kotlin/android/jvm-test/build/reports/tests
+          if-no-files-found: ignore
+
+  build-aar:
+    name: Android AAR
+    needs: test-host
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: android-ndk
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r28c
+          link-to-sdk: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked --version 4.1.2
+      - name: Generate Kotlin bindings
+        run: sh kotlin/scripts/generate-bindings.sh
+      - name: Cross-compile Android native libraries
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: sh kotlin/scripts/build-android.sh
+      - name: Read version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "version=$(sh scripts/check-versions.sh "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(sh scripts/check-versions.sh)" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Assemble AAR and local Maven repo
+        working-directory: kotlin/android
+        run: gradle :anydoc:assembleRelease :anydoc:publishReleasePublicationToLocalBuildRepository
+      - name: Stage artifacts
+        run: |
+          version='${{ steps.version.outputs.version }}'
+          mkdir -p staged/maven
+          cp kotlin/android/anydoc/build/outputs/aar/anydoc-release.aar "staged/anydoc-${version}.aar"
+          cp -a kotlin/android/build/maven/. staged/maven/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-aar
+          path: staged
+          if-no-files-found: error
+
+  publish:
+    name: Publish Maven / Release
+    needs: build-aar
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: kotlin-aar
+          path: dist
+      - name: Read version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "version=$(sh scripts/check-versions.sh "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(sh scripts/check-versions.sh)" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish the prebuilt Maven repo to GitHub Packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="https://maven.pkg.github.com/${GITHUB_REPOSITORY}"
+          # Only versioned artifacts. GitHub Packages owns maven-metadata.xml;
+          # uploading Gradle's copy 409s or overwrites the registry index.
+          mapfile -t files < <(find dist/maven -type f \( -name '*.aar' -o -name '*.pom' -o -name '*-sources.jar' \))
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "error: no Maven artifacts under dist/maven" >&2
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            rel=${file#dist/maven/}
+            echo "PUT ${rel}"
+            curl -fL --retry 3 \
+              -X PUT \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              --upload-file "$file" \
+              "${repo}/${rel}"
+          done
+      - name: Attach AAR to the GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version='${{ steps.version.outputs.version }}'
+          if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" "dist/anydoc-${version}.aar" --clobber
+          tar -C dist -czf "anydoc-${version}-maven-repo.tgz" maven
+          gh release upload "$GITHUB_REF_NAME" "anydoc-${version}-maven-repo.tgz" --clobber

@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+**/jniLibs/
+generated/
+.idea/
+*.iml
+.cxx/
+captures/

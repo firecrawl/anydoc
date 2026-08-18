@@ -1,0 +1,5 @@
+[bindings.kotlin]
+package_name = "dev.firecrawl.anydoc"
+cdylib_name = "anydoc_kotlin"
+generate_immutable_records = true
+android = false

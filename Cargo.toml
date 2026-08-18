@@ -1,5 +1,5 @@
 [workspace]
-members = ["node", "python", "wasm"]
+members = ["node", "python", "wasm", "kotlin"]
 # cargo-fuzz keeps its own lockfile and nightly-only dependencies.
 exclude = ["fuzz"]
 

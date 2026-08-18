@@ -1,0 +1,28 @@
+# Binding crate version: bump together with the workspace release version.
+[package]
+name = "anydoc-kotlin"
+version = "0.1.9"
+edition = "2024"
+description = "Kotlin/Android bindings for anydoc"
+license = "MIT"
+repository = "https://github.com/firecrawl/anydoc"
+publish = false
+
+[lib]
+name = "anydoc_kotlin"
+crate-type = ["lib", "cdylib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["cli"]
+
+[features]
+cli = ["uniffi/cli"]
+
+[dependencies]
+anydoc = { path = ".." }
+uniffi = "0.29"
+
+[dev-dependencies]
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
