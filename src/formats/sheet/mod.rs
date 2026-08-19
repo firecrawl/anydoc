@@ -16,7 +16,7 @@ use crate::package::{Package, path};
 use std::io::Cursor;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
-    match container(bytes) {
+    match container(bytes)? {
         Some(Container::Ole) => {
             // An encrypted OOXML package is an OLE container carrying no
             // BIFF workbook stream, so it has to be named before the
@@ -40,31 +40,41 @@ enum Container {
 
 /// Which workbook container the bytes hold: an OLE compound file (xls), or a
 /// ZIP holding `xl/workbook.xml` (xlsx, xlsm) or `xl/workbook.bin` (xlsb).
-fn container(bytes: &[u8]) -> Option<Container> {
+fn container(bytes: &[u8]) -> Result<Option<Container>, ConvertError> {
     const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
     if bytes.starts_with(&OLE_MAGIC) {
-        return Some(Container::Ole);
+        return Ok(Some(Container::Ole));
     }
-    let zip = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
+    let Ok(zip) = zip::ZipArchive::new(Cursor::new(bytes)) else {
+        return Ok(None);
+    };
     if zip.index_for_name("xl/workbook.xml").is_some() {
-        return Some(Container::Xml);
+        return Ok(Some(Container::Xml));
     }
     if zip.index_for_name("xl/workbook.bin").is_some() {
-        return Some(Container::Bin);
+        return Ok(Some(Container::Bin));
     }
-    // A package may name its workbook anywhere, and detection already
-    // resolves the root relationship to find it, so the conventional paths
-    // alone would reject a workbook the reader can open.
-    let mut pkg = Package::open(bytes).ok()?;
-    let target = read_rels(&mut pkg, "_rels/.rels")
-        .ok()?
+    // A package may name its workbook anywhere, and detection resolves the
+    // root relationship to find it, so the conventional paths alone would
+    // reject a workbook the reader can open.
+    let mut pkg = Package::open(bytes)?;
+    let Some(target) = read_rels(&mut pkg, "_rels/.rels")?
         .first_of_type(rel_type::OFFICE_DOCUMENT)
-        .and_then(|rel| path::resolve("", &rel.target).ok())?;
-    match target.path.rsplit('.').next() {
-        Some("bin") => Some(Container::Bin),
-        Some("xml") => Some(Container::Xml),
-        _ => None,
-    }
+        .and_then(|rel| path::resolve("", &rel.target).ok())
+    else {
+        return Ok(None);
+    };
+    // The part's own bytes decide, since the name carries no guarantee: a
+    // SpreadsheetML workbook is XML, an xlsb one is a record stream.
+    let Some(part) = pkg.part(&target.path)? else {
+        return Ok(None);
+    };
+    let leading = part.iter().find(|b| !b.is_ascii_whitespace());
+    Ok(match leading {
+        Some(b'<') => Some(Container::Xml),
+        Some(_) => Some(Container::Bin),
+        None => None,
+    })
 }
 
 /// Float formatting at the 15 significant decimal digits a spreadsheet
