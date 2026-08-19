@@ -586,6 +586,11 @@ fn render_serial(serial: f64, elapsed: bool, date1904: bool) -> String {
     } else {
         // 1900 system: serial 1 is 1900-01-01, and the fictitious
         // 1900-02-29 (serial 60) offsets everything after it by one day.
+        // Serial 60 is that non-existent day, so it has no date to render
+        // and would otherwise collapse onto serial 59.
+        if days == 60 {
+            return format_float(serial);
+        }
         days - i64::from(days >= 60) + days_from_civil(1899, 12, 31)
     };
     let (y, m, d) = civil_from_days(civil_days);
@@ -965,5 +970,16 @@ mod tests {
             matches!(err, ConvertError::ResourceLimit { limit: "max_grid_slots", .. }),
             "got {err:?}"
         );
+    }
+
+    #[test]
+    fn the_fictitious_leap_day_keeps_its_own_value() {
+        // Serial 60 is 1900-02-29, a day that never existed, and mapping it
+        // onto a real date would make it indistinguishable from serial 59.
+        assert_eq!(render_serial(59.0, false, false), "1900-02-28");
+        assert_eq!(render_serial(60.0, false, false), "60");
+        assert_eq!(render_serial(61.0, false, false), "1900-03-01");
+        // The 1904 system has no such day.
+        assert_eq!(render_serial(60.0, false, true), "1904-03-01");
     }
 }
