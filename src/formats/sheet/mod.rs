@@ -1,12 +1,13 @@
-//! Excel spreadsheets (xlsx, xlsm, xlsb, xls). SpreadsheetML containers go
-//! through the in-house reader, which resolves each cell's number format
-//! from `xl/styles.xml`; xlsb and OLE-based xls go through calamine. The
-//! in-house path raises typed errors on malformed input and needs no panic
-//! barrier - that barrier exists solely for calamine and stays on the
-//! fallback path.
+//! Excel spreadsheets (xlsx, xlsm, xlsb, xls). SpreadsheetML containers and
+//! OLE-based BIFF .xls go through the in-house readers, which share the
+//! number format engine and grid assembly; only binary xlsb still goes
+//! through calamine. The in-house paths raise typed errors on malformed
+//! input and need no panic barrier - that barrier exists solely for
+//! calamine and stays on the fallback path.
 
 mod fallback;
 mod numfmt;
+mod xls;
 mod xlsx;
 
 use crate::error::ConvertError;
@@ -14,12 +15,17 @@ use crate::model::Document;
 use std::io::Cursor;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
-    if has_workbook_xml(bytes) { xlsx::parse(bytes) } else { fallback::parse(bytes) }
+    if bytes.starts_with(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") {
+        xls::parse(bytes)
+    } else if has_workbook_xml(bytes) {
+        xlsx::parse(bytes)
+    } else {
+        fallback::parse(bytes)
+    }
 }
 
 /// SpreadsheetML detection: a ZIP container holding `xl/workbook.xml`.
-/// xlsb (`xl/workbook.bin`) and OLE-based xls fail this and take the
-/// calamine path.
+/// xlsb (`xl/workbook.bin`) fails this and takes the calamine path.
 fn has_workbook_xml(bytes: &[u8]) -> bool {
     zip::ZipArchive::new(Cursor::new(bytes))
         .is_ok_and(|zip| zip.index_for_name("xl/workbook.xml").is_some())

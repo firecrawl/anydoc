@@ -1,5 +1,5 @@
-//! Calamine fallback for the Excel containers the in-house reader does not
-//! cover: OLE-based .xls and binary .xlsb.
+//! Calamine fallback for the one Excel container the in-house readers do
+//! not cover yet: binary .xlsb.
 
 use super::{format_duration_days, format_float, format_time_of_day};
 use crate::error::ConvertError;
@@ -118,8 +118,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     Ok(doc)
 }
 
-/// Merged regions per sheet, where the container format exposes them (xlsx
-/// via each worksheet's mergeCells part, xls via BIFF MERGEDCELLS).
+/// Merged regions per sheet, where the container format exposes them.
 fn merged_regions<RS: std::io::Read + std::io::Seek>(
     workbook: &mut Sheets<RS>,
     sheet_names: &[String],
@@ -129,10 +128,6 @@ fn merged_regions<RS: std::io::Read + std::io::Seek>(
         let regions = match workbook {
             Sheets::Xlsx(x) => {
                 contained("merged-region listing", || x.merge_cells_by_sheet_name(name))?
-                    .map_err(|e| e.to_string())
-            }
-            Sheets::Xls(x) => {
-                contained("merged-cell listing", || x.merge_cells_by_sheet_name(name))?
                     .map_err(|e| e.to_string())
             }
             _ => continue,

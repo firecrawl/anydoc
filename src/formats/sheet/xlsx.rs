@@ -148,8 +148,10 @@ fn rich_text(item: &Element) -> String {
 }
 
 /// A cell's resolved number format: General, or a parsed format code.
+/// Shared with the BIFF reader - .xls XF/FORMAT records resolve into the
+/// same representation.
 #[derive(Clone)]
-enum CellFormat {
+pub(super) enum CellFormat {
     General,
     Fmt(Rc<NumberFormat>),
 }
@@ -205,7 +207,7 @@ impl Styles {
 /// A numFmtId's format: the file's own `numFmt` entries first, then the
 /// built-in table. Unknown ids and unsupported codes fall back to General -
 /// never to a guess.
-fn resolve_format(id: u32, custom: &HashMap<u32, &str>) -> CellFormat {
+pub(super) fn resolve_format(id: u32, custom: &HashMap<u32, &str>) -> CellFormat {
     let code = custom.get(&id).copied().or_else(|| builtin_code(id));
     match code {
         Some(code) => match NumberFormat::parse(code) {
@@ -224,16 +226,17 @@ fn resolve_format(id: u32, custom: &HashMap<u32, &str>) -> CellFormat {
     }
 }
 
-/// One worksheet, parsed but not yet filtered or gridded.
+/// One worksheet, parsed but not yet filtered or gridded. Shared with the
+/// BIFF reader, which fills it from records instead of XML.
 #[derive(Default)]
-struct SheetContent {
+pub(super) struct SheetContent {
     /// Rendered text by zero-based (row, col); empty results are absent.
-    cells: HashMap<(u32, u32), String>,
-    hidden_rows: HashSet<u32>,
+    pub(super) cells: HashMap<(u32, u32), String>,
+    pub(super) hidden_rows: HashSet<u32>,
     /// Inclusive zero-based column ranges hidden by `cols/col` entries.
-    hidden_cols: Vec<(u32, u32)>,
+    pub(super) hidden_cols: Vec<(u32, u32)>,
     /// Inclusive zero-based merge regions (r1, c1, r2, c2), area > 1.
-    merges: Vec<(u32, u32, u32, u32)>,
+    pub(super) merges: Vec<(u32, u32, u32, u32)>,
 }
 
 fn read_sheet(
@@ -344,20 +347,26 @@ fn cell_text(c: &Element, shared: &[String], styles: &Styles, date1904: bool) ->
                 log::debug!("unparseable numeric cell value {v:?}");
                 return String::new();
             };
-            let text = match fmt {
-                CellFormat::General => format_float(n),
-                CellFormat::Fmt(f) => match f.format_number(n) {
-                    Rendered::General(x) => format_float(x),
-                    Rendered::Text(s) => s,
-                    Rendered::DateTime { elapsed } => render_serial(n, elapsed, date1904),
-                },
-            };
-            clean_text(&text)
+            render_numeric(fmt, n, date1904)
         }
     }
 }
 
-fn format_as_text(fmt: &CellFormat, text: &str) -> String {
+/// Render a numeric cell through its resolved format. Shared with the BIFF
+/// reader so both containers format identically.
+pub(super) fn render_numeric(fmt: &CellFormat, n: f64, date1904: bool) -> String {
+    let text = match fmt {
+        CellFormat::General => format_float(n),
+        CellFormat::Fmt(f) => match f.format_number(n) {
+            Rendered::General(x) => format_float(x),
+            Rendered::Text(s) => s,
+            Rendered::DateTime { elapsed } => render_serial(n, elapsed, date1904),
+        },
+    };
+    clean_text(&text)
+}
+
+pub(super) fn format_as_text(fmt: &CellFormat, text: &str) -> String {
     match fmt {
         CellFormat::Fmt(f) => match f.format_text(text) {
             Some(s) => clean_text(&s),
@@ -371,7 +380,7 @@ fn format_as_text(fmt: &CellFormat, text: &str) -> String {
 /// widened to cover intersecting merge regions (a merge anchored on the
 /// only populated cell must survive at full size), and merges remapped onto
 /// the surviving rows and columns.
-fn build_table(mut sheet: SheetContent) -> Result<Option<Table>, ConvertError> {
+pub(super) fn build_table(mut sheet: SheetContent) -> Result<Option<Table>, ConvertError> {
     // Hidden coordinates as sorted lists: lookups and first-visible scans
     // stay logarithmic, so an adversarial pile of hidden rows or column
     // ranges cannot force quadratic work.
