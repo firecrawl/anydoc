@@ -391,10 +391,17 @@ fn parse_section(s: &str) -> Option<Section> {
                 i += 7;
             }
             'a' | 'A' => {
-                let rest: String = chars[i..].iter().collect();
+                // Matched over chars: the tokens are ASCII, but a multibyte
+                // char can follow them, and byte slicing would split it.
                 let len = ["AM/PM", "A/P"]
                     .iter()
-                    .find(|t| rest.len() >= t.len() && rest[..t.len()].eq_ignore_ascii_case(t))
+                    .find(|t| {
+                        chars.len() - i >= t.len()
+                            && chars[i..i + t.len()]
+                                .iter()
+                                .zip(t.chars())
+                                .all(|(c, want)| c.eq_ignore_ascii_case(&want))
+                    })
                     .map(|t| t.len())?;
                 has_date = true;
                 i += len;
