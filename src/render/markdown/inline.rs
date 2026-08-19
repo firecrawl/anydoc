@@ -205,7 +205,11 @@ fn render_text_run(
     }
     if !core.is_empty() {
         if style.code {
-            push_code_span(core, out);
+            if ctx == InlineContext::TableCell {
+                push_table_cell_code_span(core, out);
+            } else {
+                push_code_span(core, out);
+            }
         } else {
             let mut open = String::new();
             if style.strike {
@@ -233,7 +237,16 @@ fn render_text_run(
 }
 
 pub(crate) fn push_code_span(text: &str, out: &mut String) {
+    push_code_span_inner(text, false, out);
+}
+
+pub(crate) fn push_table_cell_code_span(text: &str, out: &mut String) {
+    push_code_span_inner(text, true, out);
+}
+
+fn push_code_span_inner(text: &str, escape_table_pipes: bool, out: &mut String) {
     let text = text.replace('\n', " ");
+    let text = if escape_table_pipes { text.replace('|', "\\|") } else { text };
     let fence = backtick_fence(&text, 1);
     let pad = if text.starts_with('`') || text.ends_with('`') { " " } else { "" };
     let _ = write!(out, "{fence}{pad}{text}{pad}{fence}");

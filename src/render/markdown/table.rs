@@ -166,7 +166,7 @@ fn cell_block_text(block: &Block, rc: &Ctx, parts: &mut Vec<String>) {
             let t = text.trim();
             if !t.is_empty() {
                 let mut s = String::new();
-                crate::render::markdown::inline::push_code_span(t, &mut s);
+                crate::render::markdown::inline::push_table_cell_code_span(t, &mut s);
                 parts.push(s);
             }
         }
