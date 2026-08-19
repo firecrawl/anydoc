@@ -56,9 +56,12 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         .map(|(href, _)| href.as_str())
     {
         spine_entries += 1;
-        let Ok(target) = path::resolve(&opf_path, href) else {
-            log::warn!("skipping chapter with unresolvable href {href:?}");
-            continue;
+        let target = match path::resolve(&opf_path, href) {
+            Ok(t) => t,
+            Err(e) => {
+                log::warn!("skipping chapter with unresolvable href {href:?}: {e}");
+                continue;
+            }
         };
         if spine_parts.insert(target.path.clone()) {
             spine_paths.push(target.path);
