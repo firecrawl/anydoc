@@ -205,7 +205,7 @@ fn render_text_run(
     }
     if !core.is_empty() {
         if style.code {
-            push_code_span(core, out);
+            push_code_span(core, ctx, out);
         } else {
             let mut open = String::new();
             if style.strike {
@@ -232,9 +232,15 @@ fn render_text_run(
     }
 }
 
-pub(crate) fn push_code_span(text: &str, out: &mut String) {
+pub(crate) fn push_code_span(text: &str, ctx: InlineContext, out: &mut String) {
     let text = text.replace('\n', " ");
     let fence = backtick_fence(&text, 1);
     let pad = if text.starts_with('`') || text.ends_with('`') { " " } else { "" };
+    // A row is split into cells before any code span is parsed, so a pipe is
+    // syntax here even though everything else between the fences is literal.
+    let text = match ctx {
+        InlineContext::TableCell => text.replace('|', "\\|"),
+        _ => text,
+    };
     let _ = write!(out, "{fence}{pad}{text}{pad}{fence}");
 }

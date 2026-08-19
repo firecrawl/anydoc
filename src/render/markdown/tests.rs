@@ -296,6 +296,21 @@ fn url_pipes_cannot_split_table_cells() {
 }
 
 #[test]
+fn code_span_pipes_cannot_split_table_cells() {
+    let md = doc(vec![table_from(
+        vec![vec![
+            Cell::from_inlines(vec![Inline::Text {
+                text: "a | b".into(),
+                style: Style { code: true, ..Style::PLAIN },
+            }]),
+            Cell::from_inlines(vec![Inline::plain("or")]),
+        ]],
+        0,
+    )]);
+    assert_eq!(md, "|  |  |\n| --- | --- |\n| `a \\| b` | or |\n");
+}
+
+#[test]
 fn url_angle_brackets_are_encoded_without_bracketing() {
     let md = doc(vec![Block::Paragraph(vec![Inline::Link {
         content: vec![Inline::plain("link")],
