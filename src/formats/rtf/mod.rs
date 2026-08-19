@@ -9,6 +9,7 @@ mod tables;
 
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Note, NoteKind, Style, inlines_are_empty};
+use crate::package::materialization::MaterializationBudget;
 use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::field_result;
@@ -20,6 +21,14 @@ use table::TableState;
 use tables::{LIST_LEVELS, Prelude, codepage_encoding, parse_prelude};
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
+    parse_with_budget(bytes, MaterializationBudget::default())
+}
+
+fn parse_with_budget(
+    bytes: &[u8],
+    budget: MaterializationBudget,
+) -> Result<Document, ConvertError> {
+    budget.check_input(bytes.len())?;
     if !bytes.starts_with(b"{\\rtf") {
         return Err(ConvertError::malformed("not an RTF file"));
     }
@@ -27,7 +36,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     // header for \ansicpg first.
     let default_encoding = scan_codepage(bytes);
     let prelude = parse_prelude(bytes, default_encoding);
-    let mut parser = Parser::new(bytes, prelude, default_encoding);
+    let mut parser = Parser::new(bytes, prelude, default_encoding, budget);
     parser.run()?;
     parser.finish()
 }
@@ -396,6 +405,8 @@ struct Parser<'a> {
     prelude: Prelude,
     decoder: TextDecoder,
     recovered: bool,
+    budget: MaterializationBudget,
+    materialization_error: Option<ConvertError>,
 
     inlines: Vec<Inline>,
     blocks: Vec<Block>,
@@ -412,6 +423,7 @@ impl<'a> Parser<'a> {
         bytes: &'a [u8],
         prelude: Prelude,
         default_encoding: &'static encoding_rs::Encoding,
+        budget: MaterializationBudget,
     ) -> Self {
         Parser {
             lexer: Lexer::new(bytes),
@@ -420,6 +432,8 @@ impl<'a> Parser<'a> {
             prelude,
             decoder: TextDecoder::new(default_encoding),
             recovered: false,
+            budget,
+            materialization_error: None,
             inlines: Vec::new(),
             blocks: Vec::new(),
             list_run: Vec::new(),
@@ -479,6 +493,9 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            if let Some(error) = self.materialization_error.take() {
+                return Err(error);
+            }
         }
         if !self.stack.is_empty() {
             self.recovered = true;
@@ -487,6 +504,9 @@ impl<'a> Parser<'a> {
             log::warn!("recovered unbalanced rtf groups");
         }
         self.flush_pending();
+        if let Some(error) = self.materialization_error.take() {
+            return Err(error);
+        }
         self.end_paragraph()
     }
 
@@ -843,6 +863,12 @@ impl<'a> Parser<'a> {
     }
 
     fn push_text(&mut self, text: String) {
+        if let Err(error) = self.budget.charge_text(text.len()) {
+            if self.materialization_error.is_none() {
+                self.materialization_error = Some(error);
+            }
+            return;
+        }
         let text = clean_text(&text);
         if text.is_empty() {
             return;
@@ -863,6 +889,12 @@ impl<'a> Parser<'a> {
             Capture::Pict => {}
             Capture::None => {
                 if !self.state.suppress {
+                    if let Err(error) = self.budget.charge_text_run() {
+                        if self.materialization_error.is_none() {
+                            self.materialization_error = Some(error);
+                        }
+                        return;
+                    }
                     self.inlines.push(Inline::Text { text, style: self.state.style });
                 }
             }
@@ -879,6 +911,9 @@ impl<'a> Parser<'a> {
     }
 
     fn end_paragraph(&mut self) -> Result<(), ConvertError> {
+        if let Some(error) = self.materialization_error.take() {
+            return Err(error);
+        }
         let inlines = std::mem::take(&mut self.inlines);
         let listtext = self.dest.listtext.take();
 
@@ -913,12 +948,20 @@ impl<'a> Parser<'a> {
             {
                 let text =
                     format!("{} ", label.clone().unwrap_or_else(|| key.marker.label(*number)));
+                self.budget.charge_text(text.len())?;
+                self.budget.charge_text_run()?;
                 content.insert(0, Inline::Text { text, style: Style::PLAIN });
             }
             self.blocks.push(Block::Heading { level, anchor: None, content });
             return Ok(());
         }
         if let Some((key, level, number, label)) = entry {
+            if key.marker.ordered()
+                && let Some(label) = label.as_ref()
+            {
+                self.budget.charge_text(label.len())?;
+                self.budget.charge_text_run()?;
+            }
             self.list_run.push(ListEntry {
                 level,
                 key,
@@ -999,6 +1042,10 @@ impl<'a> Parser<'a> {
     }
 
     fn end_cell(&mut self, depth: usize) -> Result<(), ConvertError> {
+        if let Some(error) = self.materialization_error.take() {
+            return Err(error);
+        }
+        self.budget.charge_cell()?;
         let inlines = std::mem::take(&mut self.inlines);
         self.dest.listtext = None;
         self.table.end_cell(depth, self.state.block, inlines)
@@ -1120,5 +1167,53 @@ mod tests {
         .unwrap();
         assert_eq!(doc.assets.len(), 1, "only the preferred picture: {:?}", doc.assets);
         assert_eq!(doc.assets[0].media_type, "image/png");
+    }
+
+    fn rtf_resource_limit_name(error: ConvertError) -> &'static str {
+        match error {
+            ConvertError::ResourceLimit { limit, .. } => limit,
+            other => panic!("expected resource limit, got {other}"),
+        }
+    }
+
+    #[test]
+    fn rtf_text_materialization_is_bounded() {
+        let budget = MaterializationBudget::with_limits(1024, 5, 10, 10);
+        let error = parse_with_budget(br"{\rtf1 abcdef}", budget).unwrap_err();
+        assert_eq!(rtf_resource_limit_name(error), "max_materialized_text_bytes");
+    }
+
+    #[test]
+    fn rtf_text_run_materialization_is_bounded() {
+        let budget = MaterializationBudget::with_limits(1024, 1024, 10, 2);
+        let error = parse_with_budget(br"{\rtf1 a\b b\b0 c\par}", budget).unwrap_err();
+        assert_eq!(rtf_resource_limit_name(error), "max_materialized_text_runs");
+    }
+
+    #[test]
+    fn rtf_cell_materialization_is_bounded() {
+        let budget = MaterializationBudget::with_limits(1024, 1024, 1, 10);
+        let error =
+            parse_with_budget(br"{\rtf1\trowd\cellx1000\cellx2000 a\cell b\cell\row}", budget)
+                .unwrap_err();
+        assert_eq!(rtf_resource_limit_name(error), "max_materialized_cells");
+    }
+
+    #[test]
+    fn rtf_generated_list_labels_are_bounded() {
+        let budget = MaterializationBudget::with_limits(4096, 4, 10, 10);
+        let error = parse_with_budget(
+            br"{\rtf1{\*\listtable{\list{\listlevel\levelnfc0\levelstartat1{\leveltext \'03\'00.\'00;}{\levelnumbers \'01\'03;}}\listid1}}{\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}}\pard\ls1\ilvl0 item\par}",
+            budget,
+        )
+        .unwrap_err();
+        assert_eq!(rtf_resource_limit_name(error), "max_materialized_text_bytes");
+    }
+
+    #[test]
+    fn pending_text_limit_precedes_cell_limit() {
+        let budget = MaterializationBudget::with_limits(1024, 1, 0, 10);
+        let error = parse_with_budget(br"{\rtf1\trowd\cellx1000 ab\cell\row}", budget).unwrap_err();
+        assert_eq!(rtf_resource_limit_name(error), "max_materialized_text_bytes");
     }
 }
