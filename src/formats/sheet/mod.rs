@@ -1,12 +1,13 @@
-//! Excel spreadsheets (xlsx, xlsm, xlsb, xls). SpreadsheetML containers go
-//! through the in-house reader, which resolves each cell's number format
-//! from `xl/styles.xml`; xlsb and OLE-based xls go through calamine. The
-//! in-house path raises typed errors on malformed input and needs no panic
-//! barrier - that barrier exists solely for calamine and stays on the
-//! fallback path.
+//! Excel spreadsheets (xlsx, xlsm, xlsb, xls). SpreadsheetML containers -
+//! XML (xlsx, xlsm) and binary (xlsb) - go through the in-house readers,
+//! which resolve each cell's number format from the styles part; OLE-based
+//! xls goes through calamine. The in-house paths raise typed errors on
+//! malformed input and need no panic barrier - that barrier exists solely
+//! for calamine and stays on the fallback path.
 
 mod fallback;
 mod numfmt;
+mod xlsb;
 mod xlsx;
 
 use crate::error::ConvertError;
@@ -14,15 +15,30 @@ use crate::model::Document;
 use std::io::Cursor;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
-    if has_workbook_xml(bytes) { xlsx::parse(bytes) } else { fallback::parse(bytes) }
+    match workbook_container(bytes) {
+        Some(Container::Xml) => xlsx::parse(bytes),
+        Some(Container::Bin) => xlsb::parse(bytes),
+        None => fallback::parse(bytes),
+    }
 }
 
-/// SpreadsheetML detection: a ZIP container holding `xl/workbook.xml`.
-/// xlsb (`xl/workbook.bin`) and OLE-based xls fail this and take the
-/// calamine path.
-fn has_workbook_xml(bytes: &[u8]) -> bool {
-    zip::ZipArchive::new(Cursor::new(bytes))
-        .is_ok_and(|zip| zip.index_for_name("xl/workbook.xml").is_some())
+enum Container {
+    Xml,
+    Bin,
+}
+
+/// SpreadsheetML detection: a ZIP container holding `xl/workbook.xml` (xlsx,
+/// xlsm) or `xl/workbook.bin` (xlsb). OLE-based xls fails this and takes
+/// the calamine path.
+fn workbook_container(bytes: &[u8]) -> Option<Container> {
+    let zip = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
+    if zip.index_for_name("xl/workbook.xml").is_some() {
+        return Some(Container::Xml);
+    }
+    if zip.index_for_name("xl/workbook.bin").is_some() {
+        return Some(Container::Bin);
+    }
+    None
 }
 
 /// Float formatting at the 15 significant decimal digits a spreadsheet

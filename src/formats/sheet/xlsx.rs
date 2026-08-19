@@ -18,13 +18,13 @@ use crate::shared::text::clean_text;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-const SHARED_STRINGS_REL: &str =
+pub(super) const SHARED_STRINGS_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
 /// The grid bounds the format defines; a reference outside them is not a
 /// real cell.
-const MAX_ROWS: u32 = 1_048_576;
-const MAX_COLS: u32 = 16_384;
+pub(super) const MAX_ROWS: u32 = 1_048_576;
+pub(super) const MAX_COLS: u32 = 16_384;
 
 pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let mut pkg = Package::open(bytes)?;
@@ -103,6 +103,23 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     Ok(doc)
 }
 
+/// Part name for a workbook-level sibling: the relationship of the given
+/// type when present, else the conventional name next to the workbook part.
+pub(super) fn sibling_part_name(
+    rels: &Relationships,
+    base: &str,
+    rel: &str,
+    conventional: &str,
+) -> String {
+    rels.first_of_type(rel)
+        .and_then(|r| path::resolve(base, &r.target).ok())
+        .map(|t| t.path)
+        .unwrap_or_else(|| match base.rsplit_once('/') {
+            Some((dir, _)) => format!("{dir}/{conventional}"),
+            None => conventional.to_string(),
+        })
+}
+
 /// Load a workbook-level XML part by relationship type, falling back to the
 /// conventional name next to the workbook part.
 fn sibling_part(
@@ -112,15 +129,7 @@ fn sibling_part(
     rel: &str,
     conventional: &str,
 ) -> Result<Option<Element>, ConvertError> {
-    let part = rels
-        .first_of_type(rel)
-        .and_then(|r| path::resolve(base, &r.target).ok())
-        .map(|t| t.path)
-        .unwrap_or_else(|| match base.rsplit_once('/') {
-            Some((dir, _)) => format!("{dir}/{conventional}"),
-            None => conventional.to_string(),
-        });
-    pkg.optional_xml_part(&part)
+    pkg.optional_xml_part(&sibling_part_name(rels, base, rel, conventional))
 }
 
 /// The shared string table, one cleaned entry per `si` in order.
@@ -149,7 +158,7 @@ fn rich_text(item: &Element) -> String {
 
 /// A cell's resolved number format: General, or a parsed format code.
 #[derive(Clone)]
-enum CellFormat {
+pub(super) enum CellFormat {
     General,
     Fmt(Rc<NumberFormat>),
 }
@@ -205,7 +214,7 @@ impl Styles {
 /// A numFmtId's format: the file's own `numFmt` entries first, then the
 /// built-in table. Unknown ids and unsupported codes fall back to General -
 /// never to a guess.
-fn resolve_format(id: u32, custom: &HashMap<u32, &str>) -> CellFormat {
+pub(super) fn resolve_format(id: u32, custom: &HashMap<u32, &str>) -> CellFormat {
     let code = custom.get(&id).copied().or_else(|| builtin_code(id));
     match code {
         Some(code) => match NumberFormat::parse(code) {
@@ -226,14 +235,14 @@ fn resolve_format(id: u32, custom: &HashMap<u32, &str>) -> CellFormat {
 
 /// One worksheet, parsed but not yet filtered or gridded.
 #[derive(Default)]
-struct SheetContent {
+pub(super) struct SheetContent {
     /// Rendered text by zero-based (row, col); empty results are absent.
-    cells: HashMap<(u32, u32), String>,
-    hidden_rows: HashSet<u32>,
+    pub(super) cells: HashMap<(u32, u32), String>,
+    pub(super) hidden_rows: HashSet<u32>,
     /// Inclusive zero-based column ranges hidden by `cols/col` entries.
-    hidden_cols: Vec<(u32, u32)>,
+    pub(super) hidden_cols: Vec<(u32, u32)>,
     /// Inclusive zero-based merge regions (r1, c1, r2, c2), area > 1.
-    merges: Vec<(u32, u32, u32, u32)>,
+    pub(super) merges: Vec<(u32, u32, u32, u32)>,
 }
 
 fn read_sheet(
@@ -344,20 +353,25 @@ fn cell_text(c: &Element, shared: &[String], styles: &Styles, date1904: bool) ->
                 log::debug!("unparseable numeric cell value {v:?}");
                 return String::new();
             };
-            let text = match fmt {
-                CellFormat::General => format_float(n),
-                CellFormat::Fmt(f) => match f.format_number(n) {
-                    Rendered::General(x) => format_float(x),
-                    Rendered::Text(s) => s,
-                    Rendered::DateTime { elapsed } => render_serial(n, elapsed, date1904),
-                },
-            };
-            clean_text(&text)
+            render_number(fmt, n, date1904)
         }
     }
 }
 
-fn format_as_text(fmt: &CellFormat, text: &str) -> String {
+/// Render a numeric cell value under its resolved format.
+pub(super) fn render_number(fmt: &CellFormat, n: f64, date1904: bool) -> String {
+    let text = match fmt {
+        CellFormat::General => format_float(n),
+        CellFormat::Fmt(f) => match f.format_number(n) {
+            Rendered::General(x) => format_float(x),
+            Rendered::Text(s) => s,
+            Rendered::DateTime { elapsed } => render_serial(n, elapsed, date1904),
+        },
+    };
+    clean_text(&text)
+}
+
+pub(super) fn format_as_text(fmt: &CellFormat, text: &str) -> String {
     match fmt {
         CellFormat::Fmt(f) => match f.format_text(text) {
             Some(s) => clean_text(&s),
@@ -371,7 +385,7 @@ fn format_as_text(fmt: &CellFormat, text: &str) -> String {
 /// widened to cover intersecting merge regions (a merge anchored on the
 /// only populated cell must survive at full size), and merges remapped onto
 /// the surviving rows and columns.
-fn build_table(mut sheet: SheetContent) -> Result<Option<Table>, ConvertError> {
+pub(super) fn build_table(mut sheet: SheetContent) -> Result<Option<Table>, ConvertError> {
     // Hidden coordinates as sorted lists: lookups and first-visible scans
     // stay logarithmic, so an adversarial pile of hidden rows or column
     // ranges cannot force quadratic work.

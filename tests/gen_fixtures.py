@@ -915,6 +915,112 @@ def merged_xlsx():
 
 
 # ---------------------------------------------------------------------------
+# Handmade XLSB: binary SpreadsheetML records (MS-XLSB). Exercises the
+# variable-length record framing (two-byte ids, multi-byte sizes via a long
+# shared string), RK integer/float cells with and without the /100 bit,
+# number formats, a hidden row, a hidden column, a hidden sheet, and a merge
+# extending past the populated range.
+
+def xlsb_rec(rec_id, payload=b""):
+    out = bytearray()
+    if rec_id < 0x80:
+        out.append(rec_id)
+    else:
+        out.append((rec_id & 0x7F) | 0x80)
+        out.append(rec_id >> 7)
+    size = len(payload)
+    while True:
+        low = size & 0x7F
+        size >>= 7
+        if size == 0:
+            out.append(low)
+            break
+        out.append(low | 0x80)
+    return bytes(out) + payload
+
+
+def xlsb_str(s):
+    data = s.encode("utf-16-le")
+    return struct.pack("<I", len(data) // 2) + data
+
+
+def xlsb_cell(col, style=0):
+    return struct.pack("<II", col, style)
+
+
+def xlsb_row(r, hidden=False):
+    flags = 0x10 if hidden else 0
+    return xlsb_rec(0, struct.pack("<IIHBBBI", r, 0, 0, 0, flags, 0, 0))
+
+
+def sheet_xlsb():
+    root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.bin"/>
+</Relationships>"""
+    wb_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.bin"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.bin"/>
+<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.bin"/>
+<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.bin"/>
+</Relationships>"""
+    workbook = (
+        xlsb_rec(153, struct.pack("<II", 0, 0) + xlsb_str(""))  # BrtWbProp, 1900 dates
+        + xlsb_rec(156, struct.pack("<II", 0, 1) + xlsb_str("rId1") + xlsb_str("Data"))
+        + xlsb_rec(156, struct.pack("<II", 1, 2) + xlsb_str("rId2") + xlsb_str("Secret"))
+    )
+    # cellXfs: 0 General, 1 percent, 2 currency, 3 builtin date (ifmt 14).
+    xf = lambda ifmt: xlsb_rec(47, struct.pack("<HH", 0, ifmt) + bytes(12))
+    styles = (
+        xlsb_rec(44, struct.pack("<H", 164) + xlsb_str("0.0%"))
+        + xlsb_rec(44, struct.pack("<H", 165) + xlsb_str('"$"#,##0.00'))
+        + xlsb_rec(617, struct.pack("<I", 4))
+        + xf(0) + xf(164) + xf(165) + xf(14)
+        + xlsb_rec(618)
+    )
+    # The long entry forces a record size beyond one byte.
+    sst_items = ["Region", "north " * 40]
+    shared = b"".join(xlsb_rec(19, b"\x00" + xlsb_str(s)) for s in sst_items)
+    isst = lambda col, i: xlsb_rec(7, xlsb_cell(col) + struct.pack("<I", i))
+    real = lambda col, style, v: xlsb_rec(5, xlsb_cell(col, style) + struct.pack("<d", v))
+    rk = lambda col, style, v: xlsb_rec(2, xlsb_cell(col, style) + struct.pack("<I", v))
+    st = lambda col, s: xlsb_rec(6, xlsb_cell(col) + xlsb_str(s))
+    data = (
+        xlsb_rec(60, struct.pack("<IIIIH", 3, 3, 0, 0, 1))  # column D hidden
+        + xlsb_row(0)
+        + isst(0, 0) + isst(1, 1) + st(2, "Notes") + st(3, "hidden column")
+        + xlsb_row(1)
+        + rk(0, 0, (42 << 2) | 2)                       # RK integer 42
+        + rk(1, 1, (65 << 2) | 2 | 1)                   # RK integer/100: 65% via 0.65
+        + real(2, 2, 1234.5)                            # currency
+        + xlsb_row(2, hidden=True)
+        + st(0, "hidden row")
+        + xlsb_row(3)
+        + rk(0, 0, struct.unpack("<Q", struct.pack("<d", 1.5))[0] >> 32)  # RK float
+        + rk(1, 0, (struct.unpack("<Q", struct.pack("<d", 1.5))[0] >> 32) | 1)  # RK float/100
+        + real(2, 3, 46096.0)                           # builtin date format
+        + xlsb_row(4)
+        + st(0, "wide merge")
+        + xlsb_rec(4, xlsb_cell(1) + b"\x01")           # TRUE
+        + xlsb_rec(3, xlsb_cell(2) + b"\x07")           # #DIV/0!
+        + xlsb_rec(177, struct.pack("<I", 1))           # BrtBeginMergeCells
+        + xlsb_rec(176, struct.pack("<IIII", 4, 5, 0, 2))  # A5:C6, past the populated rows
+        + xlsb_rec(178)                                 # BrtEndMergeCells
+    )
+    secret = xlsb_row(0) + st(0, "must not appear")
+    write_zip(OUT / "xlsb" / "handmade-sheet.xlsb", [
+        ("_rels/.rels", root_rels),
+        ("xl/workbook.bin", workbook),
+        ("xl/_rels/workbook.bin.rels", wb_rels),
+        ("xl/styles.bin", styles),
+        ("xl/sharedStrings.bin", shared),
+        ("xl/worksheets/sheet1.bin", data),
+        ("xl/worksheets/sheet2.bin", secret),
+    ])
+
+
+# ---------------------------------------------------------------------------
 # R16: ODF style:default-style beneath named chains; full ISO durations
 
 def defaults_odf():
@@ -1925,6 +2031,7 @@ def main():
     manyrefs_docx()
     defaults_odf()
     merged_xlsx()
+    sheet_xlsb()
     features_epub()
     bin_rtf()
     csvs()

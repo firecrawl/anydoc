@@ -1,5 +1,5 @@
-//! Calamine fallback for the Excel containers the in-house reader does not
-//! cover: OLE-based .xls and binary .xlsb.
+//! Calamine fallback for the one Excel container the in-house readers do
+//! not cover: OLE-based .xls.
 
 use super::{format_duration_days, format_float, format_time_of_day};
 use crate::error::ConvertError;
