@@ -264,6 +264,30 @@ mod tests {
     }
 
     #[test]
+    fn page_break_between_runs_keeps_the_word_boundary() {
+        // A w:br is unrepresentable in Markdown whatever its type, but the
+        // runs it separates must not merge into a word the document never
+        // had. A break ending a paragraph still leaves no stray marker.
+        let cases = [
+            (
+                r#"<w:p><w:r><w:t>Alfa</w:t><w:br w:type="page"/><w:t>Beta</w:t></w:r></w:p>"#,
+                "Alfa\\\nBeta\n",
+            ),
+            (
+                r#"<w:p><w:r><w:t>Alfa</w:t><w:br w:type="page"/></w:r></w:p>
+                <w:p><w:r><w:t>Beta</w:t></w:r></w:p>"#,
+                "Alfa\n\nBeta\n",
+            ),
+        ];
+        for (body, expected) in cases {
+            let document = format!(r#"<w:document {W}><w:body>{body}</w:body></w:document>"#);
+            let bytes = docx_parts(&[("word/document.xml", &document)]);
+            let markdown = crate::to_markdown_bytes(&bytes, crate::Format::Docx).unwrap();
+            assert_eq!(markdown, expected, "body: {body}");
+        }
+    }
+
+    #[test]
     fn numbered_heading_keeps_its_number() {
         // H1: a heading style with numbering shows its label and advances
         // the sequence.
