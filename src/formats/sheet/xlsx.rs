@@ -1,9 +1,7 @@
 //! In-house SpreadsheetML reader (.xlsx / .xlsm): the workbook's visible
 //! sheets, shared strings, cell number formats from `xl/styles.xml`, and
-//! merge regions. Rows, columns, and sheets the source hides are omitted -
-//! hidden content is not visible to someone opening the workbook, so
-//! passing it on would make it look authoritative - and merge regions are
-//! remapped onto the surviving grid.
+//! merge regions. Rows, columns, and sheets the source hides are omitted,
+//! and merge regions are remapped onto the surviving grid.
 
 use super::numfmt::{NumberFormat, Rendered, builtin_code};
 use super::{format_duration_days, format_float, format_time_of_day};
