@@ -45,7 +45,8 @@ pub enum Format {
     Rtf,
     /// EPUB 2 and 3 (`.epub`).
     Epub,
-    /// Excel workbooks: `.xlsx`, `.xlsm`, `.xlsb`, and binary `.xls`.
+    /// Excel workbooks: `.xlsx`, `.xlsm`, binary `.xlsb`, and legacy
+    /// OLE-based `.xls`.
     Excel,
     /// OpenDocument Spreadsheet (`.ods`).
     Ods,

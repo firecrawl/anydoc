@@ -1,34 +1,56 @@
-//! Excel spreadsheets (xlsx, xlsm, xlsb, xls). SpreadsheetML containers and
-//! OLE-based BIFF .xls go through the in-house readers, which share the
-//! number format engine and grid assembly; only binary xlsb still goes
-//! through calamine. The in-house paths raise typed errors on malformed
-//! input and need no panic barrier - that barrier exists solely for
-//! calamine and stays on the fallback path.
+//! Excel spreadsheets (xlsx, xlsm, xlsb, xls). Every container is read
+//! in-house: SpreadsheetML as XML (xlsx, xlsm) or binary (xlsb), and
+//! OLE-based BIFF (xls). All three share the number format engine and grid
+//! assembly, so one workbook saved in any of them converts identically.
 
-mod fallback;
 mod numfmt;
 mod xls;
+mod xlsb;
 mod xlsx;
 
 use crate::error::ConvertError;
 use crate::model::Document;
+use crate::package::archive::probe_ole;
 use std::io::Cursor;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
-    if bytes.starts_with(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") {
-        xls::parse(bytes)
-    } else if has_workbook_xml(bytes) {
-        xlsx::parse(bytes)
-    } else {
-        fallback::parse(bytes)
+    match container(bytes) {
+        Some(Container::Ole) => {
+            // An encrypted OOXML package is an OLE container carrying no
+            // BIFF workbook stream, so it has to be named before the
+            // reader looks for one.
+            match probe_ole(bytes) {
+                Some(e @ ConvertError::Encrypted) => Err(e),
+                _ => xls::parse(bytes),
+            }
+        }
+        Some(Container::Xml) => xlsx::parse(bytes),
+        Some(Container::Bin) => xlsb::parse(bytes),
+        None => Err(ConvertError::malformed("not a readable workbook container")),
     }
 }
 
-/// SpreadsheetML detection: a ZIP container holding `xl/workbook.xml`.
-/// xlsb (`xl/workbook.bin`) fails this and takes the calamine path.
-fn has_workbook_xml(bytes: &[u8]) -> bool {
-    zip::ZipArchive::new(Cursor::new(bytes))
-        .is_ok_and(|zip| zip.index_for_name("xl/workbook.xml").is_some())
+enum Container {
+    Ole,
+    Xml,
+    Bin,
+}
+
+/// Which workbook container the bytes hold: an OLE compound file (xls), or a
+/// ZIP holding `xl/workbook.xml` (xlsx, xlsm) or `xl/workbook.bin` (xlsb).
+fn container(bytes: &[u8]) -> Option<Container> {
+    const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+    if bytes.starts_with(&OLE_MAGIC) {
+        return Some(Container::Ole);
+    }
+    let zip = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
+    if zip.index_for_name("xl/workbook.xml").is_some() {
+        return Some(Container::Xml);
+    }
+    if zip.index_for_name("xl/workbook.bin").is_some() {
+        return Some(Container::Bin);
+    }
+    None
 }
 
 /// Float formatting at the 15 significant decimal digits a spreadsheet
@@ -92,5 +114,18 @@ mod tests {
         let days = (26.0 * 3600.0 + 30.0 * 60.0 + 15.0) / 86_400.0;
         assert_eq!(format_duration_days(days), "26:30:15");
         assert_eq!(format_duration_days(-0.5), "-12:00:00");
+    }
+
+    #[test]
+    fn an_encrypted_ooxml_package_is_not_read_as_biff() {
+        // An encrypted workbook is an OLE container carrying no BIFF
+        // workbook stream, so the container check alone would send it to
+        // the wrong reader.
+        let mut ole = cfb::CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+        ole.create_stream("EncryptionInfo").unwrap();
+        ole.create_stream("EncryptedPackage").unwrap();
+        let bytes = ole.into_inner().into_inner();
+
+        assert!(matches!(parse(&bytes), Err(ConvertError::Encrypted)));
     }
 }

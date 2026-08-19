@@ -18,13 +18,13 @@ use crate::shared::text::clean_text;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-const SHARED_STRINGS_REL: &str =
+pub(super) const SHARED_STRINGS_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
 /// The grid bounds the format defines; a reference outside them is not a
 /// real cell.
-const MAX_ROWS: u32 = 1_048_576;
-const MAX_COLS: u32 = 16_384;
+pub(super) const MAX_ROWS: u32 = 1_048_576;
+pub(super) const MAX_COLS: u32 = 16_384;
 
 pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let mut pkg = Package::open(bytes)?;
@@ -103,6 +103,23 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     Ok(doc)
 }
 
+/// Part name for a workbook-level sibling: the relationship of the given
+/// type when present, else the conventional name next to the workbook part.
+pub(super) fn sibling_part_name(
+    rels: &Relationships,
+    base: &str,
+    rel: &str,
+    conventional: &str,
+) -> String {
+    rels.first_of_type(rel)
+        .and_then(|r| path::resolve(base, &r.target).ok())
+        .map(|t| t.path)
+        .unwrap_or_else(|| match base.rsplit_once('/') {
+            Some((dir, _)) => format!("{dir}/{conventional}"),
+            None => conventional.to_string(),
+        })
+}
+
 /// Load a workbook-level XML part by relationship type, falling back to the
 /// conventional name next to the workbook part.
 fn sibling_part(
@@ -112,15 +129,7 @@ fn sibling_part(
     rel: &str,
     conventional: &str,
 ) -> Result<Option<Element>, ConvertError> {
-    let part = rels
-        .first_of_type(rel)
-        .and_then(|r| path::resolve(base, &r.target).ok())
-        .map(|t| t.path)
-        .unwrap_or_else(|| match base.rsplit_once('/') {
-            Some((dir, _)) => format!("{dir}/{conventional}"),
-            None => conventional.to_string(),
-        });
-    pkg.optional_xml_part(&part)
+    pkg.optional_xml_part(&sibling_part_name(rels, base, rel, conventional))
 }
 
 /// The shared string table, one cleaned entry per `si` in order.
@@ -347,14 +356,14 @@ fn cell_text(c: &Element, shared: &[String], styles: &Styles, date1904: bool) ->
                 log::debug!("unparseable numeric cell value {v:?}");
                 return String::new();
             };
-            render_numeric(fmt, n, date1904)
+            render_number(fmt, n, date1904)
         }
     }
 }
 
 /// Render a numeric cell through its resolved format. Shared with the BIFF
-/// reader so both containers format identically.
-pub(super) fn render_numeric(fmt: &CellFormat, n: f64, date1904: bool) -> String {
+/// and binary readers so every container formats identically.
+pub(super) fn render_number(fmt: &CellFormat, n: f64, date1904: bool) -> String {
     let text = match fmt {
         CellFormat::General => format_float(n),
         CellFormat::Fmt(f) => match f.format_number(n) {
