@@ -80,13 +80,23 @@ pub(crate) fn normalize<'a>(inlines: &'a [Inline], rc: &Ctx) -> Vec<Norm<'a>> {
 }
 
 pub(crate) fn render_inlines(inlines: &[Inline], ctx: InlineContext, rc: &Ctx) -> String {
-    render_inlines_mode(inlines, ctx, false, rc)
+    render_inlines_mode(inlines, ctx, false, false, rc)
 }
 
-fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, rc: &Ctx) -> String {
+/// `more_follows` marks a nested render whose output lands mid-paragraph (a
+/// link label, or link content that degraded to plain text), so its last run
+/// still has content after it even though its own run list has ended.
+fn render_inlines_mode(
+    inlines: &[Inline],
+    ctx: InlineContext,
+    in_label: bool,
+    more_follows: bool,
+    rc: &Ctx,
+) -> String {
     let runs = normalize(inlines, rc);
     let mut out = String::new();
     for (idx, run) in runs.iter().enumerate() {
+        let pairs_ahead = more_follows || idx + 1 < runs.len();
         match run {
             Norm::Text { text, style } => {
                 let next_active = matches!(
@@ -96,15 +106,19 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
                     runs.get(idx + 1),
                     Some(Norm::Text { style, .. }) if *style != Style::PLAIN
                 );
-                render_text_run(text, *style, ctx, next_active, in_label, &mut out)
+                render_text_run(text, *style, ctx, next_active, pairs_ahead, in_label, &mut out)
             }
             Norm::NoteRef(id) => {
                 if let Some(num) = rc.nums.get(*id) {
                     let _ = write!(out, "[^{num}]");
                 }
             }
-            Norm::Link { content, target } => render_link(content, target, ctx, rc, &mut out),
-            Norm::Image { alt, source } => render_image(alt, source, ctx, in_label, &mut out),
+            Norm::Link { content, target } => {
+                render_link(content, target, ctx, pairs_ahead, rc, &mut out)
+            }
+            Norm::Image { alt, source } => {
+                render_image(alt, source, ctx, in_label, pairs_ahead, &mut out)
+            }
             Norm::Anchor(id) => {
                 if let Some(html_id) = rc.anchors.html_id(id) {
                     let _ = write!(out, "<a id=\"{html_id}\"></a>");
@@ -124,10 +138,13 @@ fn render_link(
     content: &[Inline],
     target: &LinkTarget,
     ctx: InlineContext,
+    pairs_ahead: bool,
     rc: &Ctx,
     out: &mut String,
 ) {
-    let label = render_inlines_mode(content, ctx, true, rc);
+    // The label is always followed by `](url)`, so its runs never end the
+    // paragraph.
+    let label = render_inlines_mode(content, ctx, true, true, rc);
     let url = match target {
         LinkTarget::External(url) | LinkTarget::Relative(url) => url.clone(),
         LinkTarget::Anchor(id) => match rc.anchors.fragment(id) {
@@ -135,7 +152,7 @@ fn render_link(
             None => {
                 // Target exists nowhere in the document: degrade to plain text.
                 log::debug!("unresolved internal link target: {id}");
-                out.push_str(&render_inlines_mode(content, ctx, false, rc));
+                out.push_str(&render_inlines_mode(content, ctx, false, pairs_ahead, rc));
                 return;
             }
         },
@@ -157,12 +174,17 @@ fn render_image(
     source: &ImageSource,
     ctx: InlineContext,
     in_label: bool,
+    pairs_ahead: bool,
     out: &mut String,
 ) {
     match source {
         ImageSource::External(url) => {
-            let alt =
-                escape_text(alt.trim(), ctx, EscapeOpts { in_label: true, ..Default::default() });
+            // The alt text is always followed by `](url)`.
+            let alt = escape_text(
+                alt.trim(),
+                ctx,
+                EscapeOpts { in_label: true, pairs_ahead: true, ..Default::default() },
+            );
             let _ = write!(out, "![{}]({})", alt, format_url(url));
         }
         // Embedded assets render as their alt text: Markdown cannot embed
@@ -173,7 +195,7 @@ fn render_image(
                 out.push_str(&escape_text(
                     alt.trim(),
                     ctx,
-                    EscapeOpts { in_label, ..Default::default() },
+                    EscapeOpts { in_label, pairs_ahead, ..Default::default() },
                 ));
             }
         }
@@ -186,6 +208,7 @@ fn render_text_run(
     style: Style,
     ctx: InlineContext,
     trailing_active: bool,
+    pairs_ahead: bool,
     in_label: bool,
     out: &mut String,
 ) {
@@ -194,7 +217,13 @@ fn render_text_run(
         out.push_str(&escape_text(
             text,
             ctx,
-            EscapeOpts { at_line_start, trailing_active, in_label, ..Default::default() },
+            EscapeOpts {
+                at_line_start,
+                trailing_active,
+                pairs_ahead,
+                in_label,
+                ..Default::default()
+            },
         ));
         return;
     }
