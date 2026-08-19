@@ -178,14 +178,15 @@ pub(crate) fn escape_url_as_text(url: &str, ctx: InlineContext) -> String {
     )
 }
 
-/// Escape the pipes in a code span's text so the row cannot split on them.
+/// Prepare a code span's text for a table cell, where a pipe is the only
+/// character between the fences that is still syntax.
 ///
 /// A backslash run already sitting in front of a pipe would pair off with the
 /// escape and leave the pipe bare, so it is doubled to keep the escape intact.
 /// That doubling survives into the rendered code span: GFM has no encoding for
 /// a code span that contains a backslash immediately before a pipe, and an
 /// intact row is worth more than the exact backslash count.
-pub(crate) fn escape_cell_pipes(text: &str) -> String {
+pub(crate) fn escape_cell_code_span(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut backslashes = 0;
     for c in text.chars() {

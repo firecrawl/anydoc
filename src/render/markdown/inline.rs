@@ -3,8 +3,8 @@
 use crate::model::{ImageSource, Inline, LinkTarget, Style, inlines_are_empty};
 use crate::render::markdown::Ctx;
 use crate::render::markdown::escape::{
-    EscapeOpts, InlineContext, backtick_fence, escape_cell_pipes, escape_text, escape_url_as_text,
-    format_url,
+    EscapeOpts, InlineContext, backtick_fence, escape_cell_code_span, escape_text,
+    escape_url_as_text, format_url,
 };
 use std::borrow::Cow;
 use std::fmt::Write as _;
@@ -240,7 +240,7 @@ pub(crate) fn push_code_span(text: &str, ctx: InlineContext, out: &mut String) {
     // A row is split into cells before any code span is parsed, so a pipe is
     // syntax here even though everything else between the fences is literal.
     let text = match ctx {
-        InlineContext::TableCell => escape_cell_pipes(&text),
+        InlineContext::TableCell => escape_cell_code_span(&text),
         _ => text,
     };
     let _ = write!(out, "{fence}{pad}{text}{pad}{fence}");
