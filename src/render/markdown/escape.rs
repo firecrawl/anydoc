@@ -178,7 +178,6 @@ pub(crate) fn escape_url_as_text(url: &str, ctx: InlineContext) -> String {
     )
 }
 
-/// Shortest backtick fence longer than any backtick run in `text`.
 /// Escape the pipes in a code span's text so the row cannot split on them.
 ///
 /// A backslash run already sitting in front of a pipe would pair off with the
@@ -205,6 +204,7 @@ pub(crate) fn escape_cell_pipes(text: &str) -> String {
     out
 }
 
+/// Shortest backtick fence longer than any backtick run in `text`.
 pub(crate) fn backtick_fence(text: &str, min: usize) -> String {
     let longest_run = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
     "`".repeat((longest_run + 1).max(min))
