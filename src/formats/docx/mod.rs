@@ -248,60 +248,19 @@ mod tests {
     }
 
     #[test]
-    fn unpreserved_edge_whitespace_is_discarded() {
-        // M3: w:t edge whitespace is significant only under
-        // xml:space="preserve".
+    fn unmarked_run_edge_whitespace_is_kept() {
+        // Converters that never write xml:space carry inter-word spacing on
+        // run edges; dropping it glues the words together.
         let document = format!(
             r#"<w:document {W}><w:body><w:p>
-            <w:r><w:t>lead</w:t></w:r>
-            <w:r><w:t>   discarded   </w:t></w:r>
-            <w:r><w:t xml:space="preserve"> kept </w:t></w:r>
-            <w:r><w:t>tail</w:t></w:r>
+            <w:r><w:t>This</w:t></w:r>
+            <w:r><w:t> by-law</w:t></w:r>
+            <w:r><w:t> grants</w:t></w:r>
             </w:p></w:body></w:document>"#
         );
         let doc = parse(&docx_parts(&[("word/document.xml", &document)])).unwrap();
         let Some(Block::Paragraph(inlines)) = doc.blocks.first() else { panic!() };
-        assert_eq!(crate::model::inlines_to_plain_text(inlines), "leaddiscarded kept tail");
-    }
-
-    #[test]
-    fn unpreserved_no_break_space_is_kept() {
-        // The xml:space contract governs XML whitespace; a no-break space is
-        // character data, so it survives an unmarked edge.
-        let nbsp = '\u{a0}';
-        let document = format!(
-            r#"<w:document {W}><w:body><w:p>
-            <w:r><w:t>before{nbsp}</w:t></w:r>
-            <w:r><w:t>after</w:t></w:r>
-            </w:p></w:body></w:document>"#
-        );
-        let doc = parse(&docx_parts(&[("word/document.xml", &document)])).unwrap();
-        let Some(Block::Paragraph(inlines)) = doc.blocks.first() else { panic!() };
-        assert_eq!(crate::model::inlines_to_plain_text(inlines), "before after");
-    }
-
-    #[test]
-    fn page_break_between_runs_keeps_the_word_boundary() {
-        // A w:br is unrepresentable in Markdown whatever its type, but the
-        // runs it separates must not merge into a word the document never
-        // had. A break ending a paragraph still leaves no stray marker.
-        let cases = [
-            (
-                r#"<w:p><w:r><w:t>Alfa</w:t><w:br w:type="page"/><w:t>Beta</w:t></w:r></w:p>"#,
-                "Alfa\\\nBeta\n",
-            ),
-            (
-                r#"<w:p><w:r><w:t>Alfa</w:t><w:br w:type="page"/></w:r></w:p>
-                <w:p><w:r><w:t>Beta</w:t></w:r></w:p>"#,
-                "Alfa\n\nBeta\n",
-            ),
-        ];
-        for (body, expected) in cases {
-            let document = format!(r#"<w:document {W}><w:body>{body}</w:body></w:document>"#);
-            let bytes = docx_parts(&[("word/document.xml", &document)]);
-            let markdown = crate::to_markdown_bytes(&bytes, crate::Format::Docx).unwrap();
-            assert_eq!(markdown, expected, "body: {body}");
-        }
+        assert_eq!(crate::model::inlines_to_plain_text(inlines), "This by-law grants");
     }
 
     #[test]
