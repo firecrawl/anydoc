@@ -239,8 +239,34 @@ pub(crate) fn push_code_span(text: &str, ctx: InlineContext, out: &mut String) {
     // A row is split into cells before any code span is parsed, so a pipe is
     // syntax here even though everything else between the fences is literal.
     let text = match ctx {
-        InlineContext::TableCell => text.replace('|', "\\|"),
+        InlineContext::TableCell => escape_cell_pipes(&text),
         _ => text,
     };
     let _ = write!(out, "{fence}{pad}{text}{pad}{fence}");
+}
+
+/// Escape the pipes in a code span's text so the row cannot split on them.
+///
+/// A backslash run already sitting in front of a pipe would pair off with the
+/// escape and leave the pipe bare, so it is doubled to keep the escape intact.
+/// That doubling survives into the rendered code span: GFM has no encoding for
+/// a code span that contains a backslash immediately before a pipe, and an
+/// intact row is worth more than the exact backslash count.
+fn escape_cell_pipes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut backslashes = 0;
+    for c in text.chars() {
+        match c {
+            '|' => {
+                for _ in 0..=backslashes {
+                    out.push('\\');
+                }
+                backslashes = 0;
+            }
+            '\\' => backslashes += 1,
+            _ => backslashes = 0,
+        }
+        out.push(c);
+    }
+    out
 }
