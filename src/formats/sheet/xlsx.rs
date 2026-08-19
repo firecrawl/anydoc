@@ -447,6 +447,15 @@ pub(super) fn build_table(mut sheet: SheetContent) -> Result<Option<Table>, Conv
     if row_map.is_empty() || col_map.is_empty() {
         return Ok(None);
     }
+    // Charged before materializing: the extent is derived from cell
+    // coordinates, so a handful of cells can describe a whole sheet.
+    let slots = row_map.len() as u64 * col_map.len() as u64;
+    if slots > limits::MAX_GRID_SLOTS {
+        return Err(ConvertError::ResourceLimit {
+            limit: "max_grid_slots",
+            detail: format!("sheet extent covers {slots} grid positions"),
+        });
+    }
 
     // Remap merges onto the surviving coordinates. The covered-position set
     // is charged against the expansion budget up front, before any
@@ -942,5 +951,19 @@ mod tests {
         };
         assert_eq!(cell.row_span, 2);
         assert_eq!(texts(table)[0][0], "kept");
+    }
+
+    #[test]
+    fn a_sparse_sheet_cannot_materialize_an_unbounded_grid() {
+        // Two cells at opposite corners describe the whole sheet, so the
+        // extent has to be charged before any position is built.
+        let wb = one_sheet(
+            r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c></row><row r="1048576"><c r="XFD1048576" t="inlineStr"><is><t>b</t></is></c></row></sheetData>"#,
+        );
+        let err = parse(&wb.build()).unwrap_err();
+        assert!(
+            matches!(err, ConvertError::ResourceLimit { limit: "max_grid_slots", .. }),
+            "got {err:?}"
+        );
     }
 }
