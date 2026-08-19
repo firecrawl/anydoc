@@ -79,6 +79,33 @@ fn format_duration_days(days: f64) -> String {
     format!("{sign}{h}:{m:02}:{s:02}")
 }
 
+/// Decode an RK value, the packed number both binary containers use. Bit 0
+/// asks for a hundredth of the result; bit 1 selects an integer over the
+/// high 30 bits of a double.
+pub(super) fn rk_number(rk: u32) -> f64 {
+    let value = if rk & 0x02 != 0 {
+        f64::from((rk as i32) >> 2)
+    } else {
+        f64::from_bits(u64::from(rk & 0xFFFF_FFFC) << 32)
+    };
+    if rk & 0x01 != 0 { value / 100.0 } else { value }
+}
+
+/// The literal an error code displays as, shared by both binary containers.
+pub(super) fn error_literal(code: u8) -> Option<&'static str> {
+    Some(match code {
+        0x00 => "#NULL!",
+        0x07 => "#DIV/0!",
+        0x0F => "#VALUE!",
+        0x17 => "#REF!",
+        0x1D => "#NAME?",
+        0x24 => "#NUM!",
+        0x2A => "#N/A",
+        0x2B => "#GETTING_DATA",
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

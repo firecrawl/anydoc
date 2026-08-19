@@ -8,6 +8,7 @@
 use super::xlsx::{
     CellFormat, SheetContent, build_table, format_as_text, render_number, resolve_format,
 };
+use super::{error_literal, rk_number};
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline};
 use crate::package::limits;
@@ -468,33 +469,6 @@ fn cell_ref(body: &[u8]) -> Option<(u32, u32, u16)> {
 
 fn get_f64(body: &[u8], off: usize) -> Option<f64> {
     Some(f64::from_le_bytes(body.get(off..off.checked_add(8)?)?.try_into().ok()?))
-}
-
-/// An RkNumber: bit 0 divides by 100, bit 1 selects a signed 30-bit integer
-/// over the high 30 bits of an IEEE 754 double.
-fn rk_number(rk: u32) -> f64 {
-    let value = if rk & 0x02 != 0 {
-        f64::from((rk as i32) >> 2)
-    } else {
-        f64::from_bits(u64::from(rk & 0xFFFF_FFFC) << 32)
-    };
-    if rk & 0x01 != 0 { value / 100.0 } else { value }
-}
-
-/// A BErr code's literal Excel rendering, matching what the xlsx reader
-/// passes through from `t="e"` cells.
-fn error_literal(code: u8) -> Option<&'static str> {
-    Some(match code {
-        0x00 => "#NULL!",
-        0x07 => "#DIV/0!",
-        0x0F => "#VALUE!",
-        0x17 => "#REF!",
-        0x1D => "#NAME?",
-        0x24 => "#NUM!",
-        0x2A => "#N/A",
-        0x2B => "#GETTING_DATA",
-        _ => return None,
-    })
 }
 
 /// One worksheet substream into the shared `SheetContent` shape. `Ok(None)`

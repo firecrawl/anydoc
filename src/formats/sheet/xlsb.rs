@@ -8,6 +8,7 @@ use super::xlsx::{
     CellFormat, MAX_COLS, MAX_ROWS, SHARED_STRINGS_REL, SheetContent, build_table, format_as_text,
     render_number, resolve_format, sibling_part_name,
 };
+use super::{error_literal, rk_number};
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline};
 use crate::package::limits;
@@ -294,7 +295,7 @@ fn cell_text(
     date1904: bool,
 ) -> Result<String, ConvertError> {
     Ok(match id {
-        BRT_CELL_RK => render_number(fmt, rk_to_f64(f.u32()?), date1904),
+        BRT_CELL_RK => render_number(fmt, rk_number(f.u32()?), date1904),
         BRT_CELL_REAL | BRT_FMLA_NUM => render_number(fmt, f.f64()?, date1904),
         BRT_CELL_ST | BRT_FMLA_STRING => format_as_text(fmt, &clean_text(&f.wide_string()?)),
         BRT_CELL_RSTRING => {
@@ -318,7 +319,7 @@ fn cell_text(
         },
         BRT_CELL_ERROR | BRT_FMLA_ERROR => {
             let code = f.u8()?;
-            match error_text(code) {
+            match error_literal(code) {
                 Some(text) => text.to_string(),
                 None => {
                     log::debug!("unknown error cell code {code:#04x}");
@@ -328,33 +329,6 @@ fn cell_text(
         }
         _ => String::new(),
     })
-}
-
-/// BErr error codes (MS-XLSB 2.5.98.2), rendered in their literal Excel
-/// form. An unknown code yields nothing rather than a guess.
-fn error_text(code: u8) -> Option<&'static str> {
-    Some(match code {
-        0x00 => "#NULL!",
-        0x07 => "#DIV/0!",
-        0x0F => "#VALUE!",
-        0x17 => "#REF!",
-        0x1D => "#NAME?",
-        0x24 => "#NUM!",
-        0x2A => "#N/A",
-        0x2B => "#GETTING_DATA",
-        _ => return None,
-    })
-}
-
-/// RkNumber (MS-XLSB 2.5.123): bit 0 divides by 100, bit 1 selects a signed
-/// 30-bit integer over the high 30 bits of an IEEE 754 double.
-fn rk_to_f64(rk: u32) -> f64 {
-    let num = if rk & 2 != 0 {
-        f64::from((rk as i32) >> 2)
-    } else {
-        f64::from_bits(u64::from(rk & 0xFFFF_FFFC) << 32)
-    };
-    if rk & 1 != 0 { num / 100.0 } else { num }
 }
 
 /// Iterator over one part's record stream: a 1-2 byte record type and a 1-4
@@ -725,11 +699,11 @@ mod tests {
     fn rk_values_decode_both_kinds_with_and_without_x100() {
         // Integer, negative integer (arithmetic shift), integer / 100,
         // float from the high 30 bits, float / 100.
-        assert_eq!(rk_to_f64((1 << 2) | 2), 1.0);
-        assert_eq!(rk_to_f64(((-1i32 as u32) << 2) | 2), -1.0);
-        assert_eq!(rk_to_f64((12345 << 2) | 2 | 1), 123.45);
-        assert_eq!(rk_to_f64((1.5f64.to_bits() >> 32) as u32), 1.5);
-        assert_eq!(rk_to_f64((1.5f64.to_bits() >> 32) as u32 | 1), 0.015);
+        assert_eq!(rk_number((1 << 2) | 2), 1.0);
+        assert_eq!(rk_number(((-1i32 as u32) << 2) | 2), -1.0);
+        assert_eq!(rk_number((12345 << 2) | 2 | 1), 123.45);
+        assert_eq!(rk_number((1.5f64.to_bits() >> 32) as u32), 1.5);
+        assert_eq!(rk_number((1.5f64.to_bits() >> 32) as u32 | 1), 0.015);
     }
 
     #[test]
