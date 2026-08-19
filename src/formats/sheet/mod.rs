@@ -11,6 +11,8 @@ mod xlsx;
 use crate::error::ConvertError;
 use crate::model::Document;
 use crate::package::archive::probe_ole;
+use crate::package::relationships::{read_rels, rel_type};
+use crate::package::{Package, path};
 use std::io::Cursor;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
@@ -50,7 +52,19 @@ fn container(bytes: &[u8]) -> Option<Container> {
     if zip.index_for_name("xl/workbook.bin").is_some() {
         return Some(Container::Bin);
     }
-    None
+    // A package may name its workbook anywhere, and detection already
+    // resolves the root relationship to find it, so the conventional paths
+    // alone would reject a workbook the reader can open.
+    let mut pkg = Package::open(bytes).ok()?;
+    let target = read_rels(&mut pkg, "_rels/.rels")
+        .ok()?
+        .first_of_type(rel_type::OFFICE_DOCUMENT)
+        .and_then(|rel| path::resolve("", &rel.target).ok())?;
+    match target.path.rsplit('.').next() {
+        Some("bin") => Some(Container::Bin),
+        Some("xml") => Some(Container::Xml),
+        _ => None,
+    }
 }
 
 /// Float formatting at the 15 significant decimal digits a spreadsheet
