@@ -50,7 +50,7 @@ pub(super) fn builtin_code(id: u32) -> Option<&'static str> {
 #[derive(Debug, PartialEq)]
 pub(super) enum Rendered {
     /// Render this value the way an unformatted cell renders.
-    General(f64),
+    General { value: f64, prefix: String, suffix: String },
     /// The section is a date/time format: render the serial as a date, time
     /// of day, or (when `elapsed`) a duration.
     DateTime { elapsed: bool },
@@ -140,8 +140,15 @@ struct NumSpec {
 
 #[derive(Debug)]
 enum Body {
-    General,
-    DateTime { elapsed: bool },
+    /// `General` with the literals that decorate it, which render around the
+    /// value the way an unformatted cell would show it.
+    General {
+        prefix: String,
+        suffix: String,
+    },
+    DateTime {
+        elapsed: bool,
+    },
     Number(NumSpec),
     Text(Vec<Tok>),
 }
@@ -194,21 +201,27 @@ impl NumberFormat {
 
     pub(super) fn format_number(&self, v: f64) -> Rendered {
         if !v.is_finite() {
-            return Rendered::General(v);
+            return Rendered::General { value: v, prefix: String::new(), suffix: String::new() };
         }
         let Some((section, value, auto_minus)) = select(self.numeric_sections(), v) else {
-            return Rendered::General(v);
+            return Rendered::General { value: v, prefix: String::new(), suffix: String::new() };
         };
         match &section.body {
-            Body::General => Rendered::General(value),
+            Body::General { prefix, suffix } => {
+                Rendered::General { value, prefix: prefix.clone(), suffix: suffix.clone() }
+            }
             Body::DateTime { elapsed } => Rendered::DateTime { elapsed: *elapsed },
             Body::Number(spec) => {
                 match render_number(spec, value.abs(), auto_minus && value < 0.0) {
                     Some(s) => Rendered::Text(s),
-                    None => Rendered::General(v),
+                    None => {
+                        Rendered::General { value: v, prefix: String::new(), suffix: String::new() }
+                    }
                 }
             }
-            Body::Text(_) => Rendered::General(v),
+            Body::Text(_) => {
+                Rendered::General { value: v, prefix: String::new(), suffix: String::new() }
+            }
         }
     }
 
@@ -307,6 +320,17 @@ fn split_sections(code: &str) -> Option<Vec<String>> {
 
 const COLORS: &[&str] = &["black", "blue", "cyan", "green", "magenta", "red", "white", "yellow"];
 
+/// The text literal tokens render as, used to carry the decoration around a
+/// `General` body.
+fn decoration(toks: &[Tok]) -> String {
+    toks.iter()
+        .map(|t| match t {
+            Tok::Literal(s) => s.as_str(),
+            _ => " ",
+        })
+        .collect()
+}
+
 fn push_literal(raw: &mut Vec<Tok>, c: char) {
     match raw.last_mut() {
         Some(Tok::Literal(s)) => s.push(c),
@@ -318,6 +342,7 @@ fn parse_section(s: &str) -> Option<Section> {
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
     let mut raw: Vec<Tok> = Vec::new();
+    let mut general_at = 0usize;
     let mut condition: Option<Cond> = None;
     let mut has_date = false;
     let mut elapsed = false;
@@ -388,6 +413,9 @@ fn parse_section(s: &str) -> Option<Section> {
                     return None;
                 }
                 has_general = true;
+                // Adjacent literals merge, so the split has to be recorded
+                // against the rendered text rather than a token index.
+                general_at = decoration(&raw).chars().count();
                 i += 7;
             }
             'a' | 'A' => {
@@ -429,7 +457,9 @@ fn parse_section(s: &str) -> Option<Section> {
         if raw.iter().any(|t| !matches!(t, Tok::Literal(_) | Tok::Skip)) {
             return None;
         }
-        Body::General
+        let text = decoration(&raw);
+        let split = text.char_indices().nth(general_at).map_or(text.len(), |(b, _)| b);
+        Body::General { prefix: text[..split].to_string(), suffix: text[split..].to_string() }
     } else if has_date {
         if raw.iter().any(|t| matches!(t, Tok::At | Tok::Exp { .. } | Tok::BareDigits(_))) {
             return None;
@@ -770,6 +800,10 @@ fn emit(
     let min_frac = frac_places.iter().rposition(|&p| p == '0').map_or(0, |i| i + 1);
     let keep_frac = frac_digits.trim_end_matches('0').len().max(min_frac);
 
+    // The point shows only when something follows it: kept digits, or the
+    // alignment spaces a `?` place emits.
+    let show_decimal = keep_frac > 0 || frac_places.contains(&'?');
+
     let mut out = String::new();
     let (mut int_i, mut frac_i, mut exp_i) = (0usize, 0usize, 0usize);
     let mut int_remaining = total_int;
@@ -800,7 +834,11 @@ fn emit(
                 exp_i += 1;
             }
             Tok::Digit { .. } => {}
-            Tok::Decimal => out.push('.'),
+            Tok::Decimal => {
+                if show_decimal {
+                    out.push('.');
+                }
+            }
             Tok::Percent => out.push('%'),
             Tok::Literal(s) => out.push_str(s),
             Tok::Exp { plus } => {
@@ -971,7 +1009,8 @@ mod tests {
     fn digit_placeholders_pad_per_kind() {
         assert_eq!(fmt("00000", 42.0), "00042");
         assert_eq!(fmt("#", 0.0), "");
-        assert_eq!(fmt("0.##", 5.0), "5.");
+        assert_eq!(fmt("0.##", 5.0), "5");
+        assert_eq!(fmt("0.??", 5.0), "5.  ");
         assert_eq!(fmt("0.0#", 5.25), "5.25");
         assert_eq!(fmt("0.00", 5.255), "5.26");
         assert_eq!(fmt("???", 42.0), " 42");
@@ -1049,12 +1088,29 @@ mod tests {
     }
 
     #[test]
+    fn general_keeps_the_literals_around_it() {
+        // `General"kg"` shows the unformatted value with its unit, so the
+        // literals cannot be dropped on the way through.
+        let f = NumberFormat::parse(r#""~"General" kg""#).unwrap();
+        assert_eq!(
+            f.format_number(1234.5),
+            Rendered::General { value: 1234.5, prefix: "~".into(), suffix: " kg".into() }
+        );
+    }
+
+    #[test]
     fn general_renders_generally() {
         let f = NumberFormat::parse("General").unwrap();
-        assert_eq!(f.format_number(3.5), Rendered::General(3.5));
+        assert_eq!(
+            f.format_number(3.5),
+            Rendered::General { value: 3.5, prefix: String::new(), suffix: String::new() }
+        );
         // The positional negative section receives the magnitude.
         let f = NumberFormat::parse("General;General").unwrap();
-        assert_eq!(f.format_number(-3.5), Rendered::General(3.5));
+        assert_eq!(
+            f.format_number(-3.5),
+            Rendered::General { value: 3.5, prefix: String::new(), suffix: String::new() }
+        );
     }
 
     #[test]
@@ -1073,7 +1129,10 @@ mod tests {
         assert_eq!(f.format_text("hi"), Some("* hi *".to_string()));
         let f = NumberFormat::parse("@").unwrap();
         assert_eq!(f.format_text("hi"), Some("hi".to_string()));
-        assert_eq!(f.format_number(3.5), Rendered::General(3.5));
+        assert_eq!(
+            f.format_number(3.5),
+            Rendered::General { value: 3.5, prefix: String::new(), suffix: String::new() }
+        );
         let f = NumberFormat::parse("0.00").unwrap();
         assert_eq!(f.format_text("hi"), None);
     }

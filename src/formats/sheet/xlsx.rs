@@ -367,7 +367,9 @@ pub(super) fn render_number(fmt: &CellFormat, n: f64, date1904: bool) -> String 
     let text = match fmt {
         CellFormat::General => format_float(n),
         CellFormat::Fmt(f) => match f.format_number(n) {
-            Rendered::General(x) => format_float(x),
+            Rendered::General { value, prefix, suffix } => {
+                format!("{prefix}{}{suffix}", format_float(value))
+            }
             Rendered::Text(s) => s,
             Rendered::DateTime { elapsed } => render_serial(n, elapsed, date1904),
         },
