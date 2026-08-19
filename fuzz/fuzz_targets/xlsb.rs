@@ -12,12 +12,13 @@ use std::io::{Cursor, Write};
 fuzz_target!(|data: &[u8]| {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let opts = zip::write::SimpleFileOptions::default();
-    let parts: [(&str, &[u8]); 7] = [
+    let parts: [(&str, &[u8]); 8] = [
         ("[Content_Types].xml", CONTENT_TYPES.as_bytes()),
         ("_rels/.rels", RELS.as_bytes()),
         ("xl/workbook.bin", WORKBOOK),
         ("xl/_rels/workbook.bin.rels", WORKBOOK_RELS.as_bytes()),
         ("xl/worksheets/sheet1.bin", data),
+        ("xl/worksheets/sheet2.bin", data),
         ("xl/styles.bin", data),
         ("xl/sharedStrings.bin", data),
     ];
