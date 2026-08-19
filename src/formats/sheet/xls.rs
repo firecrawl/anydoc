@@ -115,6 +115,11 @@ fn next_record<'a>(
     records: &mut u64,
 ) -> Result<Option<Record<'a>>, ConvertError> {
     let Some(rec) = record_at(data, pos) else {
+        // Trailing bytes too short to form a record: the stream was cut, so
+        // whatever was read is partial rather than complete.
+        if pos < data.len() {
+            log::warn!("workbook stream ends mid-record at byte {pos}; output may be partial");
+        }
         return Ok(None);
     };
     *records += 1;
