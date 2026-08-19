@@ -3,7 +3,8 @@
 use crate::model::{ImageSource, Inline, LinkTarget, Style, inlines_are_empty};
 use crate::render::markdown::Ctx;
 use crate::render::markdown::escape::{
-    EscapeOpts, InlineContext, backtick_fence, escape_text, escape_url_as_text, format_url,
+    EscapeOpts, InlineContext, backtick_fence, escape_cell_pipes, escape_text, escape_url_as_text,
+    format_url,
 };
 use std::borrow::Cow;
 use std::fmt::Write as _;
@@ -243,30 +244,4 @@ pub(crate) fn push_code_span(text: &str, ctx: InlineContext, out: &mut String) {
         _ => text,
     };
     let _ = write!(out, "{fence}{pad}{text}{pad}{fence}");
-}
-
-/// Escape the pipes in a code span's text so the row cannot split on them.
-///
-/// A backslash run already sitting in front of a pipe would pair off with the
-/// escape and leave the pipe bare, so it is doubled to keep the escape intact.
-/// That doubling survives into the rendered code span: GFM has no encoding for
-/// a code span that contains a backslash immediately before a pipe, and an
-/// intact row is worth more than the exact backslash count.
-fn escape_cell_pipes(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut backslashes = 0;
-    for c in text.chars() {
-        match c {
-            '|' => {
-                for _ in 0..=backslashes {
-                    out.push('\\');
-                }
-                backslashes = 0;
-            }
-            '\\' => backslashes += 1,
-            _ => backslashes = 0,
-        }
-        out.push(c);
-    }
-    out
 }
