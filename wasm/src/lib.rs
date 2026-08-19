@@ -99,8 +99,20 @@ pub fn format_from_path(path: &str) -> Option<Format> {
 ///
 /// Throws an `Error` carrying a `ConvertErrorCode` on `code`.
 #[wasm_bindgen(js_name = toMarkdownBytes)]
-pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String, JsValue> {
-    anydoc::to_markdown_bytes(bytes, format.map(anydoc::Format::from)).map_err(convert_error)
+pub fn to_markdown_bytes(
+    bytes: &[u8],
+    format: Option<Format>,
+    password: Option<String>,
+) -> Result<String, JsValue> {
+    match password.as_deref() {
+        Some(password) => anydoc::to_markdown_bytes_with_password(
+            bytes,
+            format.map(anydoc::Format::from),
+            password,
+        ),
+        None => anydoc::to_markdown_bytes(bytes, format.map(anydoc::Format::from)),
+    }
+    .map_err(convert_error)
 }
 
 /// Parse an in-memory document into the document model, which also carries
@@ -111,9 +123,18 @@ pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String,
 ///
 /// Throws an `Error` carrying a `ConvertErrorCode` on `code`.
 #[wasm_bindgen(js_name = toDocument, unchecked_return_type = "Document")]
-pub fn to_document(bytes: &[u8], format: Option<Format>) -> Result<JsValue, JsValue> {
-    let document =
-        anydoc::to_document(bytes, format.map(anydoc::Format::from)).map_err(convert_error)?;
+pub fn to_document(
+    bytes: &[u8],
+    format: Option<Format>,
+    password: Option<String>,
+) -> Result<JsValue, JsValue> {
+    let document = match password.as_deref() {
+        Some(password) => {
+            anydoc::to_document_with_password(bytes, format.map(anydoc::Format::from), password)
+        }
+        None => anydoc::to_document(bytes, format.map(anydoc::Format::from)),
+    }
+    .map_err(convert_error)?;
     serde_wasm_bindgen::to_value(&Document::from(document))
         .map_err(|error| js_sys::Error::new(&error.to_string()).into())
 }

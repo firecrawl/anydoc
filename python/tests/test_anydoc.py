@@ -13,6 +13,7 @@ OUTLINE = FIXTURES / "docx" / "handmade-outline.docx"
 RICH = FIXTURES / "docx" / "handmade-rich.docx"
 CSV = FIXTURES / "csv" / "sheet.csv"
 ENCRYPTED = FIXTURES / "malformed" / "encrypted--errors.odt"
+ENCRYPTED_DOCX = FIXTURES / "encrypted" / "password-test.docx"
 ZIPBOMB = FIXTURES / "abuse" / "zipbomb--errors.docx"
 
 
@@ -24,6 +25,12 @@ class AnydocTest(unittest.TestCase):
     def test_to_markdown_bytes_converts_in_memory(self):
         markdown = anydoc.to_markdown_bytes(RICH.read_bytes(), "docx")
         self.assertIn("| Quarter | Widgets |", markdown)
+
+    def test_password_protected_ooxml_converts_with_the_password(self):
+        data = ENCRYPTED_DOCX.read_bytes()
+        self.assertTrue(anydoc.to_markdown_bytes(data, password="testPassword"))
+        with self.assertRaises(anydoc.EncryptedError):
+            anydoc.to_markdown_bytes(data, password="wrong")
 
     def test_to_markdown_bytes_detects_the_format_when_none_is_named(self):
         markdown = anydoc.to_markdown_bytes(RICH.read_bytes())

@@ -34,6 +34,9 @@ The package is built with `wasm-pack --target web`: it loads with a plain `<scri
 
 Calls are synchronous: wasm runs single-threaded on the calling thread, so convert on a worker if the main thread must stay responsive.
 
+Password-protected OOXML can be converted by passing the password as the third
+argument to `toMarkdownBytes(bytes, format, password)`.
+
 ## Errors
 
 A conversion throws only when no meaningful Markdown could come out of the bytes. The thrown value is an `Error` whose `code` names what went wrong:

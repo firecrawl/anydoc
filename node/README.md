@@ -32,7 +32,11 @@ The package ships an `anydoc` command, so `npx` converts a document with no inst
 npx @firecrawl/anydoc report.docx               # Markdown to stdout
 npx @firecrawl/anydoc slides.pptx -o slides.md  # or to a file
 npx @firecrawl/anydoc - --format csv < data.csv # read stdin
+npx @firecrawl/anydoc report.docx --password secret
 ```
+
+Set `ANYDOC_PASSWORD` instead of using `--password` when the password should
+not appear in shell history or the process list.
 
 Markdown goes to stdout, errors to stderr, and `anydoc --help` covers the rest.
 

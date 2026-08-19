@@ -13,7 +13,7 @@ Usage:
 
 Converts one document per invocation and writes the Markdown to stdout.
 Pass - as the input to read the document from stdin. Never prompts; all
-diagnostics go to stderr.
+diagnostics go to stderr. ANYDOC_PASSWORD is used when --password is omitted.
 
 Options:
   -o, --output <path>    Write the Markdown to <path> instead of stdout
@@ -21,6 +21,7 @@ Options:
                          ${FORMATS}
                          (extension aliases like xls, docm, ppsx resolve
                          to these)
+  -p, --password <value> Decrypt a password-protected OOXML document
   -h, --help             Print this help and exit
   -V, --version          Print the version and exit
 
@@ -50,7 +51,7 @@ function fail(code, message) {
 }
 
 function parseArgs(argv) {
-  const args = { input: null, output: null, format: null }
+  const args = { input: null, output: null, format: null, password: null }
   let positionalOnly = false
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i]
@@ -95,6 +96,10 @@ function parseArgs(argv) {
       case '--format':
         args.format = value()
         break
+      case '-p':
+      case '--password':
+        args.password = value()
+        break
       default:
         fail(USAGE_ERROR, `unknown option '${arg}' (see anydoc --help)`)
     }
@@ -133,12 +138,13 @@ async function main() {
 
   let markdown
   try {
+    const password = args.password ?? process.env.ANYDOC_PASSWORD
     if (args.input === '-') {
-      markdown = await toMarkdownBytes(await readStdin(), format)
+      markdown = await toMarkdownBytes(await readStdin(), format, password)
     } else if (format !== undefined) {
-      markdown = await toMarkdownBytes(await readFile(args.input), format)
+      markdown = await toMarkdownBytes(await readFile(args.input), format, password)
     } else {
-      markdown = await toMarkdown(args.input)
+      markdown = await toMarkdown(args.input, password)
     }
   } catch (error) {
     fail(CONVERSION_ERROR, error.message)

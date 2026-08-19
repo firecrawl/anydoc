@@ -18,6 +18,7 @@ pub use error::ConvertError;
 
 use render::markdown::document_to_markdown;
 
+use std::borrow::Cow;
 use std::path::Path;
 
 /// Input format. Selects the parser; container variants that share a parser
@@ -98,7 +99,19 @@ impl Format {
 /// file content ([`Format::from_bytes`]); the extension is the fallback for
 /// signature-less formats (CSV) and unrecognizable containers.
 pub fn to_markdown(path: impl AsRef<Path>) -> Result<String, ConvertError> {
-    let path = path.as_ref();
+    to_markdown_path(path.as_ref(), None)
+}
+
+/// Convert a password-protected document file to Markdown. The password is
+/// used only when the input is an encrypted OOXML package.
+pub fn to_markdown_with_password(
+    path: impl AsRef<Path>,
+    password: &str,
+) -> Result<String, ConvertError> {
+    to_markdown_path(path.as_ref(), Some(password))
+}
+
+fn to_markdown_path(path: &Path, password: Option<&str>) -> Result<String, ConvertError> {
     let bytes = std::fs::read(path)?;
     let Some(format) = Format::from_bytes(&bytes).or_else(|| Format::from_path(path)) else {
         return Err(ConvertError::Unsupported(format!(
@@ -106,7 +119,7 @@ pub fn to_markdown(path: impl AsRef<Path>) -> Result<String, ConvertError> {
             path.display()
         )));
     };
-    to_markdown_bytes(&bytes, format)
+    to_markdown_bytes_impl(&bytes, Some(format), password)
 }
 
 /// Convert an in-memory document to Markdown. Pass a [`Format`] to select the
@@ -116,13 +129,31 @@ pub fn to_markdown_bytes(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
 ) -> Result<String, ConvertError> {
-    let format = resolve_format(bytes, format.into())?;
+    to_markdown_bytes_impl(bytes, format.into(), None)
+}
+
+/// Convert an in-memory document to Markdown, decrypting an encrypted OOXML
+/// package with `password` before detecting and parsing its inner format.
+pub fn to_markdown_bytes_with_password(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+    password: &str,
+) -> Result<String, ConvertError> {
+    to_markdown_bytes_impl(bytes, format.into(), Some(password))
+}
+
+fn to_markdown_bytes_impl(
+    bytes: &[u8],
+    format: Option<Format>,
+    password: Option<&str>,
+) -> Result<String, ConvertError> {
+    let (bytes, format) = prepare_input(bytes, format, password)?;
     // PDFs convert to Markdown directly (pdf-inspector) without passing
     // through the document model.
     if format == Format::Pdf {
-        return formats::pdf::to_markdown(bytes);
+        return formats::pdf::to_markdown(&bytes);
     }
-    Ok(document_to_markdown(&to_document(bytes, format)?))
+    Ok(document_to_markdown(&formats::parse(&bytes, format)?))
 }
 
 /// Parse an in-memory document into the document model. Pass a [`Format`] to
@@ -134,7 +165,46 @@ pub fn to_document(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
 ) -> Result<model::Document, ConvertError> {
-    formats::parse(bytes, resolve_format(bytes, format.into())?)
+    to_document_impl(bytes, format.into(), None)
+}
+
+/// Parse an in-memory document into the document model, decrypting an
+/// encrypted OOXML package with `password` first.
+pub fn to_document_with_password(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+    password: &str,
+) -> Result<model::Document, ConvertError> {
+    to_document_impl(bytes, format.into(), Some(password))
+}
+
+fn to_document_impl(
+    bytes: &[u8],
+    format: Option<Format>,
+    password: Option<&str>,
+) -> Result<model::Document, ConvertError> {
+    let (bytes, format) = prepare_input(bytes, format, password)?;
+    formats::parse(&bytes, format)
+}
+
+fn prepare_input<'a>(
+    bytes: &'a [u8],
+    format: Option<Format>,
+    password: Option<&str>,
+) -> Result<(Cow<'a, [u8]>, Format), ConvertError> {
+    if matches!(package::archive::probe_ole(bytes), Some(ConvertError::Encrypted)) {
+        let Some(password) = password else {
+            return Err(ConvertError::Encrypted);
+        };
+        let decrypted = office_crypto::decrypt_from_bytes(bytes.to_vec(), password)
+            .map_err(|_| ConvertError::Encrypted)?;
+        let Some(format) = Format::from_bytes(&decrypted) else {
+            return Err(ConvertError::Encrypted);
+        };
+        return Ok((Cow::Owned(decrypted), format));
+    }
+
+    Ok((Cow::Borrowed(bytes), resolve_format(bytes, format)?))
 }
 
 fn resolve_format(bytes: &[u8], format: Option<Format>) -> Result<Format, ConvertError> {

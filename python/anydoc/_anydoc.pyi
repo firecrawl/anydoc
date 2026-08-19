@@ -53,17 +53,25 @@ def format_from_extension(extension: str) -> Format | None:
 def format_from_path(path: str | os.PathLike[str]) -> Format | None:
     """The format a path's extension names."""
 
-def to_markdown(path: str | os.PathLike[str]) -> str:
+def to_markdown(path: str | os.PathLike[str], password: str | None = None) -> str:
     """Convert a document file to Markdown. The format is detected from the
     file content; the extension is the fallback for signature-less formats
     (CSV) and unrecognizable containers."""
 
-def to_markdown_bytes(data: bytes | bytearray, format: Format | None = None) -> str:
+def to_markdown_bytes(
+    data: bytes | bytearray,
+    format: Format | None = None,
+    password: str | None = None,
+) -> str:
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
     name explicitly."""
 
-def to_document(data: bytes | bytearray, format: Format | None = None) -> Document:
+def to_document(
+    data: bytes | bytearray,
+    format: Format | None = None,
+    password: str | None = None,
+) -> Document:
     """Parse an in-memory document into the document model, which also
     carries the embedded assets. Without a format, it is detected from the
     content.

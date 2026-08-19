@@ -97,8 +97,8 @@ pub fn format_from_path(path: String) -> Option<Format> {
 /// Rejects with an `Error` carrying a `ConvertErrorCode` on `code`; a file
 /// that cannot be read is `'io'`.
 #[napi(ts_return_type = "Promise<string>")]
-pub fn to_markdown(path: String) -> AsyncTask<MarkdownFileTask> {
-    AsyncTask::new(MarkdownFileTask { path, failure: Failure::default() })
+pub fn to_markdown(path: String, password: Option<String>) -> AsyncTask<MarkdownFileTask> {
+    AsyncTask::new(MarkdownFileTask { path, password, failure: Failure::default() })
 }
 
 /// Convert an in-memory document to Markdown. Without a format, it is
@@ -110,10 +110,12 @@ pub fn to_markdown(path: String) -> AsyncTask<MarkdownFileTask> {
 pub fn to_markdown_bytes(
     bytes: Uint8Array,
     format: Option<Format>,
+    password: Option<String>,
 ) -> AsyncTask<MarkdownBytesTask> {
     AsyncTask::new(MarkdownBytesTask {
         bytes: bytes.to_vec(),
         format: format.map(Into::into),
+        password,
         failure: Failure::default(),
     })
 }
@@ -126,10 +128,15 @@ pub fn to_markdown_bytes(
 ///
 /// Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
 #[napi(ts_return_type = "Promise<Document>")]
-pub fn to_document(bytes: Uint8Array, format: Option<Format>) -> AsyncTask<DocumentTask> {
+pub fn to_document(
+    bytes: Uint8Array,
+    format: Option<Format>,
+    password: Option<String>,
+) -> AsyncTask<DocumentTask> {
     AsyncTask::new(DocumentTask {
         bytes: bytes.to_vec(),
         format: format.map(Into::into),
+        password,
         failure: Failure::default(),
     })
 }
@@ -162,6 +169,7 @@ impl Failure {
 
 pub struct MarkdownFileTask {
     path: String,
+    password: Option<String>,
     failure: Failure,
 }
 
@@ -170,7 +178,11 @@ impl Task for MarkdownFileTask {
     type JsValue = String;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        anydoc::to_markdown(&self.path).map_err(|e| self.failure.capture(e))
+        match self.password.as_deref() {
+            Some(password) => anydoc::to_markdown_with_password(&self.path, password),
+            None => anydoc::to_markdown(&self.path),
+        }
+        .map_err(|e| self.failure.capture(e))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -185,6 +197,7 @@ impl Task for MarkdownFileTask {
 pub struct MarkdownBytesTask {
     bytes: Vec<u8>,
     format: Option<anydoc::Format>,
+    password: Option<String>,
     failure: Failure,
 }
 
@@ -193,7 +206,13 @@ impl Task for MarkdownBytesTask {
     type JsValue = String;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        anydoc::to_markdown_bytes(&self.bytes, self.format).map_err(|e| self.failure.capture(e))
+        match self.password.as_deref() {
+            Some(password) => {
+                anydoc::to_markdown_bytes_with_password(&self.bytes, self.format, password)
+            }
+            None => anydoc::to_markdown_bytes(&self.bytes, self.format),
+        }
+        .map_err(|e| self.failure.capture(e))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -208,6 +227,7 @@ impl Task for MarkdownBytesTask {
 pub struct DocumentTask {
     bytes: Vec<u8>,
     format: Option<anydoc::Format>,
+    password: Option<String>,
     failure: Failure,
 }
 
@@ -216,7 +236,11 @@ impl Task for DocumentTask {
     type JsValue = Document;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        anydoc::to_document(&self.bytes, self.format).map_err(|e| self.failure.capture(e))
+        match self.password.as_deref() {
+            Some(password) => anydoc::to_document_with_password(&self.bytes, self.format, password),
+            None => anydoc::to_document(&self.bytes, self.format),
+        }
+        .map_err(|e| self.failure.capture(e))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
