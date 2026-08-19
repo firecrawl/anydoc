@@ -44,32 +44,33 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     // still publication content, and unusable parts degrade at parse time.
     // Intra-book links target these; links to any other resource stay
     // Relative.
-    let spine_hrefs: Vec<&str> = opf
+    // A part holds one position in a reading order, and each repeat would
+    // cost another parse of it and another copy of its anchor.
+    let mut spine_entries = 0usize;
+    let mut spine_paths: Vec<String> = Vec::new();
+    let mut spine_parts: HashSet<String> = HashSet::new();
+    for href in opf
         .descendants_any("itemref")
         .filter_map(|ir| ir.attr_any("idref"))
         .filter_map(|idref| manifest.get(idref))
         .map(|(href, _)| href.as_str())
-        .collect();
-    let spine_parts: HashSet<String> = spine_hrefs
-        .iter()
-        .filter_map(|href| path::resolve(&opf_path, href).ok().map(|t| t.path))
-        .collect();
+    {
+        spine_entries += 1;
+        let Ok(target) = path::resolve(&opf_path, href) else {
+            log::warn!("skipping chapter with unresolvable href {href:?}");
+            continue;
+        };
+        if spine_parts.insert(target.path.clone()) {
+            spine_paths.push(target.path);
+        }
+    }
 
     let assets = RefCell::new(AssetSink::new());
     let mut css_cache: HashMap<String, Option<String>> = HashMap::new();
-    let mut failed = 0usize;
-    for href in &spine_hrefs {
-        let chapter_path = match path::resolve(&opf_path, href) {
-            Ok(t) => t.path,
-            Err(e) => {
-                log::warn!("skipping chapter with unresolvable href {href:?}: {e}");
-                failed += 1;
-                continue;
-            }
-        };
-        let Some(tree) = pkg.borrow_mut().optional_xml_part(&chapter_path)? else {
+    let mut converted = 0usize;
+    for chapter_path in &spine_paths {
+        let Some(tree) = pkg.borrow_mut().optional_xml_part(chapter_path)? else {
             log::warn!("skipping unusable chapter {chapter_path}");
-            failed += 1;
             continue;
         };
         let Some(body) = tree
@@ -78,10 +79,9 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             .and_then(|h| h.child_elems().find(|e| e.local == "body"))
         else {
             log::warn!("skipping chapter {chapter_path}: no body element");
-            failed += 1;
             continue;
         };
-        let css = chapter_stylesheet(&tree, &chapter_path, &pkg, &mut css_cache)?;
+        let css = chapter_stylesheet(&tree, chapter_path, &pkg, &mut css_cache)?;
         let ctx = ChapterCtx {
             pkg: &pkg,
             assets: &assets,
@@ -91,8 +91,9 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         // Chapter-start anchor: renders only when a link targets this chapter.
         doc.blocks.push(Block::Paragraph(vec![Inline::Anchor(chapter_path.clone())]));
         doc.blocks.extend(crate::shared::html::to_blocks(body, &css, &ctx)?);
+        converted += 1;
     }
-    if !spine_hrefs.is_empty() && failed == spine_hrefs.len() {
+    if spine_entries > 0 && converted == 0 {
         return Err(ConvertError::malformed("no chapter in the book could be read"));
     }
 
@@ -204,5 +205,61 @@ fn scoped(chapter_path: &str, fragment: Option<&str>) -> AnchorId {
     match fragment {
         Some(f) if !f.is_empty() => format!("{chapter_path}#{f}"),
         _ => chapter_path.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    #[test]
+    fn a_part_repeated_across_the_spine_is_read_once() {
+        let items: String = (0..64)
+            .map(|i| {
+                format!(r#"<item id="i{i}" href="ch.xhtml" media-type="application/xhtml+xml"/>"#)
+            })
+            .collect();
+        let refs: String = (0..64).map(|i| format!(r#"<itemref idref="i{i}"/>"#)).collect();
+        let parts = [
+            (
+                "META-INF/container.xml",
+                r#"<?xml version="1.0"?>
+                <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                <rootfiles><rootfile full-path="c.opf"
+                media-type="application/oebps-package+xml"/></rootfiles></container>"#
+                    .to_string(),
+            ),
+            (
+                "c.opf",
+                format!(
+                    r#"<?xml version="1.0"?>
+                    <package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/>
+                    <manifest>{items}</manifest><spine>{refs}</spine></package>"#
+                ),
+            ),
+            (
+                "ch.xhtml",
+                r#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">
+                <body><p>chapter text</p></body></html>"#
+                    .to_string(),
+            ),
+        ];
+        let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, body) in &parts {
+            w.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(body.as_bytes()).unwrap();
+        }
+
+        let doc = parse(&w.finish().unwrap().into_inner()).unwrap();
+        let text = doc
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(inlines) => Some(crate::model::inlines_to_plain_text(inlines)),
+                _ => None,
+            })
+            .collect::<String>();
+        assert_eq!(text, "chapter text", "sixty-four itemrefs naming one part");
     }
 }
