@@ -365,9 +365,11 @@ fn date_parts(runs: &[char], elapsed: bool) -> DateParts {
             _ => {}
         }
     }
-    // An elapsed span is a duration, and a section with no run at all came
-    // from a bracket alone, so treat both as a time.
+    // An elapsed span is a duration whatever else the section names (`[m]`
+    // is elapsed minutes, never months), and a section with no run at all
+    // came from a bracket alone: both are a time and only a time.
     if elapsed || (!parts.date && !parts.time) {
+        parts.date = false;
         parts.time = true;
     }
     parts
@@ -1293,6 +1295,8 @@ mod tests {
         assert_eq!(parts("h:mm"), (false, true, false));
         assert_eq!(parts("yyyy-mm-dd hh:mm:ss"), (true, true, false));
         assert_eq!(parts("[h]:mm:ss"), (false, true, true));
+        // A lone elapsed `m` is minutes with no neighbour to say so.
+        assert_eq!(parts("[m]"), (false, true, true));
         // `m` is minutes beside an hour or a second, and months otherwise.
         assert_eq!(parts("mm:ss"), (false, true, false));
         assert_eq!(parts("mm/dd/yyyy"), (true, false, false));
