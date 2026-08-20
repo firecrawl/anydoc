@@ -58,13 +58,15 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let multi_sheet = visible.len() > 1;
     let mut doc = Document::default();
     let mut failed = 0usize;
+    // One budget for the workbook, so sheets cannot multiply the cap.
+    let mut slots = 0u64;
     for sheet in &visible {
         let Some(content) = read_sheet(&data, &globals, sheet.offset, &mut records)? else {
             log::warn!("skipping unreadable sheet {:?}", sheet.name);
             failed += 1;
             continue;
         };
-        let Some(table) = build_table(content)? else {
+        let Some(table) = build_table(content, &mut slots)? else {
             continue;
         };
         if multi_sheet {

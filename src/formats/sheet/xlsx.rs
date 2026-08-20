@@ -79,6 +79,8 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let multi_sheet = sheets.len() > 1;
     let mut doc = Document::default();
     let mut failed = 0usize;
+    // One budget for the workbook, so sheets cannot multiply the cap.
+    let mut slots = 0u64;
     for (name, part) in &sheets {
         let worksheet = pkg.optional_xml_part(part)?;
         let Some(worksheet) = worksheet.as_ref().and_then(|r| r.find(ns::SML, "worksheet")) else {
@@ -87,7 +89,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             continue;
         };
         let content = read_sheet(worksheet, &shared, &styles, date1904);
-        let Some(table) = build_table(content)? else {
+        let Some(table) = build_table(content, &mut slots)? else {
             continue;
         };
         if multi_sheet {
@@ -389,7 +391,10 @@ pub(super) fn format_as_text(fmt: &CellFormat, text: &str) -> String {
 /// widened to cover intersecting merge regions (a merge anchored on the
 /// only populated cell must survive at full size), and merges remapped onto
 /// the surviving rows and columns.
-pub(super) fn build_table(mut sheet: SheetContent) -> Result<Option<Table>, ConvertError> {
+pub(super) fn build_table(
+    mut sheet: SheetContent,
+    slots: &mut u64,
+) -> Result<Option<Table>, ConvertError> {
     // Hidden coordinates as sorted lists: lookups and first-visible scans
     // stay logarithmic, so an adversarial pile of hidden rows or column
     // ranges cannot force quadratic work.
@@ -447,13 +452,14 @@ pub(super) fn build_table(mut sheet: SheetContent) -> Result<Option<Table>, Conv
     if row_map.is_empty() || col_map.is_empty() {
         return Ok(None);
     }
-    // Charged before materializing: the extent is derived from cell
-    // coordinates, so a handful of cells can describe a whole sheet.
-    let slots = row_map.len() as u64 * col_map.len() as u64;
-    if slots > limits::MAX_GRID_SLOTS {
+    // Charged before materializing, and across the workbook rather than per
+    // sheet: the extent comes from cell coordinates, so a handful of cells
+    // describes a whole sheet and a handful of sheets multiplies it.
+    *slots = slots.saturating_add(row_map.len() as u64 * col_map.len() as u64);
+    if *slots > limits::MAX_GRID_SLOTS {
         return Err(ConvertError::ResourceLimit {
             limit: "max_grid_slots",
-            detail: format!("sheet extent covers {slots} grid positions"),
+            detail: format!("workbook extent covers {slots} grid positions"),
         });
     }
 
@@ -961,12 +967,21 @@ mod tests {
     }
 
     #[test]
-    fn a_sparse_sheet_cannot_materialize_an_unbounded_grid() {
+    fn the_grid_budget_spans_the_whole_workbook() {
         // Two cells at opposite corners describe the whole sheet, so the
         // extent has to be charged before any position is built.
         let wb = one_sheet(
             r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c></row><row r="1048576"><c r="XFD1048576" t="inlineStr"><is><t>b</t></is></c></row></sheetData>"#,
         );
+        let err = parse(&wb.build()).unwrap_err();
+        assert!(
+            matches!(err, ConvertError::ResourceLimit { limit: "max_grid_slots", .. }),
+            "got {err:?}"
+        );
+
+        // Sheets accumulate, so a pile of them cannot each sit under the cap.
+        let half = r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c></row><row r="150000"><c r="P150000" t="inlineStr"><is><t>b</t></is></c></row></sheetData>"#;
+        let wb = Wb { sheets: vec![("A", "", half), ("B", "", half)], ..Wb::default() };
         let err = parse(&wb.build()).unwrap_err();
         assert!(
             matches!(err, ConvertError::ResourceLimit { limit: "max_grid_slots", .. }),

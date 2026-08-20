@@ -80,6 +80,8 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let multi_sheet = sheets.len() > 1;
     let mut doc = Document::default();
     let mut failed = 0usize;
+    // One budget for the workbook, so sheets cannot multiply the cap.
+    let mut slots = 0u64;
     for (name, part) in &sheets {
         let content =
             pkg.optional_part(part)?.map(|bytes| read_sheet(&bytes, &shared, &xfs, date1904));
@@ -97,7 +99,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
                 continue;
             }
         };
-        let Some(table) = build_table(content)? else {
+        let Some(table) = build_table(content, &mut slots)? else {
             continue;
         };
         if multi_sheet {
