@@ -2,6 +2,7 @@
 
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, TableKind};
+use crate::package::limits;
 use crate::shared::header::resolve_header_rows;
 use crate::shared::text::clean_text;
 use calamine::{Data, Dimensions, Reader, Sheets, open_workbook_auto_from_rs};
@@ -49,28 +50,44 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         let mut origins: HashMap<(usize, usize), (u32, u32)> = HashMap::new();
         let mut covered: HashSet<(usize, usize)> = HashSet::new();
         for d in merged.get(name.as_str()).map(Vec::as_slice).unwrap_or_default() {
-            // Intersect the absolute merged region with the used range first:
-            // a region wholly above or left of the range must not saturate
-            // onto relative (0,0), and positions outside the range are never
-            // materialized (a crafted region list must not force insertions
-            // beyond the cells that actually exist).
+            // A region participates only if it intersects the used range: a
+            // region wholly above or left of the range must not saturate
+            // onto relative (0,0). The clamped top-left decides the origin.
             let (row0, col0) = (d.start.0.max(start.0), d.start.1.max(start.1));
-            let row_end = (d.end.0 as u64 + 1).min(start.0 as u64 + height as u64);
-            let col_end = (d.end.1 as u64 + 1).min(start.1 as u64 + width as u64);
-            if (row0 as u64) >= row_end || (col0 as u64) >= col_end {
+            let clipped_row_end = (d.end.0 as u64 + 1).min(start.0 as u64 + height as u64);
+            let clipped_col_end = (d.end.1 as u64 + 1).min(start.1 as u64 + width as u64);
+            if (row0 as u64) >= clipped_row_end || (col0 as u64) >= clipped_col_end {
                 continue;
             }
-            // Translate the non-empty intersection to range-relative form.
+            // The span keeps the region's full extent past the used range: a
+            // merge anchored on populated cells but reaching into empty rows
+            // or columns is source structure and must not silently collapse
+            // to the populated rectangle. A region whose full extent would
+            // blow the expansion budget (a crafted or whole-column merge)
+            // degrades to today's clipped form instead — the file still
+            // converts, it just loses the overhang.
             let r0 = (row0 - start.0) as usize;
             let c0 = (col0 - start.1) as usize;
-            let r1 = (row_end - start.0 as u64) as usize;
-            let c1 = (col_end - start.1 as u64) as usize;
+            let full_row_end = d.end.0 as u64 + 1 - start.0 as u64;
+            let full_col_end = d.end.1 as u64 + 1 - start.1 as u64;
+            let area = (full_row_end - r0 as u64).saturating_mul(full_col_end - c0 as u64);
+            let (r1, c1) = if area <= limits::MAX_EXPANSION {
+                (full_row_end as usize, full_col_end as usize)
+            } else {
+                (
+                    (clipped_row_end - start.0 as u64) as usize,
+                    (clipped_col_end - start.1 as u64) as usize,
+                )
+            };
             if r1 - r0 == 1 && c1 - c0 == 1 {
                 continue;
             }
             origins.insert((r0, c0), ((c1 - c0) as u32, (r1 - r0) as u32));
-            for r in r0..r1 {
-                for c in c0..c1 {
+            // Covered markers are consumed only inside the used range (the
+            // cell loop below); positions past it are materialized by
+            // `finish`, so the set stays bounded by the cells that exist.
+            for r in r0..r1.min(height) {
+                for c in c0..c1.min(width) {
                     if (r, c) != (r0, c0) {
                         covered.insert((r, c));
                     }
@@ -98,6 +115,12 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
                     None => builder.place(cell)?,
                 }
             }
+        }
+        // Merges reaching below the used range need rows to land in;
+        // `finish` materializes their covered positions there.
+        let deepest = origins.iter().map(|(&(r, _), &(_, rs))| r + rs as usize).max().unwrap_or(0);
+        for _ in height..deepest {
+            builder.next_row();
         }
         // A spreadsheet marks no header row, so the shape of the data decides.
         let mut table = builder.finish(TableKind::Data);
@@ -216,6 +239,11 @@ mod tests {
         let sheet = format!(
             r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="11"><c r="D11" t="inlineStr"><is><t>x</t></is></c><c r="E11" t="inlineStr"><is><t>y</t></is></c></row><row r="12"><c r="D12" t="inlineStr"><is><t>z</t></is></c><c r="E12" t="inlineStr"><is><t>w</t></is></c></row></sheetData><mergeCells count="1"><mergeCell ref="{merge_ref}"/></mergeCells></worksheet>"#
         );
+        xlsx_with_sheet(&sheet)
+    }
+
+    /// Minimal xlsx wrapping the given worksheet XML.
+    fn xlsx_with_sheet(sheet: &str) -> Vec<u8> {
         let parts: &[(&str, &str)] = &[
             (
                 "[Content_Types].xml",
@@ -268,6 +296,57 @@ mod tests {
         // old relative saturation mapped it onto (0,0) and covered D12.
         let doc = parse(&xlsx_with_merge("A1:B12")).unwrap();
         assert_eq!(covered_count(&doc), 0, "out-of-range merge must not cover cells");
+    }
+
+    fn first_table(doc: &Document) -> &crate::model::Table {
+        let Some(Block::Table(t)) = doc.blocks.first() else {
+            panic!("expected a table, got {:?}", doc.blocks.first());
+        };
+        t
+    }
+
+    #[test]
+    fn merge_extending_past_the_used_range_keeps_its_span() {
+        // A merge anchored on the used range but reaching into empty rows
+        // and columns (D11:H15 over a D11:E12 used range) must keep its full
+        // 5x5 extent instead of clipping to the populated 2x2.
+        let doc = parse(&xlsx_with_merge("D11:H15")).unwrap();
+        let t = first_table(&doc);
+        assert_eq!((t.grid.len(), t.grid[0].len()), (5, 5));
+        assert!(
+            matches!(&t.grid[0][0], crate::model::CellSlot::Origin(c)
+                if c.row_span == 5 && c.col_span == 5),
+            "span must cover the whole merge: {:?}",
+            t.grid[0][0]
+        );
+        assert_eq!(covered_count(&doc), 24);
+    }
+
+    #[test]
+    fn merge_anchored_on_the_only_populated_cell_keeps_its_span() {
+        // The issue-8 shape: the sole populated cell anchors the merge, so
+        // the used range is 1x1 and the old intersection collapsed the merge
+        // to an ordinary cell.
+        let sheet = r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="F1" t="inlineStr"><is><t>Merged heading</t></is></c></row></sheetData><mergeCells count="1"><mergeCell ref="F1:O3"/></mergeCells></worksheet>"#;
+        let doc = parse(&xlsx_with_sheet(sheet)).unwrap();
+        let t = first_table(&doc);
+        assert_eq!((t.grid.len(), t.grid[0].len()), (3, 10));
+        assert!(matches!(&t.grid[0][0], crate::model::CellSlot::Origin(c)
+            if c.row_span == 3 && c.col_span == 10));
+        assert_eq!(covered_count(&doc), 29);
+    }
+
+    #[test]
+    fn oversized_merge_degrades_to_the_clipped_form() {
+        // A crafted whole-sheet merge must not materialize a huge grid, but
+        // the file must still convert: the region degrades to the populated
+        // range (here 1x1) instead of erroring.
+        let sheet = r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>x</t></is></c></row></sheetData><mergeCells count="1"><mergeCell ref="A1:XFD1048576"/></mergeCells></worksheet>"#;
+        let doc = parse(&xlsx_with_sheet(sheet)).unwrap();
+        let t = first_table(&doc);
+        assert_eq!((t.grid.len(), t.grid[0].len()), (1, 1));
+        assert!(matches!(&t.grid[0][0], crate::model::CellSlot::Origin(c)
+            if c.row_span == 1 && c.col_span == 1));
     }
 
     #[test]
