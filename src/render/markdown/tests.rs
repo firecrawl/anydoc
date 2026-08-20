@@ -144,6 +144,28 @@ fn unresolved_link_fallback_counts_toward_seam_pairing() {
 }
 
 #[test]
+fn escaped_backtick_in_later_run_still_pairs() {
+    // A styled run's backtick is emitted as `\\``, yet still closes a span
+    // an earlier raw backtick opens: code spans ignore backslash escapes.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        styled("x`y", BOLD),
+    ])]);
+    assert_eq!(md, "a \\`\\\n**x\\`y**\n");
+    // A whitespace-only code run loses its styling and emits no fence.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        Inline::Link {
+            content: vec![styled("  ", Style { code: true, ..Style::PLAIN }), Inline::plain("x")],
+            target: LinkTarget::External("https://e.test".into()),
+        },
+    ])]);
+    assert_eq!(md, "a `\\\n[  x](https://e.test)\n");
+}
+
+#[test]
 fn bold_trailing_space_moved_out() {
     let md = doc(vec![Block::Paragraph(vec![styled("bold ", BOLD), Inline::plain("plain")])]);
     assert_eq!(md, "**bold** plain\n");

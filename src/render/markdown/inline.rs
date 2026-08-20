@@ -203,13 +203,18 @@ fn delims_ahead(runs: &[Norm], rc: &Ctx) -> Delims {
             Norm::Text { style, .. } if style.code => delims.insert('`'),
             Norm::Text { text, style } if *style == Style::PLAIN => delims.insert_text(text),
             Norm::Text { text, style } => {
-                // Emphasis content is fully escaped; only the wrapping
-                // delimiters and a literal `]` reach the output raw.
+                // Emphasis content is escaped, which neutralizes everything
+                // but backticks: code spans ignore backslash escapes, so an
+                // emitted `\`` still closes a span an earlier raw backtick
+                // opens. `]` is the one character escaping leaves raw.
                 if style.bold || style.italic {
                     delims.insert('*');
                 }
                 if style.strike {
                     delims.insert('~');
+                }
+                if text.contains('`') {
+                    delims.insert('`');
                 }
                 if text.contains(']') {
                     delims.insert(']');
@@ -249,11 +254,15 @@ fn target_has_backtick(target: &LinkTarget) -> bool {
     }
 }
 
-/// True when rendering `inlines` inside a link label leaves a raw backtick in
-/// the output (label escaping leaves a lone backtick alone).
+/// True when rendering `inlines` inside a link label emits a backtick an
+/// earlier raw one can pair with: any backtick in text counts even where the
+/// label escapes it (code spans ignore backslash escapes), and a code run
+/// emits fences unless it is whitespace-only and loses its styling.
 fn emits_backtick(inlines: &[Inline]) -> bool {
     inlines.iter().any(|inline| match inline {
-        Inline::Text { text, style } => style.code || text.contains('`'),
+        Inline::Text { text, style } => {
+            text.contains('`') || (style.code && !text.trim().is_empty())
+        }
         Inline::Link { content, target } => emits_backtick(content) || target_has_backtick(target),
         Inline::Image { alt, .. } => alt.contains('`'),
         _ => false,
