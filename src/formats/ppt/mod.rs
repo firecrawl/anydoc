@@ -320,7 +320,8 @@ impl Extractor {
     fn end_segment(&mut self, id: Option<u32>) {
         self.flush_shape();
         flush_list(&mut self.current, &mut self.list_run);
-        if !self.current.is_empty() {
+        let keep_empty_slide = !self.current_is_notes && id.is_some();
+        if !self.current.is_empty() || keep_empty_slide {
             let blocks = std::mem::take(&mut self.current);
             self.segments.push((blocks, id, self.current_is_notes));
         }
@@ -342,7 +343,8 @@ impl Extractor {
         // slides), which order-based zipping would misattribute.
         let mut used = vec![false; notes.len()];
         let mut out = Vec::new();
-        for (sid, blocks) in slides {
+        for (slide_index, (sid, blocks)) in slides.into_iter().enumerate() {
+            out.push(Block::Paragraph(vec![Inline::Anchor(format!("slide-{}", slide_index + 1))]));
             out.extend(blocks);
             for (i, (nid, nblocks)) in notes.iter_mut().enumerate() {
                 if !used[i] && sid.is_some() && *nid == sid {
@@ -632,5 +634,34 @@ impl Extractor {
                 self.current.push(Block::Paragraph(inlines));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn top_level_anchor_ids(blocks: &[Block]) -> Vec<&str> {
+        blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(inlines) => inlines.iter().find_map(|inline| match inline {
+                    Inline::Anchor(id) => Some(id.as_str()),
+                    _ => None,
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn empty_slides_keep_anchor_positions() {
+        let mut extractor = Extractor::default();
+
+        extractor.end_segment(Some(10));
+        extractor.current.push(Block::Paragraph(vec![Inline::plain("Third slide")]));
+        extractor.end_segment(Some(30));
+
+        assert_eq!(top_level_anchor_ids(&extractor.into_blocks()), ["slide-1", "slide-2"]);
     }
 }

@@ -9,6 +9,7 @@
 
 mod common;
 
+use anydoc::model::{Block, Inline};
 use common::{fixture_root, walk};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -127,6 +128,46 @@ fn embedded_ole_payload_is_retained() {
         .find(|a| a.media_type == "application/vnd.ms-ole-object")
         .expect("OLE payload retained as an asset");
     assert_eq!(ole.bytes, b"OLE-PAYLOAD-STAND-IN".repeat(4));
+}
+
+fn top_level_anchor_ids(blocks: &[Block]) -> Vec<&str> {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Paragraph(inlines) => inlines.iter().find_map(|inline| match inline {
+                Inline::Anchor(id) => Some(id.as_str()),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn pptx_emits_slide_anchors_for_every_slide() {
+    let path = fixture_root().join("pptx").join("handmade-links.pptx");
+    let bytes = std::fs::read(&path).unwrap();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Pptx).unwrap();
+
+    assert_eq!(top_level_anchor_ids(&doc.blocks), ["slide-1", "slide-2"]);
+}
+
+#[test]
+fn pptx_emits_slide_anchor_without_internal_links() {
+    let path = fixture_root().join("pptx").join("handmade-inherit.pptx");
+    let bytes = std::fs::read(&path).unwrap();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Pptx).unwrap();
+
+    assert_eq!(top_level_anchor_ids(&doc.blocks), ["slide-1"]);
+}
+
+#[test]
+fn ppt_emits_slide_anchors_in_presentation_order() {
+    let path = fixture_root().join("ppt").join("handmade-multimaster.ppt");
+    let bytes = std::fs::read(&path).unwrap();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Ppt).unwrap();
+
+    assert_eq!(top_level_anchor_ids(&doc.blocks), ["slide-1", "slide-2"]);
 }
 
 /// Standard Word OLE markup places a VML preview image next to the

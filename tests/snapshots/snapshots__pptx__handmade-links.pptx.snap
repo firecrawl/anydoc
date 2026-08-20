@@ -2,6 +2,8 @@
 source: tests/snapshots.rs
 expression: output
 ---
+<a id="slide-1"></a>
+
 [Jump to the second slide](#slide-2)
 
 [External link](https://example.com/)
