@@ -96,3 +96,34 @@ jobs:
       # Must run from the repo root: with python/ as cwd, the source anydoc/
       # package dir shadows the installed compiled module.
       - run: python -m unittest discover -s python/tests
+
+  go:
+    name: Go bindings
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+      - name: Build the static library
+        run: cargo build -p anydoc-go --release
+      - name: Place the archive where cgo expects it
+        run: |
+          mkdir -p go/lib/linux_amd64_gnu
+          cp target/release/libanydoc_go.a go/lib/linux_amd64_gnu/
+      - name: Committed header is up to date
+        # `cargo build` regenerates include/anydoc.h via cbindgen; any diff
+        # means the committed header is stale and must be rebuilt and committed.
+        run: |
+          if ! git diff --exit-code -- go/include/anydoc.h; then
+            echo "::error::go/include/anydoc.h is out of date. Run 'cargo build -p anydoc-go --release' and commit the result."
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+        working-directory: go
+      - name: go test
+        run: go test ./...
+        working-directory: go

@@ -23,4 +23,4 @@ Rules:
 3. Exit codes: 0 success, 1 the document could not be converted, 2 usage error. Failures print one `anydoc: <message>` line to stderr. The CLI never prompts.
 4. For a large document, write to a file with `-o` and read the parts you need instead of streaming everything into context.
 5. Scanned and image-only PDFs need OCR, which anydoc does not do; they fail as unsupported. The hosted [Firecrawl Parse](https://firecrawl.dev/parse) API handles those.
-6. Inside a Node, Python, or Rust codebase, prefer the library over shelling out: `@firecrawl/anydoc` on npm, `firecrawl-anydoc` on PyPI, `anydoc` on crates.io. Each exposes the same `to_markdown` / `toMarkdown` API.
+6. Inside a Node, Python, Go, or Rust codebase, prefer the library over shelling out: `@firecrawl/anydoc` on npm, `firecrawl-anydoc` on PyPI, `github.com/firecrawl/anydoc/go`, `anydoc` on crates.io. Each exposes the same `to_markdown` / `toMarkdown` API.

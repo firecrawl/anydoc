@@ -1,0 +1,86 @@
+name: Prepare Go Archives
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Go archive (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+            lib_dir: darwin_amd64
+            lib_name: libanydoc_go.a
+          - target: aarch64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+            lib_dir: darwin_arm64
+            lib_name: libanydoc_go.a
+          - target: x86_64-pc-windows-msvc
+            host: blacksmith-8vcpu-windows-2025
+            lib_dir: windows_amd64
+            lib_name: anydoc_go.lib
+          - target: x86_64-unknown-linux-gnu
+            host: blacksmith-8vcpu-ubuntu-2404
+            lib_dir: linux_amd64_gnu
+            lib_name: libanydoc_go.a
+          - target: aarch64-unknown-linux-gnu
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            lib_dir: linux_arm64_gnu
+            lib_name: libanydoc_go.a
+          - target: x86_64-unknown-linux-musl
+            host: blacksmith-8vcpu-ubuntu-2404
+            lib_dir: linux_amd64_musl
+            lib_name: libanydoc_go.a
+            zig: true
+          - target: aarch64-unknown-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            lib_dir: linux_arm64_musl
+            lib_name: libanydoc_go.a
+            zig: true
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: go-${{ matrix.target }}
+      - uses: mlugg/setup-zig@v2
+        if: matrix.zig == true
+        with:
+          version: 0.14.1
+      - run: cargo build -p anydoc-go --release --target ${{ matrix.target }}
+      - name: Stage archive
+        shell: bash
+        run: |
+          mkdir -p staging/go/lib/${{ matrix.lib_dir }}
+          cp target/${{ matrix.target }}/release/${{ matrix.lib_name }} \
+            staging/go/lib/${{ matrix.lib_dir }}/${{ matrix.lib_name }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: go-lib-${{ matrix.target }}
+          path: staging
+          if-no-files-found: error
+
+  bundle:
+    name: Bundle Go archives
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: go-lib-*
+          path: staging
+          merge-multiple: true
+      - uses: actions/upload-artifact@v7
+        with:
+          name: go-libraries
+          path: staging
+          if-no-files-found: error

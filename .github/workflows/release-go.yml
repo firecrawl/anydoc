@@ -1,0 +1,82 @@
+name: Release Go Module
+
+on:
+  push:
+    tags: ['go/v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Version gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check versions
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            sh scripts/check-versions.sh "v${GITHUB_REF_NAME#go/v}"
+          else
+            sh scripts/check-versions.sh
+          fi
+
+  verify:
+    name: Verify Go archive (${{ matrix.target }})
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+            lib_dir: darwin_amd64
+            lib_name: libanydoc_go.a
+          - target: aarch64-apple-darwin
+            host: blacksmith-6vcpu-macos-latest
+            lib_dir: darwin_arm64
+            lib_name: libanydoc_go.a
+          - target: x86_64-pc-windows-msvc
+            host: blacksmith-8vcpu-windows-2025
+            lib_dir: windows_amd64
+            lib_name: anydoc_go.lib
+          - target: x86_64-unknown-linux-gnu
+            host: blacksmith-8vcpu-ubuntu-2404
+            lib_dir: linux_amd64_gnu
+            lib_name: libanydoc_go.a
+          - target: aarch64-unknown-linux-gnu
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            lib_dir: linux_arm64_gnu
+            lib_name: libanydoc_go.a
+          - target: x86_64-unknown-linux-musl
+            host: blacksmith-8vcpu-ubuntu-2404
+            lib_dir: linux_amd64_musl
+            lib_name: libanydoc_go.a
+            zig: true
+          - target: aarch64-unknown-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            lib_dir: linux_arm64_musl
+            lib_name: libanydoc_go.a
+            zig: true
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: go-${{ matrix.target }}
+      - uses: mlugg/setup-zig@v2
+        if: matrix.zig == true
+        with:
+          version: 0.14.1
+      - run: cargo build -p anydoc-go --release --target ${{ matrix.target }}
+      - name: Compare bundled archive
+        shell: bash
+        run: |
+          built=target/${{ matrix.target }}/release/${{ matrix.lib_name }}
+          bundled=go/lib/${{ matrix.lib_dir }}/${{ matrix.lib_name }}
+          test -f "$bundled"
+          cmp "$built" "$bundled"
