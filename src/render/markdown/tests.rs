@@ -64,6 +64,14 @@ fn partners_that_cannot_close_leave_delimiters_raw() {
         Inline::plain("snake_case"),
     ])]);
     assert_eq!(md, "a _\\\nsnake_case\n");
+    // A `*` after punctuation and before a word character is not
+    // right-flanking either.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("a *b .*c")])]);
+    assert_eq!(md, "a *b .*c\n");
+    // Flanking is judged at the delimiter run's edges: `__` between
+    // letters is intraword even though each `_` neighbours the other.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("a _x foo__bar")])]);
+    assert_eq!(md, "a _x foo__bar\n");
 }
 
 #[test]

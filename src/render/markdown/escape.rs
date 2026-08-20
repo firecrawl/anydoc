@@ -91,17 +91,32 @@ fn partner_slot(chars: &[char], j: usize) -> Option<usize> {
 }
 
 /// Whether the emphasis or strikethrough delimiter at `j` could close a
-/// pair: approximate right-flanking (not preceded by whitespace), plus the
-/// intraword exclusion for `_`. Unknown neighbours at the edges assume the
-/// worst.
+/// pair. Flanking is a property of the whole delimiter run, so the
+/// neighbours are the run's: approximate right-flanking (not preceded by
+/// whitespace, nor preceded by punctuation with a word character after),
+/// plus the intraword exclusion for `_`. Unknown neighbours at the edges
+/// assume the worst; the punctuation test stays ASCII so an unclassified
+/// character never suppresses a genuine closer.
 fn can_close(chars: &[char], j: usize) -> bool {
-    let prev = j.checked_sub(1).map(|p| chars[p]);
+    let c = chars[j];
+    let mut start = j;
+    while start > 0 && chars[start - 1] == c {
+        start -= 1;
+    }
+    let mut end = j + 1;
+    while end < chars.len() && chars[end] == c {
+        end += 1;
+    }
+    let prev = start.checked_sub(1).map(|p| chars[p]);
+    let next = chars.get(end).copied();
     if prev.is_some_and(char::is_whitespace) {
         return false;
     }
-    chars[j] != '_'
-        || !(prev.is_some_and(char::is_alphanumeric)
-            && chars.get(j + 1).is_some_and(|n| n.is_alphanumeric()))
+    if prev.is_some_and(|p| p.is_ascii_punctuation()) && next.is_some_and(char::is_alphanumeric) {
+        return false;
+    }
+    c != '_'
+        || !(prev.is_some_and(char::is_alphanumeric) && next.is_some_and(char::is_alphanumeric))
 }
 
 /// Escape Markdown syntax in document text.
