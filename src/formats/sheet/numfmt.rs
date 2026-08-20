@@ -50,9 +50,9 @@ pub(super) fn builtin_code(id: u32) -> Option<&'static str> {
 
 /// What a resolved format asks the caller to do with a numeric value.
 #[derive(Debug, PartialEq)]
-pub(super) enum Rendered {
+pub(super) enum Rendered<'a> {
     /// Render this value the way an unformatted cell renders.
-    General { value: f64, prefix: String, suffix: String },
+    General { value: f64, prefix: &'a str, suffix: &'a str },
     /// The section is a date/time format: render the serial as the parts it
     /// asks for.
     DateTime(DateParts),
@@ -215,29 +215,23 @@ impl NumberFormat {
         }
     }
 
-    pub(super) fn format_number(&self, v: f64) -> Rendered {
+    pub(super) fn format_number(&self, v: f64) -> Rendered<'_> {
         if !v.is_finite() {
-            return Rendered::General { value: v, prefix: String::new(), suffix: String::new() };
+            return Rendered::General { value: v, prefix: "", suffix: "" };
         }
         let Some((section, value, auto_minus)) = select(self.numeric_sections(), v) else {
-            return Rendered::General { value: v, prefix: String::new(), suffix: String::new() };
+            return Rendered::General { value: v, prefix: "", suffix: "" };
         };
         match &section.body {
-            Body::General { prefix, suffix } => {
-                Rendered::General { value, prefix: prefix.clone(), suffix: suffix.clone() }
-            }
+            Body::General { prefix, suffix } => Rendered::General { value, prefix, suffix },
             Body::DateTime(parts) => Rendered::DateTime(*parts),
             Body::Number(spec) => {
                 match render_number(spec, value.abs(), auto_minus && value < 0.0) {
                     Some(s) => Rendered::Text(s),
-                    None => {
-                        Rendered::General { value: v, prefix: String::new(), suffix: String::new() }
-                    }
+                    None => Rendered::General { value: v, prefix: "", suffix: "" },
                 }
             }
-            Body::Text(_) => {
-                Rendered::General { value: v, prefix: String::new(), suffix: String::new() }
-            }
+            Body::Text(_) => Rendered::General { value: v, prefix: "", suffix: "" },
         }
     }
 
@@ -1233,23 +1227,17 @@ mod tests {
         let f = NumberFormat::parse(r#""~"General" kg""#).unwrap();
         assert_eq!(
             f.format_number(1234.5),
-            Rendered::General { value: 1234.5, prefix: "~".into(), suffix: " kg".into() }
+            Rendered::General { value: 1234.5, prefix: "~", suffix: " kg" }
         );
     }
 
     #[test]
     fn general_renders_generally() {
         let f = NumberFormat::parse("General").unwrap();
-        assert_eq!(
-            f.format_number(3.5),
-            Rendered::General { value: 3.5, prefix: String::new(), suffix: String::new() }
-        );
+        assert_eq!(f.format_number(3.5), Rendered::General { value: 3.5, prefix: "", suffix: "" });
         // The positional negative section receives the magnitude.
         let f = NumberFormat::parse("General;General").unwrap();
-        assert_eq!(
-            f.format_number(-3.5),
-            Rendered::General { value: 3.5, prefix: String::new(), suffix: String::new() }
-        );
+        assert_eq!(f.format_number(-3.5), Rendered::General { value: 3.5, prefix: "", suffix: "" });
     }
 
     #[test]
@@ -1268,10 +1256,7 @@ mod tests {
         assert_eq!(f.format_text("hi"), Some("* hi *".to_string()));
         let f = NumberFormat::parse("@").unwrap();
         assert_eq!(f.format_text("hi"), Some("hi".to_string()));
-        assert_eq!(
-            f.format_number(3.5),
-            Rendered::General { value: 3.5, prefix: String::new(), suffix: String::new() }
-        );
+        assert_eq!(f.format_number(3.5), Rendered::General { value: 3.5, prefix: "", suffix: "" });
         let f = NumberFormat::parse("0.00").unwrap();
         assert_eq!(f.format_text("hi"), None);
     }
