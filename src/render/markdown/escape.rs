@@ -62,10 +62,13 @@ impl Delims {
     /// can close.
     pub(crate) fn insert_closers(&mut self, text: &str) {
         let chars: Vec<char> = text.chars().collect();
-        for j in 0..chars.len() {
-            if let Some(slot) = partner_slot(&chars, j) {
+        let mut j = 0;
+        while j < chars.len() {
+            let end = run_end(&chars, j);
+            if let Some(slot) = partner_slot(&chars, j, end) {
                 self.0[slot] = true;
             }
+            j = end;
         }
     }
 
@@ -80,34 +83,33 @@ impl Delims {
     }
 }
 
-/// Slot for the delimiter at `j` when it can act as a pairing partner.
+/// End of the run of identical characters starting at `j`.
+fn run_end(chars: &[char], j: usize) -> usize {
+    let mut end = j + 1;
+    while end < chars.len() && chars[end] == chars[j] {
+        end += 1;
+    }
+    end
+}
+
+/// Slot for the delimiter run `j..end` when it can act as a pairing partner.
 /// Backticks and `]` always can: code spans pair by backtick-string length
 /// (even a backslash-escaped backtick still closes one) and brackets pair
 /// as link structure. `*`, `_` and `~` pair by flanking, so they only
 /// count where they can close.
-fn partner_slot(chars: &[char], j: usize) -> Option<usize> {
+fn partner_slot(chars: &[char], j: usize, end: usize) -> Option<usize> {
     let slot = Delims::slot(chars[j])?;
-    (matches!(chars[j], '`' | ']') || can_close(chars, j)).then_some(slot)
+    (matches!(chars[j], '`' | ']') || can_close(chars, j, end)).then_some(slot)
 }
 
-/// Whether the emphasis or strikethrough delimiter at `j` could close a
-/// pair. Flanking is a property of the whole delimiter run, so the
-/// neighbours are the run's: approximate right-flanking (not preceded by
-/// whitespace, nor preceded by punctuation with a word character after),
-/// plus the intraword exclusion for `_`. Unknown neighbours at the edges
-/// assume the worst; the punctuation test stays ASCII so an unclassified
-/// character never suppresses a genuine closer.
-fn can_close(chars: &[char], j: usize) -> bool {
-    let c = chars[j];
-    let mut start = j;
-    while start > 0 && chars[start - 1] == c {
-        start -= 1;
-    }
-    let mut end = j + 1;
-    while end < chars.len() && chars[end] == c {
-        end += 1;
-    }
-    let prev = start.checked_sub(1).map(|p| chars[p]);
+/// Whether the emphasis or strikethrough run `j..end` could close a pair:
+/// approximate right-flanking (not preceded by whitespace, nor preceded by
+/// punctuation with a word character after), plus the intraword exclusion
+/// for `_`. Unknown neighbours at the edges assume the worst; the
+/// punctuation test stays ASCII so an unclassified character never
+/// suppresses a genuine closer.
+fn can_close(chars: &[char], j: usize, end: usize) -> bool {
+    let prev = j.checked_sub(1).map(|p| chars[p]);
     let next = chars.get(end).copied();
     if prev.is_some_and(char::is_whitespace) {
         return false;
@@ -115,7 +117,7 @@ fn can_close(chars: &[char], j: usize) -> bool {
     if prev.is_some_and(|p| p.is_ascii_punctuation()) && next.is_some_and(char::is_alphanumeric) {
         return false;
     }
-    c != '_'
+    chars[j] != '_'
         || !(prev.is_some_and(char::is_alphanumeric) && next.is_some_and(char::is_alphanumeric))
 }
 
@@ -133,10 +135,13 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
     // Last position of each delimiter that can pair; one with no later
     // partner is inert.
     let mut last: [Option<usize>; 5] = [None; 5]; // * _ ~ ` ]
-    for j in 0..chars.len() {
-        if let Some(slot) = partner_slot(&chars, j) {
-            last[slot] = Some(j);
+    let mut j = 0;
+    while j < chars.len() {
+        let end = run_end(&chars, j);
+        if let Some(slot) = partner_slot(&chars, j, end) {
+            last[slot] = Some(end - 1);
         }
+        j = end;
     }
     let mut out = String::with_capacity(text.len() + 8);
     let mut line_has_content = !(at_line_start && ctx == InlineContext::Block);
