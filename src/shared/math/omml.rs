@@ -173,9 +173,10 @@ fn run(r: &Element, tex: &mut Tex, mode: Mode) {
     if text.is_empty() {
         return;
     }
-    let rpr = r.find(ns::M, "rPr");
+    // Run properties sit under `m:rPr`; rtf writes them on the run itself,
+    // with `sty` and `scr` as numbers in their enumeration order.
     let value = |name: &str| -> Option<String> {
-        let elem = rpr?.find(ns::M, name)?;
+        let elem = r.find(ns::M, "rPr").and_then(|p| p.find(ns::M, name)).or(r.find(ns::M, name))?;
         Some(match elem.attr(ns::M, "val") {
             Some(v) => v.to_string(),
             None => direct_text(elem).trim().to_string(),
@@ -192,15 +193,15 @@ fn run(r: &Element, tex: &mut Tex, mode: Mode) {
         return;
     }
     let font = match value("scr").as_deref() {
-        Some("double-struck") => Some("\\mathbb"),
-        Some("fraktur") => Some("\\mathfrak"),
-        Some("script") => Some("\\mathcal"),
-        Some("sans-serif") => Some("\\mathsf"),
-        Some("monospace") => Some("\\mathtt"),
+        Some("script" | "1") => Some("\\mathcal"),
+        Some("fraktur" | "2") => Some("\\mathfrak"),
+        Some("double-struck" | "3") => Some("\\mathbb"),
+        Some("sans-serif" | "4") => Some("\\mathsf"),
+        Some("monospace" | "5") => Some("\\mathtt"),
         _ => match value("sty").as_deref() {
-            Some("p") => Some("\\mathrm"),
-            Some("b") => Some("\\mathbf"),
-            Some("bi") => Some("\\boldsymbol"),
+            Some("p" | "0") => Some("\\mathrm"),
+            Some("b" | "1") => Some("\\mathbf"),
+            Some("bi" | "3") => Some("\\boldsymbol"),
             _ => None,
         },
     };

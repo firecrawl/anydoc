@@ -5,7 +5,7 @@
 use crate::model::{Block, Cell, CellSlot, Table};
 use crate::render::markdown::Ctx;
 use crate::render::markdown::escape::InlineContext;
-use crate::render::markdown::inline::{push_code_span, render_inlines};
+use crate::render::markdown::inline::{push_code_span, push_math_span, render_inlines};
 
 struct RenderedCell {
     text: String,
@@ -171,9 +171,10 @@ fn cell_block_text(block: &Block, rc: &Ctx, parts: &mut Vec<String>) {
             }
         }
         Block::Math(tex) => {
-            let tex = tex.trim();
-            if !tex.is_empty() {
-                parts.push(format!("${}$", tex.replace('\n', " ")));
+            if !tex.trim().is_empty() {
+                let mut s = String::new();
+                push_math_span(tex, InlineContext::TableCell, &mut s);
+                parts.push(s);
             }
         }
         Block::Rule => {}

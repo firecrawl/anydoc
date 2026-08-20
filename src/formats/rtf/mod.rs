@@ -274,23 +274,22 @@ impl PictState {
     }
 }
 
-/// An accumulating math zone. Its groups mirror OMML elements, each named by
-/// its first control word (`\mf` is `m:f`), so they are built into the same
-/// element tree the OOXML readers hand the converter: a property group's
-/// text is its value, a run's text is its content.
+/// An accumulating `\mmath` zone. Its groups mirror OMML elements, each
+/// named by its first control word (`\mf` is `m:f`), so they are built into
+/// the same element tree the OOXML readers hand the converter: a property
+/// group's text is its value, a run's text is its content, and a property
+/// written as a parameter word on the run (`\msty2`) is a child element.
 struct MathState {
     /// Group depth of the zone's own group.
     depth: usize,
-    /// `\mmathPara`: displayed on its own line.
-    display: bool,
     /// Open groups, innermost last, each with the depth it opened at. The
     /// first is the zone itself.
     open: Vec<(usize, Element)>,
 }
 
 impl MathState {
-    fn new(depth: usize, display: bool) -> Self {
-        MathState { depth, display, open: vec![(depth, math_elem("zone"))] }
+    fn new(depth: usize) -> Self {
+        MathState { depth, open: vec![(depth, math_elem("zone"))] }
     }
 
     fn open_group(&mut self, depth: usize) {
@@ -311,13 +310,19 @@ impl MathState {
         }
     }
 
-    /// Name the innermost group after its first math control word.
-    fn name(&mut self, name: &str) {
-        if let Some((_, elem)) = self.open.last_mut()
-            && elem.local.is_empty()
-        {
+    /// A math control word inside a group: the first names the group, a
+    /// later one is a property of it, its parameter the value.
+    fn word(&mut self, name: &str, param: Option<i32>) {
+        let Some((_, elem)) = self.open.last_mut() else { return };
+        if elem.local.is_empty() {
             elem.local = name.to_string();
+            return;
         }
+        let mut prop = math_elem(name);
+        if let Some(param) = param {
+            prop.children.push(Node::Text(param.to_string()));
+        }
+        elem.children.push(Node::Elem(prop));
     }
 
     fn push_text(&mut self, text: String) {
@@ -326,10 +331,15 @@ impl MathState {
         }
     }
 
-    fn finish(mut self) -> Vec<String> {
+    /// The zone's equations, and whether they are a math paragraph
+    /// (`\moMathPara`), which displays on its own line.
+    fn finish(mut self) -> (Vec<String>, bool) {
         self.close_groups(0);
         let (_, zone) = self.open.remove(0);
-        omath_para_to_tex(&zone)
+        match zone.find(ns::M, "oMathPara") {
+            Some(para) => (omath_para_to_tex(para), true),
+            None => (omath_para_to_tex(&zone), false),
+        }
     }
 }
 
@@ -404,10 +414,7 @@ const OMML_NAMES: &[&str] = &[
     "lit",
     "lMargin",
     "m",
-    "math",
     "mathFont",
-    "mathPara",
-    "mathParaPr",
     "mathPr",
     "maxDist",
     "mc",
@@ -487,7 +494,7 @@ struct Destinations {
     pict: Option<PictState>,
     /// The math zone currently accumulating, if any.
     math: Option<MathState>,
-    /// The current paragraph holds a finished `\mmathPara` zone.
+    /// The current paragraph holds a finished math paragraph.
     math_display: bool,
 }
 
@@ -708,6 +715,7 @@ impl<'a> Parser<'a> {
             log::warn!("recovered unbalanced rtf groups");
         }
         self.flush_pending();
+        self.finish_math();
         self.end_paragraph()
     }
 
@@ -729,7 +737,7 @@ impl<'a> Parser<'a> {
     /// Dispatch a control word to its subsystem handler; unhandled words
     /// that name a suppressed destination silence their group.
     fn control_word(&mut self, word: &str, param: Option<i32>) -> Result<(), ConvertError> {
-        if self.math_control(word) {
+        if self.math_control(word, param) {
             return Ok(());
         }
         if self.text_control(word, param)? {
@@ -999,18 +1007,18 @@ impl<'a> Parser<'a> {
         true
     }
 
-    /// Math zone controls: `\mmath` / `\mmathPara` open a zone, and inside
-    /// one every math control word names the group it starts. The
-    /// `\mmathPict` fallback picture is skipped.
-    fn math_control(&mut self, word: &str) -> bool {
+    /// Math zone controls: `\mmath` opens a zone, and inside one every math
+    /// control word names the group it starts or sets a property on it.
+    /// The `\mmathPict` fallback picture is skipped.
+    fn math_control(&mut self, word: &str, param: Option<i32>) -> bool {
         if self.dest.math.is_none() {
-            if !matches!(word, "mmath" | "mmathPara") {
+            if word != "mmath" {
                 return false;
             }
             if !self.state.suppress {
                 self.flush_pending();
                 self.state.capture = Capture::Math;
-                self.dest.math = Some(MathState::new(self.stack.len(), word == "mmathPara"));
+                self.dest.math = Some(MathState::new(self.stack.len()));
             }
             return true;
         }
@@ -1027,7 +1035,7 @@ impl<'a> Parser<'a> {
             Some(name) if OMML_NAMES.contains(&name) => {
                 self.flush_pending();
                 if let Some(math) = &mut self.dest.math {
-                    math.name(name);
+                    math.word(name, param);
                 }
                 true
             }
@@ -1039,8 +1047,8 @@ impl<'a> Parser<'a> {
         let Some(math) = self.dest.math.take() else {
             return;
         };
-        let display = math.display;
-        for (i, tex) in math.finish().into_iter().enumerate() {
+        let (lines, display) = math.finish();
+        for (i, tex) in lines.into_iter().enumerate() {
             if i > 0 {
                 self.inlines.push(Inline::LineBreak);
             }

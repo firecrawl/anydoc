@@ -24,13 +24,13 @@ fn omml_structures_map_to_latex_commands() {
         "<m:nary><m:naryPr><m:chr m:val=\"∑\"/><m:limLoc m:val=\"undOvr\"/></m:naryPr>",
         "<m:sub><m:r><m:t>i=1</m:t></m:r></m:sub><m:sup><m:r><m:t>n</m:t></m:r></m:sup>",
         "<m:e><m:r><m:t>i</m:t></m:r></m:e></m:nary>",
-        "<m:d><m:dPr><m:begChr m:val=\"[\"/><m:endChr m:val=\"]\"/></m:dPr><m:e><m:r><m:t>α</m:t></m:r></m:e></m:d>",
+        "<m:d><m:dPr><m:begChr m:val=\"⟨\"/><m:endChr m:val=\"⟩\"/></m:dPr><m:e><m:r><m:t>α</m:t></m:r></m:e></m:d>",
         "<m:func><m:fName><m:r><m:rPr><m:sty m:val=\"p\"/></m:rPr><m:t>sin</m:t></m:r></m:fName>",
         "<m:e><m:r><m:t>θ</m:t></m:r></m:e></m:func>",
     ));
     assert_eq!(
         tex,
-        "\\frac{a}{b}x^{2}\\sqrt{y}\\sum_{i=1}^{n}{i}\\left[\\alpha\\right]\\sin{\\theta}"
+        "\\frac{a}{b}x^{2}\\sqrt{y}\\sum_{i=1}^{n}{i}\\left\\langle\\alpha\\right\\rangle\\sin{\\theta}"
     );
 }
 
@@ -45,13 +45,13 @@ fn omml_normal_text_and_styled_alphanumerics() {
 
 #[test]
 fn omml_rtf_shaped_tree_reads_values_from_text() {
-    // rtf math destinations carry a property value as element text and a
-    // run's text directly in the run.
+    // rtf math destinations carry a property value as element text, a run's
+    // text directly in the run, and run properties as numbered children.
     let tex = omml(concat!(
         "<m:f><m:fPr><m:type>lin</m:type></m:fPr>",
-        "<m:num><m:r>a</m:r></m:num><m:den><m:r>b</m:r></m:den></m:f>",
+        "<m:num><m:r>a</m:r></m:num><m:den><m:r><m:sty>0</m:sty>b</m:r></m:den></m:f>",
     ));
-    assert_eq!(tex, "{a}/{b}");
+    assert_eq!(tex, "{a}/{\\mathrm{b}}");
 }
 
 #[test]

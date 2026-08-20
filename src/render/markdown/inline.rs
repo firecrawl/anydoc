@@ -132,11 +132,7 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
                 InlineContext::Heading => out.push(' '),
                 InlineContext::TableCell => out.push('\n'),
             },
-            // GFM inline math: `$` hugging both ends of the source. A line
-            // break inside it would end the paragraph's math span.
-            Norm::Math(tex) => {
-                let _ = write!(out, "${}$", tex.replace('\n', " "));
-            }
+            Norm::Math(tex) => push_math_span(tex, ctx, &mut out),
         }
     }
     out
@@ -340,6 +336,29 @@ fn render_text_run(
     if !trail.is_empty() {
         out.push_str(trail);
     }
+}
+
+/// GFM inline math: `$` hugging both ends of the source. A line break
+/// inside it would end the paragraph's math span, and a bare `$` (never
+/// valid inside math) would close it early.
+pub(crate) fn push_math_span(tex: &str, ctx: InlineContext, out: &mut String) {
+    let mut source = String::with_capacity(tex.len());
+    let mut backslashes = 0;
+    for c in tex.trim().chars() {
+        match c {
+            '\n' => source.push(' '),
+            '$' if backslashes % 2 == 0 => source.push_str("\\$"),
+            c => source.push(c),
+        }
+        backslashes = if c == '\\' { backslashes + 1 } else { 0 };
+    }
+    // A row is split into cells before the math span is parsed, so a pipe
+    // is syntax here like in a code span.
+    let source = match ctx {
+        InlineContext::TableCell => escape_cell_code_span(&source),
+        _ => source,
+    };
+    let _ = write!(out, "${source}$");
 }
 
 pub(crate) fn push_code_span(text: &str, ctx: InlineContext, out: &mut String) {

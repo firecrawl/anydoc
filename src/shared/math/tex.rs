@@ -30,7 +30,7 @@ impl Tex {
             self.out.push(' ');
         }
         self.out.push_str(s);
-        self.after_macro = false;
+        self.after_macro = ends_with_control_word(s);
     }
 
     pub fn push_char(&mut self, c: char) {
@@ -45,7 +45,7 @@ impl Tex {
     /// ends any control word before it, so no separator is needed.
     pub fn push_macro(&mut self, name: &str) {
         self.out.push_str(name);
-        self.after_macro = name.ends_with(|c: char| c.is_ascii_alphabetic());
+        self.after_macro = ends_with_control_word(name);
     }
 
     pub fn push_tex(&mut self, other: &Tex) {
@@ -132,6 +132,7 @@ impl Tex {
             '^' => self.push_str("\\char`^"),
             '~' => self.push_macro("\\sim"),
             '\u{a0}' => self.push_str("\\ "),
+            c if c.is_whitespace() => self.push_char(' '),
             c if c.is_control() => {}
             c => self.push_char(c),
         }
@@ -149,6 +150,7 @@ impl Tex {
                 '\\' => inner.push_str("\\textbackslash{}"),
                 '^' => inner.push_str("\\textasciicircum{}"),
                 '~' => inner.push_str("\\textasciitilde{}"),
+                c if c.is_whitespace() => inner.push_char(' '),
                 c if c.is_control() => {}
                 c => inner.push_char(c),
             }
@@ -168,6 +170,13 @@ impl Tex {
         }
         out
     }
+}
+
+/// Whether `s` ends in a letter-named control word (`\alpha`, `\left\langle`),
+/// which would swallow a letter written directly after it.
+fn ends_with_control_word(s: &str) -> bool {
+    let name_len = s.chars().rev().take_while(|c| c.is_ascii_alphabetic()).count();
+    name_len > 0 && s[..s.len() - name_len].ends_with('\\')
 }
 
 /// Font variant of a mathematical alphanumeric symbol.

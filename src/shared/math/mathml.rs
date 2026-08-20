@@ -61,13 +61,39 @@ fn walk_elem(e: &Element, tex: &mut Tex) {
         "mi" => identifier(e, tex),
         "mn" => tex.push_math_text(&e.text()),
         "mo" => operator(e, tex),
-        "mtext" | "ms" => {
+        "mtext" => {
             let text = e.text();
             if !text.trim().is_empty() {
                 tex.push_text_mode(text.trim_matches(|c: char| c == '\n' || c == '\r'));
             }
         }
-        "mspace" => tex.push_str("\\ "),
+        "ms" => {
+            let text = e.text();
+            let quoted = format!(
+                "{}{}{}",
+                e.attr_any("lquote").unwrap_or("\""),
+                text.trim_matches(|c: char| c == '\n' || c == '\r'),
+                e.attr_any("rquote").unwrap_or("\"")
+            );
+            tex.push_text_mode(&quoted);
+        }
+        "mspace" => {
+            // Only the sign of the width survives: zero is nothing,
+            // negative a thin backspace, anything else a space.
+            let width = e.attr_any("width").unwrap_or("");
+            let magnitude: f64 = width
+                .trim_start_matches('-')
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect::<String>()
+                .parse()
+                .unwrap_or(1.0);
+            if width.starts_with('-') {
+                tex.push_str("\\!");
+            } else if magnitude != 0.0 {
+                tex.push_str("\\ ");
+            }
+        }
         "mfrac" => {
             let parts = args(e);
             let (Some(num), Some(den)) = (parts.first(), parts.get(1)) else {
@@ -252,23 +278,29 @@ fn under_over(e: &Element, tex: &mut Tex) {
         script(tex, '^', over);
         return;
     }
+    // An explicit accent="false" / accentunder="false" asks for a plain
+    // over- or under-script even on an accent character.
+    let plain_over = e.attr_any("accent").is_some_and(|v| v == "false");
+    let plain_under = e.attr_any("accentunder").is_some_and(|v| v == "false");
     let mut body = sub(base);
     if let Some(over) = over {
-        body = decorate(over, body, true);
+        body = decorate(over, body, true, plain_over);
     }
     if let Some(under) = under {
-        body = decorate(under, body, false);
+        body = decorate(under, body, false, plain_under);
     }
     tex.push_tex(&body);
 }
 
 /// `body` with `mark` placed over or under it: an accent command where
-/// the mark is an accent character, `\overset`/`\underset` otherwise.
-fn decorate(mark: &Element, body: Tex, over: bool) -> Tex {
+/// the mark is an accent character (unless `plain`), `\overset` /
+/// `\underset` otherwise.
+fn decorate(mark: &Element, body: Tex, over: bool, plain: bool) -> Tex {
     let mut out = Tex::new();
     let text = mark.text();
     let text = text.trim();
-    if let Some(c) = text.chars().next()
+    if !plain
+        && let Some(c) = text.chars().next()
         && text.chars().count() == 1
         && let Some(cmd) = accent(c)
     {

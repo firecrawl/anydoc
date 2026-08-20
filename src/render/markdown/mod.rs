@@ -201,7 +201,21 @@ fn render_block(block: &Block, rc: &Ctx) -> Option<String> {
         Block::Rule => Some("---".to_string()),
         Block::Math(tex) => {
             let tex = tex.trim();
-            if tex.is_empty() { None } else { Some(format!("$$\n{tex}\n$$")) }
+            if tex.is_empty() {
+                return None;
+            }
+            // A bare `$` is never valid inside math; escaped, it cannot
+            // close the block early.
+            let mut source = String::with_capacity(tex.len());
+            let mut backslashes = 0;
+            for c in tex.chars() {
+                if c == '$' && backslashes % 2 == 0 {
+                    source.push('\\');
+                }
+                source.push(c);
+                backslashes = if c == '\\' { backslashes + 1 } else { 0 };
+            }
+            Some(format!("$$\n{source}\n$$"))
         }
     }
 }

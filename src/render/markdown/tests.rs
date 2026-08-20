@@ -37,9 +37,19 @@ fn math_renders_in_dollar_delimiters_and_text_dollars_are_escaped() {
             Inline::Math("x_1 < y".into()),
             Inline::plain(" holds."),
         ]),
-        Block::Math("\\sum_{i=1}^{n} i".into()),
+        Block::Math("\\sum_{i=1}^{n} i $".into()),
     ]);
-    assert_eq!(md, "Costs \\$5 or \\$6, and $x_1 < y$ holds.\n\n$$\n\\sum_{i=1}^{n} i\n$$\n");
+    assert_eq!(md, "Costs \\$5 or \\$6, and $x_1 < y$ holds.\n\n$$\n\\sum_{i=1}^{n} i \\$\n$$\n");
+}
+
+#[test]
+fn math_in_a_table_cell_escapes_pipes() {
+    let cell = |inlines| Cell { blocks: vec![Block::Paragraph(inlines)], col_span: 1, row_span: 1 };
+    let md = doc(vec![table_from(
+        vec![vec![cell(vec![Inline::plain("abs")]), cell(vec![Inline::Math("|x|".into())])]],
+        0,
+    )]);
+    assert!(md.contains("| $\\|x\\|$ |"), "{md}");
 }
 
 #[test]

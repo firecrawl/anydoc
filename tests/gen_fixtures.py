@@ -1056,21 +1056,26 @@ def math_epub():
 
 
 def math_rtf():
-    """Word's rtf: a math zone nests `{\\*\\moMath ...}` and a `\\mmathPict`
-    picture fallback; `\\mmathPara` wraps a displayed equation."""
+    """Word's rtf: a math zone nests `{\\*\\moMath ...}` (inside a
+    `\\*\\moMathPara` when displayed) and a `\\mmathPict` picture fallback;
+    run style is a parameter word on the run and flags are `on`."""
+    def r(text):
+        return "{\\mr\\mscr0\\msty2 " + text + "}"
     parts = [
-        rb"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0 Cambria Math;}}",
-        rb"\pard The roots are {\mmath{\*\moMath{\mr\rtlch\fcs1 \af0 \ltrch\fcs0 \f0 x}{\mr =}"
-        rb"{\mf{\mfPr{\mctrlPr}}{\mnum{\mr -b\'b1}{\mrad{\mradPr{\mdegHide on}}{\mdeg}{\me{\msSup{\me{\mr b}}{\msup{\mr 2}}}{\mr -4ac}}}}"
-        rb"{\mden{\mr 2a}}}}{\mmathPict{\*\mmathPr}{\pict\pngblip\picw1\pich1 89504e47}}} for any a.\par",
-        b"\\pard {\\mmathPara{\\mmathParaPr{\\mjc centerGroup}}{\\mmath{\\*\\moMath"
-        b"{\\mnary{\\mnaryPr{\\mchr \\u8721\\'3f}{\\mlimLoc undOvr}{\\mgrow 1}{\\msubHide 0}{\\msupHide 0}}"
-        b"{\\msub{\\mr i=1}}{\\msup{\\mr n}}{\\me{\\msSub{\\me{\\mr x}}{\\msub{\\mr i}}}}}{\\mr =}"
-        b"{\\mfunc{\\mfName{\\mr{\\mrPr{\\msty p}}sin}}{\\me{\\md{\\me{\\mr \\u952\\'3f}}}}}}}}\\par",
-        rb"\pard A price of $5 or $6 is not math.\par",
-        rb"}",
+        "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0 Cambria Math;}}",
+        "\\pard The roots are {\\mmath{\\*\\moMath{\\rtlch\\fcs1 \\af0 \\ltrch\\fcs0 \\f0\\insrsid1 }" + r("x") + r("=")
+        + "{\\mf{\\mfPr{\\mctrlPr\\f0 }}{\\mnum" + r("-b\\'b1") + "{\\mrad{\\mradPr{\\mdegHide on}{\\mctrlPr\\f0 }}{\\mdeg}"
+        + "{\\me{\\msSup{\\me" + r("b") + "}{\\msup" + r("2") + "}}" + r("-4ac") + "}}}{\\mden" + r("2a") + "}}}"
+        + "{\\mmathPict{\\*\\mmathPr}{\\pict\\pngblip\\picw1\\pich1 89504e47}}} for any a.\\par",
+        "\\pard {\\mmath{\\*\\moMathPara{\\moMathParaPr{\\mjc centerGroup}}{\\*\\moMath"
+        + "{\\mnary{\\mnaryPr{\\mchr \\u8721 ?}{\\mlimLoc undOvr}{\\mctrlPr\\f0 }}"
+        + "{\\msub" + r("i=1") + "}{\\msup" + r("n") + "}{\\me{\\msSub{\\me" + r("x") + "}{\\msub" + r("i") + "}}}}" + r("=")
+        + "{\\mfunc{\\mfName{\\mr\\mscr0\\msty0 sin}}{\\me{\\md{\\mdPr{\\mctrlPr\\f0 }}{\\me" + r("\\u952 ?") + "}}}}}"
+        + "{\\*\\moMath{\\mr\\mnor where }" + r("\\u8722 ?1<x") + "}}}\\par",
+        "\\pard A price of $5 or $6 is not math.\\par",
+        "}",
     ]
-    (OUT / "rtf" / "handmade-math.rtf").write_bytes(b"\n".join(parts))
+    (OUT / "rtf" / "handmade-math.rtf").write_bytes("\n".join(parts).encode("cp1252"))
 
 
 # ---------------------------------------------------------------------------
