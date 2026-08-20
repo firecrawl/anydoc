@@ -24,33 +24,26 @@ pub(super) const SHARED_STRINGS_REL: &str =
 pub(super) const MAX_ROWS: u32 = 1_048_576;
 pub(super) const MAX_COLS: u32 = 16_384;
 
-pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
-    let mut pkg = Package::open(bytes)?;
-    let root_rels = read_rels(&mut pkg, "_rels/.rels")?;
-    let wb_part = root_rels
-        .first_of_type(rel_type::OFFICE_DOCUMENT)
-        .and_then(|rel| path::resolve("", &rel.target).ok())
-        .map(|t| t.path)
-        .unwrap_or_else(|| "xl/workbook.xml".to_string());
-    let workbook = pkg.required_xml_part(&wb_part)?;
-    let wb_rels = read_rels(&mut pkg, &rels_part_for(&wb_part))?;
+pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, ConvertError> {
+    let workbook = pkg.required_xml_part(wb_part)?;
+    // Any OOXML main part resolves here; a document or presentation would
+    // otherwise convert to an empty workbook.
+    if !workbook.child_elems().next().is_some_and(|e| e.is(ns::SML, "workbook")) {
+        return Err(ConvertError::malformed("main part is not a workbook"));
+    }
+    let wb_rels = read_rels(pkg, &rels_part_for(wb_part))?;
     let date1904 = workbook
         .first_descendant(ns::SML, "workbookPr")
         .and_then(|e| e.attr_unqualified("date1904"))
         .is_some_and(bool_attr);
 
-    let shared = match sibling_part(
-        &mut pkg,
-        &wb_rels,
-        &wb_part,
-        SHARED_STRINGS_REL,
-        "sharedStrings.xml",
-    )? {
-        Some(root) => shared_strings(&root),
-        None => Vec::new(),
-    };
+    let shared =
+        match sibling_part(pkg, &wb_rels, wb_part, SHARED_STRINGS_REL, "sharedStrings.xml")? {
+            Some(root) => shared_strings(&root),
+            None => Vec::new(),
+        };
     let styles =
-        Styles::read(sibling_part(&mut pkg, &wb_rels, &wb_part, rel_type::STYLES, "styles.xml")?);
+        Styles::read(sibling_part(pkg, &wb_rels, wb_part, rel_type::STYLES, "styles.xml")?);
 
     // Visible sheets in workbook order; hidden and veryHidden sheets are
     // omitted entirely, heading included.
@@ -70,7 +63,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             log::warn!("skipping sheet {name:?} with no worksheet relationship");
             continue;
         };
-        match path::resolve(&wb_part, target) {
+        match path::resolve(wb_part, target) {
             Ok(t) => sheets.push((name, t.path)),
             Err(e) => log::warn!("skipping sheet {name:?} with unresolvable target: {e}"),
         }
@@ -691,6 +684,12 @@ mod tests {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
     const STYLES_REL: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+
+    /// Route through the shared container dispatch, the only entry a caller
+    /// has.
+    fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
+        super::super::parse(bytes)
+    }
 
     /// Assemble a workbook: (name, state, worksheet body) per sheet, plus
     /// optional styleSheet and sst parts.

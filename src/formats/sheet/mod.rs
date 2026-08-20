@@ -12,66 +12,63 @@ use crate::error::ConvertError;
 use crate::model::Document;
 use crate::package::archive::probe_ole;
 use crate::package::relationships::{read_rels, rel_type};
-use crate::package::xml::ns;
 use crate::package::{Package, path};
-use std::io::Cursor;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
-    match container(bytes)? {
-        Some(Container::Ole) => {
-            // An encrypted OOXML package is an OLE container carrying no
-            // BIFF workbook stream, so it has to be named before the
-            // reader looks for one.
-            match probe_ole(bytes) {
-                Some(e @ ConvertError::Encrypted) => Err(e),
-                _ => xls::parse(bytes),
-            }
-        }
-        Some(Container::Xml) => xlsx::parse(bytes),
-        Some(Container::Bin) => xlsb::parse(bytes),
-        None => Err(ConvertError::malformed("not a readable workbook container")),
+    const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+    if bytes.starts_with(&OLE_MAGIC) {
+        // An encrypted OOXML package is an OLE container carrying no BIFF
+        // workbook stream, so it has to be named before the reader looks
+        // for one.
+        return match probe_ole(bytes) {
+            Some(e @ ConvertError::Encrypted) => Err(e),
+            _ => xls::parse(bytes),
+        };
+    }
+    // Failing to open as a ZIP means not a workbook; a resource limit
+    // tripped by a valid archive still propagates.
+    let mut pkg = match Package::open(bytes) {
+        Ok(pkg) => pkg,
+        Err(ConvertError::Malformed { .. }) => return Err(not_a_workbook()),
+        Err(e) => return Err(e),
+    };
+    let Some(wb_part) = main_part(&mut pkg)? else {
+        return Err(not_a_workbook());
+    };
+    match classify(&mut pkg, &wb_part)? {
+        Some(Container::Xml) => xlsx::parse(&mut pkg, &wb_part),
+        Some(Container::Bin) => xlsb::parse(&mut pkg, &wb_part),
+        None => Err(not_a_workbook()),
     }
 }
 
+fn not_a_workbook() -> ConvertError {
+    ConvertError::malformed("not a readable workbook container")
+}
+
 enum Container {
-    Ole,
     Xml,
     Bin,
 }
 
-/// Which workbook container the bytes hold: an OLE compound file (xls), or a
-/// package whose main part is SpreadsheetML (xlsx, xlsm) or its binary form
-/// (xlsb).
-fn container(bytes: &[u8]) -> Result<Option<Container>, ConvertError> {
-    const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
-    if bytes.starts_with(&OLE_MAGIC) {
-        return Ok(Some(Container::Ole));
-    }
-    let Ok(zip) = zip::ZipArchive::new(Cursor::new(bytes)) else {
-        return Ok(None);
-    };
-    let mut pkg = Package::open(bytes)?;
-    // The root relationship names the main part wherever it lives, so it
-    // decides ahead of the conventional locations, which a package may also
-    // contain as leftovers.
-    if let Some(target) = read_rels(&mut pkg, "_rels/.rels")?
+/// The package's main part: the root relationship names it wherever it
+/// lives, so it decides ahead of the conventional locations, which a
+/// package may also contain as leftovers.
+fn main_part(pkg: &mut Package) -> Result<Option<String>, ConvertError> {
+    if let Some(target) = read_rels(pkg, "_rels/.rels")?
         .first_of_type(rel_type::OFFICE_DOCUMENT)
         .and_then(|rel| path::resolve("", &rel.target).ok())
     {
-        return classify(&mut pkg, &target.path);
+        return Ok(Some(target.path));
     }
-    if zip.index_for_name("xl/workbook.xml").is_some() {
-        return classify(&mut pkg, "xl/workbook.xml");
-    }
-    if zip.index_for_name("xl/workbook.bin").is_some() {
-        return classify(&mut pkg, "xl/workbook.bin");
-    }
-    Ok(None)
+    Ok(["xl/workbook.xml", "xl/workbook.bin"]
+        .into_iter()
+        .find(|name| pkg.has_part(name))
+        .map(str::to_string))
 }
 
 /// The container a main part belongs to, from its own bytes rather than its
-/// name. An XML part has to be a SpreadsheetML workbook: any other package
-/// resolves here too, and would otherwise convert to an empty document.
+/// name: a SpreadsheetML workbook is XML, an xlsb one is a record stream.
 fn classify(pkg: &mut Package, part: &str) -> Result<Option<Container>, ConvertError> {
     let Some(bytes) = pkg.part(part)? else {
         return Ok(None);
@@ -79,14 +76,10 @@ fn classify(pkg: &mut Package, part: &str) -> Result<Option<Container>, ConvertE
     let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
     // A UTF-16 part opens on its byte order mark rather than the tag.
     let is_xml = matches!(body.iter().find(|b| !b.is_ascii_whitespace()), Some(b'<' | 0xFF | 0xFE));
-    if !is_xml {
-        return Ok((!body.is_empty()).then_some(Container::Bin));
+    if is_xml {
+        return Ok(Some(Container::Xml));
     }
-    let Some(tree) = pkg.optional_xml_part(part)? else {
-        return Ok(None);
-    };
-    let workbook = tree.child_elems().next().is_some_and(|e| e.is(ns::SML, "workbook"));
-    Ok(workbook.then_some(Container::Xml))
+    Ok((!body.is_empty()).then_some(Container::Bin))
 }
 
 /// Float formatting at the 15 significant decimal digits a spreadsheet
@@ -145,6 +138,7 @@ pub(super) fn error_literal(code: u8) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     #[test]
     fn tiny_floats_survive() {
