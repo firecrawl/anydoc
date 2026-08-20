@@ -352,10 +352,22 @@ pub(crate) fn push_math_span(tex: &str, ctx: InlineContext, out: &mut String) {
         }
         backslashes = if c == '\\' { backslashes + 1 } else { 0 };
     }
-    // A row is split into cells before the math span is parsed, so a pipe
-    // is syntax here like in a code span.
+    // A row is split into cells before the math span is parsed, so a bare
+    // pipe is syntax here; GFM strips the escaping backslash before the
+    // math is read, so an already escaped pipe stays as it is.
     let source = match ctx {
-        InlineContext::TableCell => escape_cell_code_span(&source),
+        InlineContext::TableCell => {
+            let mut escaped = String::with_capacity(source.len());
+            let mut backslashes = 0;
+            for c in source.chars() {
+                if c == '|' && backslashes % 2 == 0 {
+                    escaped.push('\\');
+                }
+                escaped.push(c);
+                backslashes = if c == '\\' { backslashes + 1 } else { 0 };
+            }
+            escaped
+        }
         _ => source,
     };
     let _ = write!(out, "${source}$");

@@ -150,6 +150,7 @@ impl Tex {
                 '\\' => inner.push_str("\\textbackslash{}"),
                 '^' => inner.push_str("\\textasciicircum{}"),
                 '~' => inner.push_str("\\textasciitilde{}"),
+                '\u{a0}' => inner.push_char('~'),
                 c if c.is_whitespace() => inner.push_char(' '),
                 c if c.is_control() => {}
                 c => inner.push_char(c),
@@ -534,7 +535,7 @@ pub(crate) fn symbol(c: char) -> Option<&'static str> {
         '⌉' => "\\rceil",
         '⌊' => "\\lfloor",
         '⌋' => "\\rfloor",
-        '‖' => "\\|",
+        '‖' => "\\Vert",
         // Spacing and invisible characters
         '−' | '‐' | '‑' | '‒' | '–' => "-",
         '\u{2009}' | '\u{200a}' | '\u{2006}' => "\\,",
@@ -556,7 +557,7 @@ pub(crate) fn delimiter(c: char) -> &'static str {
         '{' => "\\{",
         '}' => "\\}",
         '|' | '∣' => "|",
-        '‖' | '∥' => "\\|",
+        '‖' | '∥' => "\\Vert",
         '⟨' | '〈' => "\\langle",
         '⟩' | '〉' => "\\rangle",
         '⌈' => "\\lceil",

@@ -78,9 +78,10 @@ fn walk_elem(e: &Element, tex: &mut Tex) {
             tex.push_text_mode(&quoted);
         }
         "mspace" => {
-            // Only the sign of the width survives: zero is nothing,
-            // negative a thin backspace, anything else a space.
-            let width = e.attr_any("width").unwrap_or("");
+            // Only the sign of the width survives: zero (the default) is
+            // nothing, negative a thin backspace, anything else a space.
+            let width = e.attr_any("width").unwrap_or("0").trim();
+            let negative = width.starts_with('-') || width.starts_with("negative");
             let magnitude: f64 = width
                 .trim_start_matches('-')
                 .chars()
@@ -88,9 +89,10 @@ fn walk_elem(e: &Element, tex: &mut Tex) {
                 .collect::<String>()
                 .parse()
                 .unwrap_or(1.0);
-            if width.starts_with('-') {
+            if magnitude == 0.0 {
+            } else if negative {
                 tex.push_str("\\!");
-            } else if magnitude != 0.0 {
+            } else {
                 tex.push_str("\\ ");
             }
         }
