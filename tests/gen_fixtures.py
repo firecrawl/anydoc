@@ -1877,6 +1877,98 @@ def abuse():
 
 # ---------------------------------------------------------------------------
 
+
+
+# ---------------------------------------------------------------------------
+# Formatted numeric cells render their Excel display values
+
+def numberformats_xlsx():
+    ct = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"""
+    root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"""
+    workbook = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Formats" sheetId="1" r:id="rId1"/></sheets></workbook>"""
+    wb_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"""
+    styles = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="5">
+<numFmt numFmtId="164" formatCode="0.00%"/>
+<numFmt numFmtId="165" formatCode="0.00;(0.00)"/>
+<numFmt numFmtId="166" formatCode="[$$-409]#,##0.00"/>
+<numFmt numFmtId="167" formatCode="0.00&quot;|&quot;"/>
+<numFmt numFmtId="168" formatCode="$#,##0.00"/>
+</numFmts>
+<cellXfs count="11">
+<xf numFmtId="0"/>
+<xf numFmtId="164"/>
+<xf numFmtId="168"/>
+<xf numFmtId="3"/>
+<xf numFmtId="2"/>
+<xf numFmtId="11"/>
+<xf numFmtId="165"/>
+<xf numFmtId="166"/>
+<xf numFmtId="12"/>
+<xf numFmtId="14"/>
+<xf numFmtId="167"/>
+</cellXfs>
+</styleSheet>"""
+    sheet = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>
+<row r="1">
+<c r="A1" t="inlineStr"><is><t>Percent</t></is></c>
+<c r="B1" t="inlineStr"><is><t>Currency</t></is></c>
+<c r="C1" t="inlineStr"><is><t>Thousands</t></is></c>
+<c r="D1" t="inlineStr"><is><t>Decimals</t></is></c>
+<c r="E1" t="inlineStr"><is><t>Scientific</t></is></c>
+<c r="F1" t="inlineStr"><is><t>Negative</t></is></c>
+<c r="G1" t="inlineStr"><is><t>LocaleCurrency</t></is></c>
+<c r="H1" t="inlineStr"><is><t>Fraction</t></is></c>
+<c r="I1" t="inlineStr"><is><t>General</t></is></c>
+<c r="J1" t="inlineStr"><is><t>String</t></is></c>
+<c r="K1" t="inlineStr"><is><t>Date</t></is></c>
+<c r="L1" t="inlineStr"><is><t>PipeLiteral</t></is></c>
+</row>
+<row r="2">
+<c r="A2" s="1"><v>0.653035934239184</v></c>
+<c r="B2" s="2"><v>56701.0309278351</v></c>
+<c r="C2" s="3"><v>1234567</v></c>
+<c r="D2" s="4"><v>1234.5</v></c>
+<c r="E2" s="5"><v>123456</v></c>
+<c r="F2" s="6"><v>-1.5</v></c>
+<c r="G2" s="7"><v>1234.5</v></c>
+<c r="H2" s="8"><v>0.5</v></c>
+<c r="I2" s="0"><v>0.653035934239184</v></c>
+<c r="J2" s="1" t="inlineStr"><is><t>5.75%</t></is></c>
+<c r="K2" s="9"><v>46031</v></c>
+<c r="L2" s="10"><v>1234.5</v></c>
+</row>
+</sheetData>
+</worksheet>"""
+    write_zip(OUT / "xlsx" / "handmade-numberformats.xlsx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", root_rels),
+        ("xl/workbook.xml", workbook),
+        ("xl/_rels/workbook.xml.rels", wb_rels),
+        ("xl/styles.xml", styles),
+        ("xl/worksheets/sheet1.xml", sheet),
+    ])
+
+
 def main():
     skip_office = "--skip-office" in sys.argv
     for sub in ["odt", "docx", "doc", "rtf", "ods", "xlsx", "xls", "csv",
@@ -1925,6 +2017,7 @@ def main():
     manyrefs_docx()
     defaults_odf()
     merged_xlsx()
+    numberformats_xlsx()
     features_epub()
     bin_rtf()
     csvs()

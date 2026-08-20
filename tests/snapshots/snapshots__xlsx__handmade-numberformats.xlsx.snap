@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+| Percent | Currency | Thousands | Decimals | Scientific | Negative | LocaleCurrency | Fraction | General | String | Date | PipeLiteral |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 65.30% | $56,701.03 | 1,234,567 | 1234.50 | 1.23E+05 | (1.50) | $1,234.50 | 1/2 | 0.653035934239184 | 5.75% | 2026-01-09 | 1234.50\| |
