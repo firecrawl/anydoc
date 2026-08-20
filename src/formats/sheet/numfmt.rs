@@ -167,6 +167,11 @@ pub(super) struct NumberFormat {
 
 impl NumberFormat {
     pub(super) fn parse(code: &str) -> Option<NumberFormat> {
+        // An empty code is not the `;;;` idiom for hiding a value, it is a
+        // format that says nothing, so the caller falls back to General.
+        if code.is_empty() {
+            return None;
+        }
         let parts = split_sections(code)?;
         if parts.is_empty() || parts.len() > 4 {
             return None;
@@ -952,7 +957,10 @@ fn best_fraction(x: f64, fixed: Option<u64>, den_places: usize) -> Option<(u64, 
         let n = (x * d as f64).round();
         return (n < 1e18).then_some((n as u64, d));
     }
-    let max_den = 10u64.saturating_pow(u32::try_from(den_places).ok()?).saturating_sub(1).min(999);
+    // Capped at the widest denominator Excel's own formats reach, so a
+    // pile of placeholders cannot turn the search into a long loop.
+    let max_den =
+        10u64.saturating_pow(u32::try_from(den_places).ok()?).saturating_sub(1).min(9_999);
     let mut best = (0u64, 1u64);
     let mut best_err = f64::INFINITY;
     for d in 1..=max_den.max(1) {
