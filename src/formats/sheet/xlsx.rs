@@ -572,10 +572,12 @@ fn render_serial(serial: f64, parts: DateParts, date1904: bool) -> String {
     if parts.elapsed {
         return format_duration_days(serial);
     }
-    // A format naming no date shows the clock alone, as does a serial that
-    // carries no whole day.
-    if !parts.date || serial.abs() < 1.0 {
+    if !parts.date {
         return format_time_of_day(serial.fract());
+    }
+    // A serial carrying no whole day has no date for a date format to show.
+    if serial.abs() < 1.0 {
+        return format_float(serial);
     }
     // Out of the representable date range (through 9999-12-31): the serial
     // is not a date, show the number.

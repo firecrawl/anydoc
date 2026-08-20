@@ -999,27 +999,47 @@ fn best_fraction(x: f64, fixed: Option<u64>, den_places: usize) -> Option<(u64, 
         let n = (x * d as f64).round();
         return (n < 1e18).then_some((n as u64, d));
     }
-    // Capped at the widest denominator Excel's own formats reach, so a
-    // pile of placeholders cannot turn the search into a long loop.
-    let max_den =
-        10u64.saturating_pow(u32::try_from(den_places).ok()?).saturating_sub(1).min(9_999);
-    let mut best = (0u64, 1u64);
-    let mut best_err = f64::INFINITY;
-    for d in 1..=max_den.max(1) {
-        let n = (x * d as f64).round();
-        if n >= 1e18 {
-            return None;
+    let max_den = 10u64.checked_pow(u32::try_from(den_places).ok()?)?.saturating_sub(1).max(1);
+    Some(closest_rational(x, max_den))
+}
+
+/// The closest rational to `x` with a denominator no larger than `max_den`.
+///
+/// Walks the continued fraction, which reaches every best approximation in a
+/// number of steps proportional to the digits of `max_den`. When the next
+/// term would overshoot the bound, the best remaining candidate is the
+/// semiconvergent formed by the largest term that still fits.
+fn closest_rational(x: f64, max_den: u64) -> (u64, u64) {
+    let (mut pn, mut pd) = (0u64, 1u64);
+    let (mut n, mut d) = (1u64, 0u64);
+    let mut rem = x;
+    for _ in 0..64 {
+        let a = rem.floor();
+        if !(0.0..1e18).contains(&a) {
+            break;
         }
-        let err = (x - n / d as f64).abs();
-        if err < best_err {
-            best_err = err;
-            best = (n as u64, d);
-            if err == 0.0 {
-                break;
-            }
+        let a = a as u64;
+        let (Some(nd), Some(nn)) = (
+            a.checked_mul(d).and_then(|v| v.checked_add(pd)),
+            a.checked_mul(n).and_then(|v| v.checked_add(pn)),
+        ) else {
+            break;
+        };
+        if nd > max_den {
+            // d is non-zero by now: the first term always yields d = 1.
+            let k = (max_den - pd) / d;
+            let (sn, sd) = (k * n + pn, k * d + pd);
+            let better = (x - sn as f64 / sd as f64).abs() < (x - n as f64 / d as f64).abs();
+            return if better { (sn, sd) } else { (n, d) };
         }
+        (pn, pd, n, d) = (n, d, nn, nd);
+        let frac = rem - a as f64;
+        if frac <= 0.0 {
+            break;
+        }
+        rem = 1.0 / frac;
     }
-    Some(best)
+    if d == 0 { (0, 1) } else { (n, d) }
 }
 
 #[cfg(test)]
@@ -1218,5 +1238,37 @@ mod tests {
         // `m` is minutes beside an hour or a second, and months otherwise.
         assert_eq!(parts("mm:ss"), (false, true, false));
         assert_eq!(parts("mm/dd/yyyy"), (true, false, false));
+    }
+
+    #[test]
+    fn the_closest_rational_matches_an_exhaustive_search() {
+        // The continued fraction walk has to reach the same answer a scan of
+        // every denominator would, semiconvergents included.
+        let brute = |x: f64, max_den: u64| {
+            let mut best = (0u64, 1u64);
+            let mut err = f64::INFINITY;
+            for d in 1..=max_den {
+                let n = (x * d as f64).round();
+                let e = (x - n / d as f64).abs();
+                if e < err - 1e-15 {
+                    err = e;
+                    best = (n as u64, d);
+                }
+            }
+            best
+        };
+        let mut seed = 12_345u64;
+        for _ in 0..2_000 {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let x = (seed >> 11) as f64 / (1u64 << 53) as f64 * 10.0;
+            for places in 1..=3 {
+                let max_den = 10u64.pow(places) - 1;
+                let (n, d) = closest_rational(x, max_den);
+                let (bn, bd) = brute(x, max_den);
+                let got = (x - n as f64 / d as f64).abs();
+                let want = (x - bn as f64 / bd as f64).abs();
+                assert!(got <= want + 1e-12, "x={x} max_den={max_den}: {n}/{d} vs {bn}/{bd}");
+            }
+        }
     }
 }
