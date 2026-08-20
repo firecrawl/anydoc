@@ -94,6 +94,31 @@ fn trailing_delimiter_before_styled_run_escaped() {
 }
 
 #[test]
+fn delimiters_do_not_pair_across_run_seams() {
+    // Two lines each ending in a backtick must not form a code span (#45).
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        Inline::plain("b `"),
+    ])]);
+    assert_eq!(md, "a \\`\\\nb `\n");
+    // Emphasis pairs across a hard break just as code spans do.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a *"),
+        Inline::LineBreak,
+        Inline::plain("b*"),
+    ])]);
+    assert_eq!(md, "a \\*\\\nb*\n");
+    // A raw backtick pairs with a later code span's fence.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        styled("x", Style { code: true, ..Style::PLAIN }),
+    ])]);
+    assert_eq!(md, "a \\`\\\n`x`\n");
+}
+
+#[test]
 fn bold_trailing_space_moved_out() {
     let md = doc(vec![Block::Paragraph(vec![styled("bold ", BOLD), Inline::plain("plain")])]);
     assert_eq!(md, "**bold** plain\n");

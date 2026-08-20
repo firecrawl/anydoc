@@ -3,7 +3,7 @@
 use crate::model::{ImageSource, Inline, LinkTarget, Style, inlines_are_empty};
 use crate::render::markdown::Ctx;
 use crate::render::markdown::escape::{
-    EscapeOpts, InlineContext, backtick_fence, escape_cell_code_span, escape_text,
+    Delims, EscapeOpts, InlineContext, backtick_fence, escape_cell_code_span, escape_text,
     escape_url_as_text, format_url,
 };
 use std::borrow::Cow;
@@ -89,14 +89,26 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
     for (idx, run) in runs.iter().enumerate() {
         match run {
             Norm::Text { text, style } => {
-                let next_active = matches!(
-                    runs.get(idx + 1),
-                    Some(Norm::Link { .. } | Norm::Image { .. } | Norm::NoteRef(_))
-                ) || matches!(
-                    runs.get(idx + 1),
-                    Some(Norm::Text { style, .. }) if *style != Style::PLAIN
-                );
-                render_text_run(text, *style, ctx, next_active, in_label, &mut out)
+                let next = runs.get(idx + 1);
+                let next_active =
+                    matches!(next, Some(Norm::Link { .. } | Norm::Image { .. } | Norm::NoteRef(_)))
+                        || matches!(
+                            next,
+                            Some(Norm::Text { style, .. }) if *style != Style::PLAIN
+                        );
+                // A hard break renders as `\`, an anchor as `<a ...>`: not
+                // markup, but a nonspace character a run-final delimiter can
+                // be left-flanking against.
+                let next_nonspace = matches!(next, Some(Norm::Anchor(_)))
+                    || (matches!(next, Some(Norm::LineBreak)) && ctx != InlineContext::Heading);
+                let opts = EscapeOpts {
+                    trailing_active: next_active,
+                    trailing_nonspace: next_nonspace,
+                    trailing_delims: delims_ahead(&runs[idx + 1..]),
+                    in_label,
+                    ..Default::default()
+                };
+                render_text_run(text, *style, ctx, opts, &mut out)
             }
             Norm::NoteRef(id) => {
                 if let Some(num) = rc.nums.get(*id) {
@@ -180,22 +192,79 @@ fn render_image(
     }
 }
 
+/// Pairable delimiters the remaining runs will emit into the current rendered
+/// line: literal characters in plain text, plus the markup that styled runs,
+/// code spans, links and images produce. A delimiter in an earlier run can
+/// pair with any of them across the run seam, hard breaks included.
+fn delims_ahead(runs: &[Norm]) -> Delims {
+    let mut delims = Delims::default();
+    for run in runs {
+        match run {
+            Norm::Text { style, .. } if style.code => delims.insert('`'),
+            Norm::Text { text, style } if *style == Style::PLAIN => delims.insert_text(text),
+            Norm::Text { text, style } => {
+                // Emphasis content is fully escaped; only the wrapping
+                // delimiters and a literal `]` reach the output raw.
+                if style.bold || style.italic {
+                    delims.insert('*');
+                }
+                if style.strike {
+                    delims.insert('~');
+                }
+                if text.contains(']') {
+                    delims.insert(']');
+                }
+            }
+            // Emphasis cannot cross a link boundary, but a code span can: a
+            // backtick in the label or destination pairs with one outside.
+            Norm::Link { content, target } => {
+                if emits_backtick(content) || target_has_backtick(target) {
+                    delims.insert('`');
+                }
+            }
+            Norm::Image { alt, source } => match source {
+                ImageSource::External(_) if alt.contains('`') => delims.insert('`'),
+                ImageSource::External(_) => {}
+                // Sourceless images degrade to their alt as plain text.
+                ImageSource::Asset(_) | ImageSource::Unavailable => delims.insert_text(alt),
+            },
+            Norm::NoteRef(_) | Norm::Anchor(_) | Norm::LineBreak => {}
+        }
+    }
+    delims
+}
+
+fn target_has_backtick(target: &LinkTarget) -> bool {
+    match target {
+        LinkTarget::External(url) | LinkTarget::Relative(url) => url.contains('`'),
+        LinkTarget::Anchor(_) => false,
+    }
+}
+
+/// True when rendering `inlines` inside a link label leaves a raw backtick in
+/// the output (label escaping leaves a lone backtick alone).
+fn emits_backtick(inlines: &[Inline]) -> bool {
+    inlines.iter().any(|inline| match inline {
+        Inline::Text { text, style } => style.code || text.contains('`'),
+        Inline::Link { content, target } => emits_backtick(content) || target_has_backtick(target),
+        Inline::Image { alt, .. } => alt.contains('`'),
+        _ => false,
+    })
+}
+
 /// Emit a styled run, moving edge whitespace outside the delimiters.
+/// `opts` carries the trailing context; `at_line_start` and `styled` are
+/// filled in here.
 fn render_text_run(
     text: &str,
     style: Style,
     ctx: InlineContext,
-    trailing_active: bool,
-    in_label: bool,
+    opts: EscapeOpts,
     out: &mut String,
 ) {
     if style == Style::PLAIN {
         let at_line_start = out.is_empty() || out.ends_with('\n');
-        out.push_str(&escape_text(
-            text,
-            ctx,
-            EscapeOpts { at_line_start, trailing_active, in_label, ..Default::default() },
-        ));
+        out.push_str(&escape_text(text, ctx, EscapeOpts { at_line_start, ..opts }));
         return;
     }
     let core_start = text.len() - text.trim_start().len();
@@ -223,7 +292,7 @@ fn render_text_run(
             out.push_str(&escape_text(
                 core,
                 ctx,
-                EscapeOpts { styled: true, in_label, ..Default::default() },
+                EscapeOpts { styled: true, in_label: opts.in_label, ..Default::default() },
             ));
             out.push_str(&close);
         }

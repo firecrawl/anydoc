@@ -23,25 +23,67 @@ pub(crate) struct EscapeOpts {
     /// The character following the run is unknown or active markup; pairable
     /// delimiters must assume the worst.
     pub trailing_active: bool,
+    /// The rest of the line starts with a non-whitespace character that is
+    /// not active markup (a hard break's backslash, an anchor tag), so a
+    /// run-final delimiter can still be left-flanking.
+    pub trailing_nonspace: bool,
+    /// Delimiters that later runs on the same rendered line will emit; a
+    /// delimiter in this run can pair with one of them across the run seam.
+    pub trailing_delims: Delims,
     /// Inside a link label / image alt, where an unmatched `]` (or `[`)
     /// would terminate the label early.
     pub in_label: bool,
 }
 
+/// Set of pairable delimiter characters (`*` `_` `~` `` ` `` `]`).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Delims([bool; 5]);
+
+impl Delims {
+    fn slot(c: char) -> Option<usize> {
+        match c {
+            '*' => Some(0),
+            '_' => Some(1),
+            '~' => Some(2),
+            '`' => Some(3),
+            ']' => Some(4),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn insert(&mut self, c: char) {
+        if let Some(slot) = Self::slot(c) {
+            self.0[slot] = true;
+        }
+    }
+
+    pub(crate) fn insert_text(&mut self, text: &str) {
+        for c in text.chars() {
+            self.insert(c);
+        }
+    }
+
+    fn contains(self, slot: usize) -> bool {
+        self.0[slot]
+    }
+}
+
 /// Escape Markdown syntax in document text.
 pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> String {
-    let EscapeOpts { at_line_start, styled, trailing_active, in_label } = opts;
+    let EscapeOpts {
+        at_line_start,
+        styled,
+        trailing_active,
+        trailing_nonspace,
+        trailing_delims,
+        in_label,
+    } = opts;
     let chars: Vec<char> = text.chars().collect();
     // Last position of each pairable delimiter; a lone one is inert.
     let mut last: [Option<usize>; 5] = [None; 5]; // * _ ~ ` ]
     for (j, &c) in chars.iter().enumerate() {
-        match c {
-            '*' => last[0] = Some(j),
-            '_' => last[1] = Some(j),
-            '~' => last[2] = Some(j),
-            '`' => last[3] = Some(j),
-            ']' => last[4] = Some(j),
-            _ => {}
+        if let Some(slot) = Delims::slot(c) {
+            last[slot] = Some(j);
         }
     }
     let mut out = String::with_capacity(text.len() + 8);
@@ -63,8 +105,11 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
         }
         let next = chars.get(i + 1).copied();
         // At the run's end the next character is unknown; trailing_active assumes the worst.
-        let next_nonspace = next.map_or(trailing_active, |n| !n.is_whitespace());
-        let paired = |slot: usize| trailing_active || last[slot].is_some_and(|j| j > i);
+        let next_nonspace =
+            next.map_or(trailing_active || trailing_nonspace, |n| !n.is_whitespace());
+        let paired = |slot: usize| {
+            trailing_active || trailing_delims.contains(slot) || last[slot].is_some_and(|j| j > i)
+        };
         let escape = match c {
             '\\' => true,
             ']' if in_label => true,
