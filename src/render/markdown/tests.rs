@@ -46,6 +46,27 @@ fn lone_syntax_chars_left_alone() {
 }
 
 #[test]
+fn partners_that_cannot_close_leave_delimiters_raw() {
+    // The space-padded `*` is not right-flanking, so the opener is inert.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("a *b 2 * 3")])]);
+    assert_eq!(md, "a *b 2 * 3\n");
+    // Same across a run seam.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a *"),
+        Inline::LineBreak,
+        Inline::plain("2 * 3"),
+    ])]);
+    assert_eq!(md, "a *\\\n2 * 3\n");
+    // Intraword underscores can neither open nor close.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a _"),
+        Inline::LineBreak,
+        Inline::plain("snake_case"),
+    ])]);
+    assert_eq!(md, "a _\\\nsnake_case\n");
+}
+
+#[test]
 fn intraword_underscores_unescaped() {
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("snake_case_name vs _lead_")])]);
     assert_eq!(md, "snake_case_name vs \\_lead_\n");

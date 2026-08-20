@@ -57,9 +57,15 @@ impl Delims {
         }
     }
 
-    pub(crate) fn insert_text(&mut self, text: &str) {
-        for c in text.chars() {
-            self.insert(c);
+    /// Record the partners `text` contributes when emitted as document
+    /// text: every backtick and `]`, plus the emphasis delimiters that
+    /// can close.
+    pub(crate) fn insert_closers(&mut self, text: &str) {
+        let chars: Vec<char> = text.chars().collect();
+        for j in 0..chars.len() {
+            if let Some(slot) = partner_slot(&chars, j) {
+                self.0[slot] = true;
+            }
         }
     }
 
@@ -74,6 +80,30 @@ impl Delims {
     }
 }
 
+/// Slot for the delimiter at `j` when it can act as a pairing partner.
+/// Backticks and `]` always can: code spans pair by backtick-string length
+/// (even a backslash-escaped backtick still closes one) and brackets pair
+/// as link structure. `*`, `_` and `~` pair by flanking, so they only
+/// count where they can close.
+fn partner_slot(chars: &[char], j: usize) -> Option<usize> {
+    let slot = Delims::slot(chars[j])?;
+    (matches!(chars[j], '`' | ']') || can_close(chars, j)).then_some(slot)
+}
+
+/// Whether the emphasis or strikethrough delimiter at `j` could close a
+/// pair: approximate right-flanking (not preceded by whitespace), plus the
+/// intraword exclusion for `_`. Unknown neighbours at the edges assume the
+/// worst.
+fn can_close(chars: &[char], j: usize) -> bool {
+    let prev = j.checked_sub(1).map(|p| chars[p]);
+    if prev.is_some_and(char::is_whitespace) {
+        return false;
+    }
+    chars[j] != '_'
+        || !(prev.is_some_and(char::is_alphanumeric)
+            && chars.get(j + 1).is_some_and(|n| n.is_alphanumeric()))
+}
+
 /// Escape Markdown syntax in document text.
 pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> String {
     let EscapeOpts {
@@ -85,10 +115,11 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
         in_label,
     } = opts;
     let chars: Vec<char> = text.chars().collect();
-    // Last position of each pairable delimiter; a lone one is inert.
+    // Last position of each delimiter that can pair; one with no later
+    // partner is inert.
     let mut last: [Option<usize>; 5] = [None; 5]; // * _ ~ ` ]
-    for (j, &c) in chars.iter().enumerate() {
-        if let Some(slot) = Delims::slot(c) {
+    for j in 0..chars.len() {
+        if let Some(slot) = partner_slot(&chars, j) {
             last[slot] = Some(j);
         }
     }

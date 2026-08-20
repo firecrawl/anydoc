@@ -194,7 +194,7 @@ fn render_image(
 }
 
 /// Pairable delimiters the remaining runs will emit into the current rendered
-/// line: literal characters in plain text, plus the markup that styled runs,
+/// line: closer-capable literals in plain text, plus the markup that styled runs,
 /// code spans, links and images produce. A delimiter in an earlier run can
 /// pair with any of them across the run seam, hard breaks included.
 /// The delimiters each suffix of `runs` emits, indexed by where the suffix
@@ -214,7 +214,7 @@ fn delims_of(run: &Norm, rc: &Ctx) -> Delims {
     let mut delims = Delims::default();
     match run {
         Norm::Text { style, .. } if style.code => delims.insert('`'),
-        Norm::Text { text, style } if *style == Style::PLAIN => delims.insert_text(text),
+        Norm::Text { text, style } if *style == Style::PLAIN => delims.insert_closers(text),
         Norm::Text { text, style } => {
             // Emphasis content is escaped, which neutralizes everything
             // but backticks: code spans ignore backslash escapes, so an
@@ -254,7 +254,7 @@ fn delims_of(run: &Norm, rc: &Ctx) -> Delims {
             ImageSource::External(_) if alt.contains('`') => delims.insert('`'),
             ImageSource::External(_) => {}
             // Sourceless images degrade to their alt as plain text.
-            ImageSource::Asset(_) | ImageSource::Unavailable => delims.insert_text(alt),
+            ImageSource::Asset(_) | ImageSource::Unavailable => delims.insert_closers(alt),
         },
         Norm::NoteRef(_) | Norm::Anchor(_) | Norm::LineBreak => {}
     }
