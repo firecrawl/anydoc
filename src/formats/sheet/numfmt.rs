@@ -8,6 +8,8 @@
 //! return `None` and the caller falls back to General: approximating a
 //! format silently would be worse than not applying it.
 
+use std::cmp::Ordering;
+
 /// Implied format codes for built-in numFmtIds. Ids 5-8 are absent
 /// deliberately: the standard leaves them to the file's own formatCode, so
 /// an unresolved reference falls back to General rather than a guessed
@@ -1011,41 +1013,79 @@ fn best_fraction(x: f64, fixed: Option<u64>, den_places: usize) -> Option<(u64, 
 
 /// The closest rational to `x` with a denominator no larger than `max_den`.
 ///
-/// Walks the continued fraction, which reaches every best approximation in a
-/// number of steps proportional to the digits of `max_den`. When the next
-/// term would overshoot the bound, the best remaining candidate is the
-/// semiconvergent formed by the largest term that still fits.
+/// Walks the continued fraction of the exact ratio the float stores, in a
+/// number of steps proportional to the digits of `max_den`. Repeatedly
+/// inverting the float remainder instead would compound rounding until the
+/// walk picks a non-closest fraction under large bounds. When the next term
+/// would overshoot the bound, the only other candidate is the semiconvergent
+/// with the largest term that fits, and the exact tail decides between them.
 fn closest_rational(x: f64, max_den: u64) -> (u64, u64) {
+    let Some((mut p, mut q)) = dyadic(x) else {
+        return (0, 1);
+    };
     let (mut pn, mut pd) = (0u64, 1u64);
     let (mut n, mut d) = (1u64, 0u64);
-    let mut rem = x;
-    for _ in 0..64 {
-        let a = rem.floor();
-        if !(0.0..1e18).contains(&a) {
-            break;
-        }
-        let a = a as u64;
-        let (Some(nd), Some(nn)) = (
-            a.checked_mul(d).and_then(|v| v.checked_add(pd)),
-            a.checked_mul(n).and_then(|v| v.checked_add(pn)),
-        ) else {
-            break;
+    while q > 0 {
+        let a = p / q;
+        let rem = p % q;
+        let next = u64::try_from(a).ok().and_then(|a| {
+            Some((a.checked_mul(n)?.checked_add(pn)?, a.checked_mul(d)?.checked_add(pd)?))
+        });
+        let (nn, nd) = match next {
+            Some((nn, nd)) if nd <= max_den => (nn, nd),
+            // The first term alone is past every u64 numerator.
+            _ if d == 0 => return (0, 1),
+            _ => {
+                let k = (max_den - pd) / d;
+                let semi =
+                    k.checked_mul(n).and_then(|v| v.checked_add(pn)).map(|sn| (sn, k * d + pd));
+                // With the exact tail r = p/q, the semiconvergent is closer
+                // iff (r - k)d < kd + pd, i.e. rem*d < q*((2k - a)d + pd):
+                // certain for 2k > a, impossible for 2k < a (pd < d).
+                let better = match (u128::from(k) * 2).cmp(&a) {
+                    Ordering::Greater => true,
+                    Ordering::Less => false,
+                    Ordering::Equal => mul_cmp(rem, d, q, pd) == Ordering::Less,
+                };
+                return match (semi, better) {
+                    (Some(semi), true) => semi,
+                    _ => (n, d),
+                };
+            }
         };
-        if nd > max_den {
-            // d is non-zero by now: the first term always yields d = 1.
-            let k = (max_den - pd) / d;
-            let (sn, sd) = (k * n + pn, k * d + pd);
-            let better = (x - sn as f64 / sd as f64).abs() < (x - n as f64 / d as f64).abs();
-            return if better { (sn, sd) } else { (n, d) };
-        }
         (pn, pd, n, d) = (n, d, nn, nd);
-        let frac = rem - a as f64;
-        if frac <= 0.0 {
-            break;
-        }
-        rem = 1.0 / frac;
+        (p, q) = (q, rem);
     }
     if d == 0 { (0, 1) } else { (n, d) }
+}
+
+/// A finite non-negative float as the ratio it stores exactly. `None` when
+/// no exact ratio fits (under 2^-74 every u64-bounded fraction rounds to
+/// zero; past u128 no bounded denominator distinguishes it from an
+/// integer), which the walk treats as zero.
+fn dyadic(x: f64) -> Option<(u128, u128)> {
+    let bits = x.to_bits();
+    let exp = (bits >> 52) as i32;
+    let frac = bits & ((1u64 << 52) - 1);
+    let (m, e) = if exp == 0 { (frac, -1074) } else { (frac | 1 << 52, exp - 1075) };
+    if m == 0 {
+        return Some((0, 1));
+    }
+    if e >= 0 {
+        return (e <= 75).then(|| (u128::from(m) << e, 1));
+    }
+    let shift = m.trailing_zeros().min(e.unsigned_abs());
+    let k = e.unsigned_abs() - shift;
+    (k <= 127).then(|| (u128::from(m >> shift), 1u128 << k))
+}
+
+/// `a * b` against `c * e`, exact in 192 bits.
+fn mul_cmp(a: u128, b: u64, c: u128, e: u64) -> Ordering {
+    let wide = |x: u128, y: u64| {
+        let lo = (x & u128::from(u64::MAX)) * u128::from(y);
+        ((x >> 64) * u128::from(y) + (lo >> 64), lo as u64)
+    };
+    wide(a, b).cmp(&wide(c, e))
 }
 
 #[cfg(test)]
@@ -1279,7 +1319,7 @@ mod tests {
         for _ in 0..2_000 {
             seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
             let x = (seed >> 11) as f64 / (1u64 << 53) as f64 * 10.0;
-            for places in 1..=3 {
+            for places in 1..=4 {
                 let max_den = 10u64.pow(places) - 1;
                 let (n, d) = closest_rational(x, max_den);
                 let (bn, bd) = brute(x, max_den);
@@ -1288,5 +1328,12 @@ mod tests {
                 assert!(got <= want + 1e-12, "x={x} max_den={max_den}: {n}/{d} vs {bn}/{bd}");
             }
         }
+    }
+
+    #[test]
+    fn the_walk_stays_exact_past_float_precision() {
+        // 1/3 as a float is the dyadic 6004799503160661/2^54, which a large
+        // bound represents exactly; a float walk stops at 1/3 instead.
+        assert_eq!(closest_rational(1.0 / 3.0, u64::MAX), (6004799503160661, 18014398509481984));
     }
 }
