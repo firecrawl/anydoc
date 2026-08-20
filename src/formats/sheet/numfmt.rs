@@ -397,7 +397,7 @@ fn parse_section(s: &str) -> Option<Section> {
                 let end = chars[i..].iter().position(|&c| c == ']')? + i;
                 let inner: String = chars[i + 1..end].iter().collect();
                 i = end + 1;
-                bracket(&inner, &mut raw, &mut condition, &mut has_date, &mut elapsed)?;
+                bracket(&inner, &mut raw, &mut condition, &mut has_date, &mut elapsed, &mut runs)?;
             }
             '"' => {
                 let end = chars[i + 1..].iter().position(|&c| c == '"')? + i + 1;
@@ -544,6 +544,7 @@ fn bracket(
     condition: &mut Option<Cond>,
     has_date: &mut bool,
     elapsed: &mut bool,
+    runs: &mut Vec<char>,
 ) -> Option<()> {
     match inner.chars().next()? {
         '<' | '>' | '=' => {
@@ -578,6 +579,7 @@ fn bracket(
         {
             *has_date = true;
             *elapsed = true;
+            runs.push(c.to_ascii_lowercase());
         }
         _ => {
             let lower = inner.to_ascii_lowercase();
