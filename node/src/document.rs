@@ -24,6 +24,7 @@ pub enum BlockKind {
     blockQuote,
     codeBlock,
     rule,
+    math,
 }
 
 #[napi(object)]
@@ -41,7 +42,7 @@ pub struct Block {
     pub blocks: Option<Vec<Block>>,
     /// codeBlock.
     pub lang: Option<String>,
-    /// codeBlock.
+    /// codeBlock, math (LaTeX source without delimiters).
     pub text: Option<String>,
 }
 
@@ -86,6 +87,7 @@ impl From<model::Block> for Block {
                 Block { lang, text: Some(text), ..Block::of(BlockKind::codeBlock) }
             }
             model::Block::Rule => Block::of(BlockKind::rule),
+            model::Block::Math(tex) => Block { text: Some(tex), ..Block::of(BlockKind::math) },
         }
     }
 }
@@ -100,12 +102,14 @@ pub enum InlineKind {
     anchor,
     noteRef,
     lineBreak,
+    /// An inline formula.
+    math,
 }
 
 #[napi(object)]
 pub struct Inline {
     pub kind: InlineKind,
-    /// text.
+    /// text; math (LaTeX source without delimiters).
     pub text: Option<String>,
     /// text.
     pub style: Option<Style>,
@@ -164,6 +168,7 @@ impl From<model::Inline> for Inline {
                 Inline { note_id: Some(id), ..Inline::of(InlineKind::noteRef) }
             }
             model::Inline::LineBreak => Inline::of(InlineKind::lineBreak),
+            model::Inline::Math(tex) => Inline { text: Some(tex), ..Inline::of(InlineKind::math) },
         }
     }
 }

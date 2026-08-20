@@ -46,7 +46,7 @@ export interface Block {
   blocks?: Array<Block>
   /** codeBlock. */
   lang?: string
-  /** codeBlock. */
+  /** codeBlock, math (LaTeX source without delimiters). */
   text?: string
 }
 
@@ -57,7 +57,8 @@ export declare const enum BlockKind {
   table = 'table',
   blockQuote = 'blockQuote',
   codeBlock = 'codeBlock',
-  rule = 'rule'
+  rule = 'rule',
+  math = 'math'
 }
 
 export interface Cell {
@@ -152,7 +153,7 @@ export declare const enum ImageSourceKind {
 
 export interface Inline {
   kind: InlineKind
-  /** text. */
+  /** text; math (LaTeX source without delimiters). */
   text?: string
   /** text. */
   style?: Style
@@ -177,7 +178,9 @@ export declare const enum InlineKind {
   /** Zero-width marker for an internal link target at this position. */
   anchor = 'anchor',
   noteRef = 'noteRef',
-  lineBreak = 'lineBreak'
+  lineBreak = 'lineBreak',
+  /** An inline formula. */
+  math = 'math'
 }
 
 export interface LinkTarget {

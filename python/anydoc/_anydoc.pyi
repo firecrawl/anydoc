@@ -81,7 +81,7 @@ class Document:
 
 @final
 class Block:
-    kind: Literal["heading", "paragraph", "list", "table", "block_quote", "code_block", "rule"]
+    kind: Literal["heading", "paragraph", "list", "table", "block_quote", "code_block", "rule", "math"]
     level: int | None
     """heading: 1-6."""
     anchor: str | None
@@ -95,11 +95,11 @@ class Block:
     lang: str | None
     """code_block."""
     text: str | None
-    """code_block."""
+    """code_block, math (LaTeX source without delimiters)."""
 
 @final
 class Inline:
-    kind: Literal["text", "link", "image", "anchor", "note_ref", "line_break"]
+    kind: Literal["text", "link", "image", "anchor", "note_ref", "line_break", "math"]
     """`anchor` is a zero-width marker for an internal link target at this
     position."""
     text: str | None

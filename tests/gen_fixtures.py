@@ -867,6 +867,213 @@ or <a href="notes.txt">a relative resource</a>.</p>
 
 
 # ---------------------------------------------------------------------------
+# Math: OMML (docx, pptx, rtf) and MathML (odt, epub) convert to LaTeX
+
+M_NS = 'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"'
+MC_NS = 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"'
+A14_NS = 'xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main"'
+
+
+def omml_run(text):
+    return f'<m:r><m:t xml:space="preserve">{text}</m:t></m:r>'
+
+
+# x = (-b ± √(b² - 4ac)) / 2a
+OMML_QUADRATIC = (
+    "<m:oMath>" + omml_run("x") + omml_run("=")
+    + "<m:f><m:num>" + omml_run("-b±")
+    + '<m:rad><m:radPr><m:degHide m:val="1"/></m:radPr><m:deg/><m:e>'
+    + "<m:sSup><m:e>" + omml_run("b") + "</m:e><m:sup>" + omml_run("2") + "</m:sup></m:sSup>"
+    + omml_run("-4ac") + "</m:e></m:rad></m:num>"
+    + "<m:den>" + omml_run("2a") + "</m:den></m:f></m:oMath>"
+)
+# ∑_{i=1}^{n} x_i = sin(θ)
+OMML_SUM = (
+    '<m:oMath><m:nary><m:naryPr><m:chr m:val="∑"/><m:limLoc m:val="undOvr"/></m:naryPr>'
+    + "<m:sub>" + omml_run("i=1") + "</m:sub><m:sup>" + omml_run("n") + "</m:sup>"
+    + "<m:e><m:sSub><m:e>" + omml_run("x") + "</m:e><m:sub>" + omml_run("i") + "</m:sub></m:sSub></m:e></m:nary>"
+    + omml_run("=")
+    + '<m:func><m:fName><m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t>sin</m:t></m:r></m:fName>'
+    + "<m:e><m:d><m:e>" + omml_run("θ") + "</m:e></m:d></m:e></m:func></m:oMath>"
+)
+# where 𝐱 ∈ ℝ (normal text run plus styled alphanumerics)
+OMML_WHERE = (
+    '<m:oMath><m:r><m:rPr><m:nor/></m:rPr><m:t xml:space="preserve">where </m:t></m:r>'
+    + omml_run("𝐱 ∈ ℝ") + "</m:oMath>"
+)
+
+
+def math_docx():
+    document = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document {W} {M_NS}><w:body>
+<w:p><w:r><w:t xml:space="preserve">The roots are </w:t></w:r>{OMML_QUADRATIC}<w:r><w:t xml:space="preserve"> for any a.</w:t></w:r></w:p>
+<w:p><m:oMathPara>{OMML_SUM}{OMML_WHERE}</m:oMathPara></w:p>
+<w:p><w:r><w:t>A price of $5 or $6 is not math.</w:t></w:r></w:p>
+</w:body></w:document>"""
+    styles = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              f'<w:styles {W}>'
+              '<w:docDefaults><w:rPrDefault><w:rPr/></w:rPrDefault></w:docDefaults></w:styles>')
+    write_zip(OUT / "docx" / "handmade-math.docx", [
+        ("[Content_Types].xml", CONTENT_TYPES_BASE.format(extra="")),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/document.xml", document),
+        ("word/styles.xml", styles),
+    ])
+
+
+def math_pptx():
+    """PowerPoint wraps an equation shape in an a14 AlternateContent whose
+    fallback is a picture of the equation."""
+    presentation = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation {PPTX_NS}>
+<p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+</p:presentation>"""
+    pres_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>"""
+    slide = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld {PPTX_NS} {MC_NS} {A14_NS} {M_NS}>
+<p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+<p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>Quadratic formula</a:t></a:r></a:p></p:txBody></p:sp>
+<mc:AlternateContent><mc:Choice Requires="a14">
+<p:sp><p:nvSpPr><p:cNvPr id="3" name="Equation"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+<p:spPr/><p:txBody><a:bodyPr/>
+<a:p><a:r><a:t>Solve with </a:t></a:r><a14:m><m:oMathPara>{OMML_QUADRATIC}</m:oMathPara></a14:m></a:p>
+<a:p><a14:m><m:oMathPara>{OMML_SUM}</m:oMathPara></a14:m></a:p>
+</p:txBody></p:sp>
+</mc:Choice><mc:Fallback>
+<p:sp><p:nvSpPr><p:cNvPr id="3" name="Equation"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+<p:spPr><a:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></a:blipFill></p:spPr>
+<p:txBody><a:bodyPr/><a:p/></p:txBody></p:sp>
+</mc:Fallback></mc:AlternateContent>
+</p:spTree></p:cSld></p:sld>"""
+    slide_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"""
+    root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>"""
+    ct = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Default Extension="png" ContentType="image/png"/>
+<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>"""
+    write_zip(OUT / "pptx" / "handmade-math.pptx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", root_rels),
+        ("ppt/presentation.xml", presentation),
+        ("ppt/_rels/presentation.xml.rels", pres_rels),
+        ("ppt/slides/slide1.xml", slide),
+        ("ppt/slides/_rels/slide1.xml.rels", slide_rels),
+        ("ppt/media/image1.png", DOT_PNG),
+    ])
+
+
+def math_odt():
+    """LibreOffice stores a formula as an object directory holding MathML
+    (with a StarMath annotation) next to a replacement metafile; ODF also
+    allows the MathML inline in the draw:object."""
+    formula = """<?xml version="1.0" encoding="UTF-8"?>
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+<semantics>
+<mrow><mi>E</mi><mo stretchy="false">=</mo><mi>m</mi><msup><mi>c</mi><mn>2</mn></msup></mrow>
+<annotation encoding="StarMath 5.0">E = m c^2</annotation>
+</semantics>
+</math>"""
+    content = """<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xmlns:math="http://www.w3.org/1998/Math/MathML" office:version="1.3">
+<office:body><office:text>
+<text:p>Einstein wrote <draw:frame draw:name="Object1" text:anchor-type="as-char">
+<draw:object xlink:href="./Object 1" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>
+<draw:image xlink:href="./ObjectReplacements/Object 1" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>
+</draw:frame> on the board.</text:p>
+<text:p>Inline object: <draw:frame draw:name="Object2" text:anchor-type="as-char"><draw:object>
+<math:math><math:semantics><math:mrow><math:mfrac><math:mi>a</math:mi><math:mi>b</math:mi></math:mfrac>
+<math:mo>+</math:mo><math:msqrt><math:mi>x</math:mi></math:msqrt></math:mrow></math:semantics></math:math>
+</draw:object></draw:frame> done.</text:p>
+</office:text></office:body></office:document-content>"""
+    manifest = """<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3">
+<manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/>
+<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+<manifest:file-entry manifest:full-path="Object 1/content.xml" manifest:media-type="text/xml"/>
+<manifest:file-entry manifest:full-path="Object 1/" manifest:media-type="application/vnd.oasis.opendocument.formula"/>
+<manifest:file-entry manifest:full-path="ObjectReplacements/Object 1" manifest:media-type=""/>
+</manifest:manifest>"""
+    write_zip(OUT / "odt" / "handmade-math.odt", [
+        ("content.xml", content),
+        ("META-INF/manifest.xml", manifest),
+        ("Object 1/content.xml", formula),
+        ("ObjectReplacements/Object 1", b"VCLMTF\x00replacement-stand-in"),
+    ], mimetype_first="application/vnd.oasis.opendocument.text")
+
+
+def math_epub():
+    ch = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Math</title></head><body>
+<h1>Formulas</h1>
+<p>Euler: <math xmlns="http://www.w3.org/1998/Math/MathML"><semantics>
+<mrow><msup><mi>e</mi><mrow><mi>i</mi><mi>π</mi></mrow></msup><mo>+</mo><mn>1</mn><mo>=</mo><mn>0</mn></mrow>
+<annotation encoding="application/x-tex">e^{i\\pi} + 1 = 0</annotation>
+</semantics></math> holds.</p>
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+<mrow><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><mi>∞</mi></munderover>
+<mfrac><msup><mi>x</mi><mi>k</mi></msup><mrow><mi>k</mi><mo>!</mo></mrow></mfrac>
+<mo>=</mo><mi>exp</mi><mo>⁡</mo><mfenced><mi>x</mi></mfenced></mrow>
+</math>
+<p>Vectors: <math xmlns="http://www.w3.org/1998/Math/MathML"><mover><mi>v</mi><mo>→</mo></mover><mo>·</mo><mover><mi>w</mi><mo>→</mo></mover></math>.</p>
+</body></html>"""
+    opf = """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:identifier id="uid">urn:uuid:00000000-0000-0000-0000-0000000math0</dc:identifier>
+<dc:title>Math Book</dc:title><dc:language>en</dc:language>
+</metadata>
+<manifest><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml" properties="mathml"/></manifest>
+<spine><itemref idref="c1"/></spine>
+</package>"""
+    container = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"""
+    write_zip(OUT / "epub" / "handmade-math.epub", [
+        ("META-INF/container.xml", container),
+        ("OEBPS/content.opf", opf),
+        ("OEBPS/ch1.xhtml", ch),
+    ], mimetype_first="application/epub+zip")
+
+
+def math_rtf():
+    """Word's rtf: a math zone nests `{\\*\\moMath ...}` and a `\\mmathPict`
+    picture fallback; `\\mmathPara` wraps a displayed equation."""
+    parts = [
+        rb"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0 Cambria Math;}}",
+        rb"\pard The roots are {\mmath{\*\moMath{\mr\rtlch\fcs1 \af0 \ltrch\fcs0 \f0 x}{\mr =}"
+        rb"{\mf{\mfPr{\mctrlPr}}{\mnum{\mr -b\'b1}{\mrad{\mradPr{\mdegHide on}}{\mdeg}{\me{\msSup{\me{\mr b}}{\msup{\mr 2}}}{\mr -4ac}}}}"
+        rb"{\mden{\mr 2a}}}}{\mmathPict{\*\mmathPr}{\pict\pngblip\picw1\pich1 89504e47}}} for any a.\par",
+        b"\\pard {\\mmathPara{\\mmathParaPr{\\mjc centerGroup}}{\\mmath{\\*\\moMath"
+        b"{\\mnary{\\mnaryPr{\\mchr \\u8721\\'3f}{\\mlimLoc undOvr}{\\mgrow 1}{\\msubHide 0}{\\msupHide 0}}"
+        b"{\\msub{\\mr i=1}}{\\msup{\\mr n}}{\\me{\\msSub{\\me{\\mr x}}{\\msub{\\mr i}}}}}{\\mr =}"
+        b"{\\mfunc{\\mfName{\\mr{\\mrPr{\\msty p}}sin}}{\\me{\\md{\\me{\\mr \\u952\\'3f}}}}}}}}\\par",
+        rb"\pard A price of $5 or $6 is not math.\par",
+        rb"}",
+    ]
+    (OUT / "rtf" / "handmade-math.rtf").write_bytes(b"\n".join(parts))
+
+
+# ---------------------------------------------------------------------------
 # R17a: merged ranges in spreadsheets become spanning grid cells
 
 def merged_xlsx():
@@ -2034,6 +2241,11 @@ def main():
     sheet_xlsb()
     features_epub()
     bin_rtf()
+    math_docx()
+    math_pptx()
+    math_odt()
+    math_epub()
+    math_rtf()
     csvs()
     malformed()
     abuse()

@@ -24,6 +24,7 @@ pub enum BlockKind {
     BlockQuote,
     CodeBlock,
     Rule,
+    Math,
 }
 
 #[derive(Serialize)]
@@ -48,7 +49,7 @@ pub struct Block {
     /// codeBlock.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
-    /// codeBlock.
+    /// codeBlock, math (LaTeX source without delimiters).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
 }
@@ -94,6 +95,7 @@ impl From<model::Block> for Block {
                 Block { lang, text: Some(text), ..Block::of(BlockKind::CodeBlock) }
             }
             model::Block::Rule => Block::of(BlockKind::Rule),
+            model::Block::Math(tex) => Block { text: Some(tex), ..Block::of(BlockKind::Math) },
         }
     }
 }
@@ -108,13 +110,15 @@ pub enum InlineKind {
     Anchor,
     NoteRef,
     LineBreak,
+    /// An inline formula.
+    Math,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Inline {
     pub kind: InlineKind,
-    /// text.
+    /// text; math (LaTeX source without delimiters).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     /// text.
@@ -181,6 +185,7 @@ impl From<model::Inline> for Inline {
                 Inline { note_id: Some(id), ..Inline::of(InlineKind::NoteRef) }
             }
             model::Inline::LineBreak => Inline::of(InlineKind::LineBreak),
+            model::Inline::Math(tex) => Inline { text: Some(tex), ..Inline::of(InlineKind::Math) },
         }
     }
 }

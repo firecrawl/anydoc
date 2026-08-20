@@ -169,6 +169,9 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
         };
         let escape = match c {
             '\\' => true,
+            // A bare `$` could pair with an emitted math delimiter, or with
+            // another `$` in the text, into a math span.
+            '$' => true,
             ']' if in_label => true,
             '`' => styled || paired(3),
             '*' => styled || start_of_line || (next_nonspace && paired(0)),

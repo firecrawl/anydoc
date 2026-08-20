@@ -44,6 +44,10 @@ pub mod ns {
     pub const O_VML: &str = "urn:schemas-microsoft-com:office:office";
     pub const WPS: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape";
     pub const WPG: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup";
+    pub const A14: &str = "http://schemas.microsoft.com/office/drawing/2010/main";
+
+    pub const M: &str = "http://schemas.openxmlformats.org/officeDocument/2006/math";
+    pub const MATHML: &str = "http://www.w3.org/1998/Math/MathML";
 }
 
 #[derive(Debug)]

@@ -7,7 +7,7 @@ expression: output
 | Kind | Value | Note |
 | --- | --- | --- |
 | Percent | 15.5% | fifteen and a half |
-| Currency | $1,234.50 | dollars |
+| Currency | \$1,234.50 | dollars |
 | Thousands | 9,876,543 | grouped |
 | Date | 2026-03-15 | ides of March |
 | Duration | 26:30:15 | over a day |

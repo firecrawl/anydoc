@@ -30,6 +30,19 @@ fn heading_and_paragraph() {
 }
 
 #[test]
+fn math_renders_in_dollar_delimiters_and_text_dollars_are_escaped() {
+    let md = doc(vec![
+        Block::Paragraph(vec![
+            Inline::plain("Costs $5 or $6, and "),
+            Inline::Math("x_1 < y".into()),
+            Inline::plain(" holds."),
+        ]),
+        Block::Math("\\sum_{i=1}^{n} i".into()),
+    ]);
+    assert_eq!(md, "Costs \\$5 or \\$6, and $x_1 < y$ holds.\n\n$$\n\\sum_{i=1}^{n} i\n$$\n");
+}
+
+#[test]
 fn escapes_paired_syntax_chars() {
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("a *bold* _it_ ~st~ `code`")])]);
     assert_eq!(md, "a \\*bold* \\_it_ \\~st~ \\`code`\n");

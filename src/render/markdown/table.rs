@@ -170,6 +170,12 @@ fn cell_block_text(block: &Block, rc: &Ctx, parts: &mut Vec<String>) {
                 parts.push(s);
             }
         }
+        Block::Math(tex) => {
+            let tex = tex.trim();
+            if !tex.is_empty() {
+                parts.push(format!("${}$", tex.replace('\n', " ")));
+            }
+        }
         Block::Rule => {}
     }
 }

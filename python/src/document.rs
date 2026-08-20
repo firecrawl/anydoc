@@ -23,7 +23,8 @@ pub struct Document {
 
 #[pyclass(frozen, get_all, module = "anydoc")]
 pub struct Block {
-    /// heading, paragraph, list, table, block_quote, code_block, or rule.
+    /// heading, paragraph, list, table, block_quote, code_block, rule, or
+    /// math.
     kind: &'static str,
     /// heading: 1-6.
     level: Option<u8>,
@@ -37,7 +38,7 @@ pub struct Block {
     blocks: Option<Py<PyList>>,
     /// code_block.
     lang: Option<String>,
-    /// code_block.
+    /// code_block, math (LaTeX source without delimiters).
     text: Option<String>,
 }
 
@@ -81,15 +82,16 @@ fn block(py: Python<'_>, block: model::Block) -> PyResult<Block> {
             Block { lang, text: Some(text), ..Block::of("code_block") }
         }
         model::Block::Rule => Block::of("rule"),
+        model::Block::Math(tex) => Block { text: Some(tex), ..Block::of("math") },
     })
 }
 
 #[pyclass(frozen, get_all, module = "anydoc")]
 pub struct Inline {
     /// text, link, image, anchor (a zero-width marker for an internal link
-    /// target at this position), note_ref, or line_break.
+    /// target at this position), note_ref, line_break, or math.
     kind: &'static str,
-    /// text.
+    /// text; math (LaTeX source without delimiters).
     text: Option<String>,
     /// text.
     style: Option<Py<Style>>,
@@ -143,6 +145,7 @@ fn inline(py: Python<'_>, inline: model::Inline) -> PyResult<Inline> {
         model::Inline::Anchor(id) => Inline { anchor: Some(id), ..Inline::of("anchor") },
         model::Inline::NoteRef(id) => Inline { note_id: Some(id), ..Inline::of("note_ref") },
         model::Inline::LineBreak => Inline::of("line_break"),
+        model::Inline::Math(tex) => Inline { text: Some(tex), ..Inline::of("math") },
     })
 }
 

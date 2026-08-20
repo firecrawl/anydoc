@@ -93,6 +93,7 @@ fn block_bytes(blocks: &[Block]) -> u64 {
                     inline_bytes(content) + target_len
                 }
                 Inline::Image { alt, .. } => alt.len() as u64,
+                Inline::Math(tex) => tex.len() as u64,
                 Inline::Anchor(id) | Inline::NoteRef(id) => id.len() as u64,
                 Inline::LineBreak => 1,
             })
@@ -102,6 +103,7 @@ fn block_bytes(blocks: &[Block]) -> u64 {
         .iter()
         .map(|b| match b {
             Block::Paragraph(i) | Block::Heading { content: i, .. } => inline_bytes(i),
+            Block::Math(tex) => tex.len() as u64,
             Block::List(list) => {
                 list.items.iter().map(|item| block_bytes(&item.blocks)).sum::<u64>()
             }

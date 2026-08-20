@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+The roots are $x=\frac{-b\pm\sqrt{b^{2}-4ac}}{2a}$ for any a.
+
+$$
+\sum_{i=1}^{n}{x_{i}}=\sin{\left(\theta\right)}
+$$
+
+A price of \$5 or \$6 is not math.

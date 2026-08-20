@@ -9,13 +9,16 @@ mod tables;
 
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Note, NoteKind, Style, inlines_are_empty};
+use crate::package::xml::{Element, Node, ns};
 use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::field_result;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
+use crate::shared::math::{math_lines, omath_para_to_tex};
 use crate::shared::text::clean_text;
 use lexer::{Lexer, Token};
 use std::collections::HashMap;
+use std::rc::Rc;
 use table::TableState;
 use tables::{LIST_LEVELS, Prelude, codepage_encoding, parse_prelude};
 
@@ -53,6 +56,9 @@ enum Capture {
     Bookmark,
     /// Inside a `\pict` destination: bytes route to the picture collector.
     Pict,
+    /// Inside a math zone: text routes to the math element under
+    /// construction.
+    Math,
 }
 
 #[derive(Clone, Copy)]
@@ -268,6 +274,205 @@ impl PictState {
     }
 }
 
+/// An accumulating math zone. Its groups mirror OMML elements, each named by
+/// its first control word (`\mf` is `m:f`), so they are built into the same
+/// element tree the OOXML readers hand the converter: a property group's
+/// text is its value, a run's text is its content.
+struct MathState {
+    /// Group depth of the zone's own group.
+    depth: usize,
+    /// `\mmathPara`: displayed on its own line.
+    display: bool,
+    /// Open groups, innermost last, each with the depth it opened at. The
+    /// first is the zone itself.
+    open: Vec<(usize, Element)>,
+}
+
+impl MathState {
+    fn new(depth: usize, display: bool) -> Self {
+        MathState { depth, display, open: vec![(depth, math_elem("zone"))] }
+    }
+
+    fn open_group(&mut self, depth: usize) {
+        self.open.push((depth, math_elem("")));
+    }
+
+    /// Attach the groups opened deeper than `depth` to their parents. A
+    /// group that named no element is transparent.
+    fn close_groups(&mut self, depth: usize) {
+        while self.open.len() > 1 && self.open.last().is_some_and(|(d, _)| *d > depth) {
+            let (_, elem) = self.open.pop().unwrap();
+            let (_, parent) = self.open.last_mut().unwrap();
+            if elem.local.is_empty() {
+                parent.children.extend(elem.children);
+            } else {
+                parent.children.push(Node::Elem(elem));
+            }
+        }
+    }
+
+    /// Name the innermost group after its first math control word.
+    fn name(&mut self, name: &str) {
+        if let Some((_, elem)) = self.open.last_mut()
+            && elem.local.is_empty()
+        {
+            elem.local = name.to_string();
+        }
+    }
+
+    fn push_text(&mut self, text: String) {
+        if let Some((_, elem)) = self.open.last_mut() {
+            elem.children.push(Node::Text(text));
+        }
+    }
+
+    fn finish(mut self) -> Vec<String> {
+        self.close_groups(0);
+        let (_, zone) = self.open.remove(0);
+        omath_para_to_tex(&zone)
+    }
+}
+
+fn math_elem(local: &str) -> Element {
+    Element {
+        ns: Some(Rc::from(ns::M)),
+        local: local.to_string(),
+        attrs: Vec::new(),
+        children: Vec::new(),
+    }
+}
+
+/// Every OMML element name, as its rtf control word without the `m` prefix.
+const OMML_NAMES: &[&str] = &[
+    "acc",
+    "accPr",
+    "aln",
+    "alnScr",
+    "argPr",
+    "argSz",
+    "bar",
+    "barPr",
+    "baseJc",
+    "begChr",
+    "borderBox",
+    "borderBoxPr",
+    "box",
+    "boxPr",
+    "brk",
+    "brkBin",
+    "brkBinSub",
+    "cGp",
+    "cGpRule",
+    "chr",
+    "count",
+    "cSp",
+    "ctrlPr",
+    "d",
+    "defJc",
+    "deg",
+    "degHide",
+    "den",
+    "diff",
+    "dispDef",
+    "dPr",
+    "e",
+    "endChr",
+    "eqArr",
+    "eqArrPr",
+    "f",
+    "fName",
+    "fPr",
+    "func",
+    "funcPr",
+    "groupChr",
+    "groupChrPr",
+    "grow",
+    "hideBot",
+    "hideLeft",
+    "hideRight",
+    "hideTop",
+    "interSp",
+    "intLim",
+    "intraSp",
+    "jc",
+    "lim",
+    "limLoc",
+    "limLow",
+    "limLowPr",
+    "limUpp",
+    "limUppPr",
+    "lit",
+    "lMargin",
+    "m",
+    "math",
+    "mathFont",
+    "mathPara",
+    "mathParaPr",
+    "mathPr",
+    "maxDist",
+    "mc",
+    "mcJc",
+    "mcPr",
+    "mcs",
+    "mPr",
+    "mr",
+    "nary",
+    "naryLim",
+    "naryPr",
+    "noBreak",
+    "nor",
+    "num",
+    "objDist",
+    "oMath",
+    "oMathPara",
+    "oMathParaPr",
+    "opEmu",
+    "phant",
+    "phantPr",
+    "plcHide",
+    "pos",
+    "postSp",
+    "preSp",
+    "r",
+    "rad",
+    "radPr",
+    "rMargin",
+    "rPr",
+    "rSp",
+    "rSpRule",
+    "scr",
+    "sepChr",
+    "show",
+    "shp",
+    "smallFrac",
+    "sPre",
+    "sPrePr",
+    "sSub",
+    "sSubPr",
+    "sSubSup",
+    "sSubSupPr",
+    "sSup",
+    "sSupPr",
+    "strikeBLTR",
+    "strikeH",
+    "strikeTLBR",
+    "strikeV",
+    "sty",
+    "sub",
+    "subHide",
+    "sup",
+    "supHide",
+    "t",
+    "transp",
+    "type",
+    "vertJc",
+    "wrapIndent",
+    "wrapRight",
+    "zeroAsc",
+    "zeroDesc",
+    "zeroWid",
+];
+
 /// Field, note, bookmark, and list-label destination state: frames open at a
 /// group depth and close when the group stack unwinds past it.
 #[derive(Default)]
@@ -280,6 +485,10 @@ struct Destinations {
     listtext: Option<String>,
     /// The `\pict` destination currently accumulating, if any.
     pict: Option<PictState>,
+    /// The math zone currently accumulating, if any.
+    math: Option<MathState>,
+    /// The current paragraph holds a finished `\mmathPara` zone.
+    math_display: bool,
 }
 
 impl Destinations {
@@ -437,6 +646,11 @@ impl<'a> Parser<'a> {
                 Token::Open => {
                     self.flush_pending();
                     self.stack.push(self.state);
+                    if self.state.capture == Capture::Math
+                        && let Some(math) = &mut self.dest.math
+                    {
+                        math.open_group(self.stack.len());
+                    }
                 }
                 Token::Close => {
                     self.flush_pending();
@@ -453,6 +667,13 @@ impl<'a> Parser<'a> {
                     // past its own group (inner property groups close first).
                     if self.dest.pict.as_ref().is_some_and(|p| self.stack.len() < p.depth) {
                         self.finish_pict()?;
+                    }
+                    if let Some(math) = &mut self.dest.math {
+                        if self.stack.len() < math.depth {
+                            self.finish_math();
+                        } else {
+                            math.close_groups(self.stack.len());
+                        }
                     }
                 }
                 Token::Word { name, param } => self.control_word(name, param)?,
@@ -508,6 +729,9 @@ impl<'a> Parser<'a> {
     /// Dispatch a control word to its subsystem handler; unhandled words
     /// that name a suppressed destination silence their group.
     fn control_word(&mut self, word: &str, param: Option<i32>) -> Result<(), ConvertError> {
+        if self.math_control(word) {
+            return Ok(());
+        }
         if self.text_control(word, param)? {
             return Ok(());
         }
@@ -775,6 +999,58 @@ impl<'a> Parser<'a> {
         true
     }
 
+    /// Math zone controls: `\mmath` / `\mmathPara` open a zone, and inside
+    /// one every math control word names the group it starts. The
+    /// `\mmathPict` fallback picture is skipped.
+    fn math_control(&mut self, word: &str) -> bool {
+        if self.dest.math.is_none() {
+            if !matches!(word, "mmath" | "mmathPara") {
+                return false;
+            }
+            if !self.state.suppress {
+                self.flush_pending();
+                self.state.capture = Capture::Math;
+                self.dest.math = Some(MathState::new(self.stack.len(), word == "mmathPara"));
+            }
+            return true;
+        }
+        if self.state.capture != Capture::Math {
+            return false;
+        }
+        if word == "mmathPict" {
+            self.flush_pending();
+            self.state.capture = Capture::None;
+            self.state.suppress = true;
+            return true;
+        }
+        match word.strip_prefix('m') {
+            Some(name) if OMML_NAMES.contains(&name) => {
+                self.flush_pending();
+                if let Some(math) = &mut self.dest.math {
+                    math.name(name);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn finish_math(&mut self) {
+        let Some(math) = self.dest.math.take() else {
+            return;
+        };
+        let display = math.display;
+        for (i, tex) in math.finish().into_iter().enumerate() {
+            if i > 0 {
+                self.inlines.push(Inline::LineBreak);
+            }
+            self.inlines.push(Inline::Math(tex));
+        }
+        if display {
+            self.dest.math_display = true;
+        }
+    }
+
     fn set_pict_format(&mut self, format: Option<(&'static str, &'static str)>) {
         if self.state.capture == Capture::Pict
             && let Some(pict) = &mut self.dest.pict
@@ -861,6 +1137,11 @@ impl<'a> Parser<'a> {
             Capture::Bookmark => self.dest.bookmark.push_str(&text),
             // Picture payload bytes are collected raw in the token loop.
             Capture::Pict => {}
+            Capture::Math => {
+                if let Some(math) = &mut self.dest.math {
+                    math.push_text(text);
+                }
+            }
             Capture::None => {
                 if !self.state.suppress {
                     self.inlines.push(Inline::Text { text, style: self.state.style });
@@ -881,6 +1162,7 @@ impl<'a> Parser<'a> {
     fn end_paragraph(&mut self) -> Result<(), ConvertError> {
         let inlines = std::mem::take(&mut self.inlines);
         let listtext = self.dest.listtext.take();
+        let math_display = std::mem::take(&mut self.dest.math_display);
 
         if self.state.in_table {
             let depth = self.state.itap.max(1);
@@ -929,7 +1211,10 @@ impl<'a> Parser<'a> {
             return Ok(());
         }
         self.flush_runs();
-        self.blocks.push(Block::Paragraph(inlines));
+        match math_lines(&inlines).filter(|_| math_display) {
+            Some(lines) => self.blocks.extend(lines.into_iter().map(Block::Math)),
+            None => self.blocks.push(Block::Paragraph(inlines)),
+        }
         Ok(())
     }
 

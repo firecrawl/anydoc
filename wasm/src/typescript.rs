@@ -45,6 +45,7 @@ export type BlockKind =
   | 'blockQuote'
   | 'codeBlock'
   | 'rule'
+  | 'math'
 
 export interface Block {
   kind: BlockKind
@@ -60,7 +61,7 @@ export interface Block {
   blocks?: Array<Block>
   /** codeBlock. */
   lang?: string
-  /** codeBlock. */
+  /** codeBlock, math (LaTeX source without delimiters). */
   text?: string
 }
 
@@ -72,10 +73,12 @@ export type InlineKind =
   | 'anchor'
   | 'noteRef'
   | 'lineBreak'
+  /** An inline formula. */
+  | 'math'
 
 export interface Inline {
   kind: InlineKind
-  /** text. */
+  /** text; math (LaTeX source without delimiters). */
   text?: string
   /** text. */
   style?: Style

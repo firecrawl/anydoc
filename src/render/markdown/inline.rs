@@ -16,6 +16,7 @@ pub(crate) enum Norm<'a> {
     Anchor(&'a str),
     NoteRef(&'a str),
     LineBreak,
+    Math(&'a str),
 }
 
 /// Single-pass normalization: drops empty runs, strips styling from
@@ -74,6 +75,8 @@ pub(crate) fn normalize<'a>(inlines: &'a [Inline], rc: &Ctx) -> Vec<Norm<'a>> {
             Inline::Anchor(id) => out.push(Norm::Anchor(id)),
             Inline::NoteRef(id) => out.push(Norm::NoteRef(id)),
             Inline::LineBreak => out.push(Norm::LineBreak),
+            Inline::Math(tex) if tex.trim().is_empty() => continue,
+            Inline::Math(tex) => out.push(Norm::Math(tex.trim())),
         }
     }
     out
@@ -91,12 +94,13 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
         match run {
             Norm::Text { text, style } => {
                 let next = runs.get(idx + 1);
-                let next_active =
-                    matches!(next, Some(Norm::Link { .. } | Norm::Image { .. } | Norm::NoteRef(_)))
-                        || matches!(
-                            next,
-                            Some(Norm::Text { style, .. }) if *style != Style::PLAIN
-                        );
+                let next_active = matches!(
+                    next,
+                    Some(Norm::Link { .. } | Norm::Image { .. } | Norm::NoteRef(_) | Norm::Math(_))
+                ) || matches!(
+                    next,
+                    Some(Norm::Text { style, .. }) if *style != Style::PLAIN
+                );
                 // A hard break renders as `\`, an anchor as `<a ...>`: not
                 // markup, but a nonspace character a run-final delimiter can
                 // be left-flanking against.
@@ -128,6 +132,11 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
                 InlineContext::Heading => out.push(' '),
                 InlineContext::TableCell => out.push('\n'),
             },
+            // GFM inline math: `$` hugging both ends of the source. A line
+            // break inside it would end the paragraph's math span.
+            Norm::Math(tex) => {
+                let _ = write!(out, "${}$", tex.replace('\n', " "));
+            }
         }
     }
     out
@@ -256,7 +265,7 @@ fn delims_of(run: &Norm, rc: &Ctx) -> Delims {
             // Sourceless images degrade to their alt as plain text.
             ImageSource::Asset(_) | ImageSource::Unavailable => delims.insert_closers(alt),
         },
-        Norm::NoteRef(_) | Norm::Anchor(_) | Norm::LineBreak => {}
+        Norm::NoteRef(_) | Norm::Anchor(_) | Norm::LineBreak | Norm::Math(_) => {}
     }
     delims
 }

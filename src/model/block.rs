@@ -33,6 +33,8 @@ pub enum Block {
     },
     /// A horizontal rule.
     Rule,
+    /// A displayed formula, as LaTeX math without delimiters.
+    Math(String),
 }
 
 impl Block {

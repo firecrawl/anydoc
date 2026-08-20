@@ -117,6 +117,11 @@ fn walk_shapes(
                         inner.extend(parse_container(content, ctx)?);
                     } else if content.is(ns::TABLE, "table") {
                         inner.extend(table::parse_table(content, ctx)?);
+                    } else if content.is(ns::DRAW, "object")
+                        && let Some(tex) = text::formula_tex(ctx, content)?
+                    {
+                        inner.push(Block::Math(tex));
+                        break;
                     } else if content.is(ns::DRAW, "image") {
                         let mut out = Vec::new();
                         let mut boxes = Vec::new();

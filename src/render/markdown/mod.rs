@@ -147,7 +147,7 @@ fn collect_note_refs(
                 }
             }
             Block::BlockQuote(blocks) => collect_note_refs(blocks, valid, order, seen),
-            Block::CodeBlock { .. } | Block::Rule => {}
+            Block::CodeBlock { .. } | Block::Rule | Block::Math(_) => {}
         }
     }
 }
@@ -199,6 +199,10 @@ fn render_block(block: &Block, rc: &Ctx) -> Option<String> {
             Some(format!("{fence}{lang}\n{body}\n{fence}"))
         }
         Block::Rule => Some("---".to_string()),
+        Block::Math(tex) => {
+            let tex = tex.trim();
+            if tex.is_empty() { None } else { Some(format!("$$\n{tex}\n$$")) }
+        }
     }
 }
 
