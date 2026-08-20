@@ -18,6 +18,9 @@ pub const MAX_ENTRY_COUNT: usize = 100_000;
 /// Maximum XML element nesting depth.
 pub const MAX_XML_DEPTH: usize = 256;
 
+/// Maximum RTF group nesting depth.
+pub const MAX_RTF_DEPTH: usize = 256;
+
 /// Maximum number of XML nodes (elements + text runs) in one part. Sized
 /// from the measured worst-case DOM cost (~400 bytes/node, see the node-cap
 /// memory test) so a saturating part stays around the archive budget.

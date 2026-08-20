@@ -108,17 +108,39 @@ impl<'a> Lexer<'a> {
     }
 }
 
-/// Extract the balanced content of destination groups named `name`
-/// (`{\name ...}` or `{\*\name ...}`), bin-aware. Returns the byte ranges of
-/// the group bodies including the destination word.
-pub fn destination_groups<'a>(bytes: &'a [u8], name: &str) -> Vec<&'a [u8]> {
-    let mut out = Vec::new();
+/// The prelude tables and codepage, extracted in one lexer pass.
+pub struct PreludeScan<'a> {
+    pub fonttbl: Vec<&'a [u8]>,
+    pub stylesheet: Vec<&'a [u8]>,
+    pub listtable: Vec<&'a [u8]>,
+    pub listoverridetable: Vec<&'a [u8]>,
+    pub codepage: Option<i32>,
+}
+
+/// Which prelude destination an open group captures into.
+#[derive(Clone, Copy)]
+enum Dest {
+    Fonts,
+    Styles,
+    Lists,
+    Overrides,
+}
+
+/// Capture the prelude destination groups and the header `\ansicpg` value.
+pub fn scan_prelude(bytes: &[u8]) -> PreludeScan<'_> {
+    let mut scan = PreludeScan {
+        fonttbl: Vec::new(),
+        stylesheet: Vec::new(),
+        listtable: Vec::new(),
+        listoverridetable: Vec::new(),
+        codepage: None,
+    };
     let mut lexer = Lexer::new(bytes);
-    // Track group starts; when a group's first control word (skipping `\*`)
-    // matches, remember its start depth and capture until it closes.
+    // A group whose first control word (skipping `\*`) names a prelude
+    // table is captured from after that word until its group closes.
     let mut depth = 0usize;
     let mut expecting_word_at: Option<usize> = None;
-    let mut capture: Option<(usize, usize)> = None; // (depth, start_pos)
+    let mut capture: Option<(usize, usize, Dest)> = None; // (depth, start, dest)
     loop {
         let before = lexer.pos;
         let Some(token) = lexer.next_token() else { break };
@@ -128,26 +150,41 @@ pub fn destination_groups<'a>(bytes: &'a [u8], name: &str) -> Vec<&'a [u8]> {
                 expecting_word_at = Some(depth);
             }
             Token::Close => {
-                if let Some((d, start)) = capture
+                if let Some((d, start, dest)) = capture
                     && depth == d
                 {
-                    out.push(&bytes[start..before]);
+                    let range = &bytes[start..before];
+                    match dest {
+                        Dest::Fonts => scan.fonttbl.push(range),
+                        Dest::Styles => scan.stylesheet.push(range),
+                        Dest::Lists => scan.listtable.push(range),
+                        Dest::Overrides => scan.listoverridetable.push(range),
+                    }
                     capture = None;
                 }
                 depth = depth.saturating_sub(1);
                 expecting_word_at = None;
             }
             Token::Symbol(b'*') if expecting_word_at == Some(depth) => {}
-            Token::Word { name: w, .. } => {
-                if expecting_word_at == Some(depth) && w == name && capture.is_none() {
-                    capture = Some((depth, lexer.pos));
+            Token::Word { name, param } => {
+                if name == "ansicpg" && scan.codepage.is_none() {
+                    scan.codepage = param;
+                }
+                if expecting_word_at == Some(depth) && capture.is_none() {
+                    match name {
+                        "fonttbl" => capture = Some((depth, lexer.pos, Dest::Fonts)),
+                        "stylesheet" => capture = Some((depth, lexer.pos, Dest::Styles)),
+                        "listtable" => capture = Some((depth, lexer.pos, Dest::Lists)),
+                        "listoverridetable" => capture = Some((depth, lexer.pos, Dest::Overrides)),
+                        _ => {}
+                    }
                 }
                 expecting_word_at = None;
             }
             _ => expecting_word_at = None,
         }
     }
-    out
+    scan
 }
 
 #[cfg(test)]
@@ -192,12 +229,27 @@ mod tests {
     }
 
     #[test]
-    fn destination_extraction() {
-        let src = br"{\rtf1{\*\listtable{\list\listid5}}{\fonttbl{\f0 Arial;}} body}";
-        let lists = destination_groups(src, "listtable");
-        assert_eq!(lists.len(), 1);
-        assert!(lists[0].starts_with(br"{\list"));
-        let fonts = destination_groups(src, "fonttbl");
+    fn prelude_scan_finds_destinations_and_codepage() {
+        let src = br"{\rtf1\ansicpg1252{\*\listtable{\list\listid5}}{\fonttbl{\f0 Arial;}} body}";
+        let scan = scan_prelude(src);
+        assert_eq!(scan.codepage, Some(1252));
+        assert_eq!(scan.listtable.len(), 1);
+        assert!(scan.listtable[0].starts_with(br"{\list"));
+        let fonts = scan.fonttbl;
         assert_eq!(fonts.len(), 1);
+        assert!(fonts[0].starts_with(br"{\f0"));
+    }
+
+    #[test]
+    fn prelude_scan_finds_styles_and_overrides() {
+        let src =
+            br"{\rtf1{\stylesheet{\s0 Normal;}}{\*\listoverridetable{\listoverride\listid1\ls1}}}";
+        let scan = scan_prelude(src);
+        let styles = scan.stylesheet;
+        assert_eq!(styles.len(), 1);
+        assert!(styles[0].starts_with(br"{\s0"));
+        let overrides = scan.listoverridetable;
+        assert_eq!(overrides.len(), 1);
+        assert!(overrides[0].starts_with(br"{\listoverride"));
     }
 }
