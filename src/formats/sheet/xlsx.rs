@@ -568,9 +568,10 @@ fn render_serial(serial: f64, parts: DateParts, date1904: bool) -> String {
     if !parts.date {
         return format_time_of_day(serial.fract());
     }
-    // A serial carrying no whole day has no date for a date format to show.
+    // A serial carrying no whole day has no date for a date format to show;
+    // the clock a combined format also names still renders.
     if serial.abs() < 1.0 {
-        return format_float(serial);
+        return if parts.time { format_time_of_day(serial) } else { format_float(serial) };
     }
     // Out of the representable date range (through 9999-12-31): the serial
     // is not a date, show the number.
@@ -1003,5 +1004,13 @@ mod tests {
         assert_eq!(render_serial(59.9999999, DATE_ONLY, false), "1900-02-28");
         // The 1904 system has no such day.
         assert_eq!(render_serial(60.0, DATE_ONLY, true), "1904-03-01");
+    }
+
+    #[test]
+    fn a_sub_day_serial_keeps_the_clock_a_combined_format_names() {
+        let both = DateParts { date: true, time: true, elapsed: false };
+        assert_eq!(render_serial(0.5, both, false), "12:00:00");
+        // A date-only format still has nothing to show but the number.
+        assert_eq!(render_serial(0.5, DATE_ONLY, false), "0.5");
     }
 }
