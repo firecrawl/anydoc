@@ -64,7 +64,7 @@ fn container(bytes: &[u8]) -> Result<Option<Container>, ConvertError> {
         return classify(&mut pkg, "xl/workbook.xml");
     }
     if zip.index_for_name("xl/workbook.bin").is_some() {
-        return Ok(Some(Container::Bin));
+        return classify(&mut pkg, "xl/workbook.bin");
     }
     Ok(None)
 }
