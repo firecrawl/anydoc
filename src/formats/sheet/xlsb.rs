@@ -14,6 +14,7 @@ use crate::model::{Block, Document, Inline};
 use crate::package::limits;
 use crate::package::relationships::{read_rels, rel_type, rels_part_for};
 use crate::package::{Package, path};
+use crate::shared::binary::utf16le_units;
 use crate::shared::text::clean_text;
 use std::collections::HashMap;
 
@@ -439,7 +440,7 @@ impl<'a> Fields<'a> {
             .checked_mul(2)
             .ok_or_else(|| ConvertError::malformed("oversized string length"))
             .and_then(|n| self.take(n))?;
-        let units = bytes.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]]));
+        let units = utf16le_units(bytes);
         Ok(char::decode_utf16(units).map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER)).collect())
     }
 

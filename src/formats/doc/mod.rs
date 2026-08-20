@@ -15,7 +15,7 @@ use crate::model::{
 };
 use crate::package::limits;
 use crate::shared::assets::AssetSink;
-use crate::shared::binary::{get_u16, get_u32, read_ole_stream};
+use crate::shared::binary::{get_u16, get_u32, read_ole_stream, utf16le_units};
 use crate::shared::blockstyle::StyledRun;
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
@@ -370,8 +370,7 @@ fn extract_text(
             let Some(bytes) = word_doc.get(piece.fc..).and_then(|rest| rest.get(..byte_len)) else {
                 continue;
             };
-            let units: Vec<u16> =
-                bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let units: Vec<u16> = utf16le_units(bytes).collect();
             let mut unit_idx = 0usize;
             for r in char::decode_utf16(units.iter().copied()) {
                 let c = r.unwrap_or('\u{fffd}');

@@ -12,7 +12,7 @@ use super::{error_literal, rk_number};
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline};
 use crate::package::limits;
-use crate::shared::binary::{get_u16, get_u32, read_ole_stream};
+use crate::shared::binary::{get_u16, get_u32, read_ole_stream, utf16le_units};
 use crate::shared::text::clean_text;
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -257,7 +257,7 @@ fn read_biff8_string(r: &mut SegReader, short: bool, rich: bool) -> Option<Strin
         }
         let bytes = r.bytes(take * unit)?;
         if wide {
-            units.extend(bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])));
+            units.extend(utf16le_units(bytes));
         } else {
             units.extend(bytes.iter().map(|&b| u16::from(b)));
         }
