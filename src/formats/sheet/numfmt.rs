@@ -999,7 +999,13 @@ fn best_fraction(x: f64, fixed: Option<u64>, den_places: usize) -> Option<(u64, 
         let n = (x * d as f64).round();
         return (n < 1e18).then_some((n as u64, d));
     }
-    let max_den = 10u64.checked_pow(u32::try_from(den_places).ok()?)?.saturating_sub(1).max(1);
+    // Past 19 places the power of ten overflows; every u64 denominator is
+    // within such a bound, so it saturates rather than dropping the format.
+    let max_den = u32::try_from(den_places)
+        .ok()
+        .and_then(|p| 10u64.checked_pow(p))
+        .map_or(u64::MAX, |p| p.saturating_sub(1))
+        .max(1);
     Some(closest_rational(x, max_den))
 }
 
@@ -1132,6 +1138,12 @@ mod tests {
         assert_eq!(fmt("# ?/?", 5.0), "5");
         assert_eq!(fmt("?/?", 0.5), "1/2");
         assert_eq!(fmt("# ?/8", 5.25), "5 2/8");
+    }
+
+    #[test]
+    fn twenty_denominator_places_still_render_a_fraction() {
+        let code = format!("?/{}", "?".repeat(20));
+        assert_eq!(fmt(&code, 0.5), format!("1/{}2", " ".repeat(19)));
     }
 
     #[test]
