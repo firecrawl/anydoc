@@ -576,6 +576,12 @@ fn render_serial(serial: f64, elapsed: bool, date1904: bool) -> String {
         return format_float(serial);
     }
     let mut days = serial.trunc() as i64;
+    // The fictitious 1900-02-29 has no date to render and would otherwise
+    // collapse onto serial 59. Tested before the seconds carry, so a value
+    // late on serial 59 still resolves as the date it belongs to.
+    if !date1904 && days == 60 {
+        return format_float(serial);
+    }
     let mut secs = (serial.fract() * 86_400.0).round() as i64;
     if secs >= 86_400 {
         secs = 0;
@@ -586,11 +592,6 @@ fn render_serial(serial: f64, elapsed: bool, date1904: bool) -> String {
     } else {
         // 1900 system: serial 1 is 1900-01-01, and the fictitious
         // 1900-02-29 (serial 60) offsets everything after it by one day.
-        // Serial 60 is that non-existent day, so it has no date to render
-        // and would otherwise collapse onto serial 59.
-        if days == 60 {
-            return format_float(serial);
-        }
         days - i64::from(days >= 60) + days_from_civil(1899, 12, 31)
     };
     let (y, m, d) = civil_from_days(civil_days);
@@ -979,6 +980,8 @@ mod tests {
         assert_eq!(render_serial(59.0, false, false), "1900-02-28");
         assert_eq!(render_serial(60.0, false, false), "60");
         assert_eq!(render_serial(61.0, false, false), "1900-03-01");
+        // A value late on serial 59 still belongs to its own day.
+        assert_eq!(render_serial(59.9999999, false, false), "1900-02-28");
         // The 1904 system has no such day.
         assert_eq!(render_serial(60.0, false, true), "1904-03-01");
     }

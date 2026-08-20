@@ -69,9 +69,10 @@ fn container(bytes: &[u8]) -> Result<Option<Container>, ConvertError> {
     let Some(part) = pkg.part(&target.path)? else {
         return Ok(None);
     };
-    let leading = part.iter().find(|b| !b.is_ascii_whitespace());
-    Ok(match leading {
-        Some(b'<') => Some(Container::Xml),
+    let body = part.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&part);
+    Ok(match body.iter().find(|b| !b.is_ascii_whitespace()) {
+        // A UTF-16 part opens on its byte order mark rather than the tag.
+        Some(b'<') | Some(0xFF) | Some(0xFE) => Some(Container::Xml),
         Some(_) => Some(Container::Bin),
         None => None,
     })
