@@ -51,11 +51,22 @@ pub(super) fn builtin_code(id: u32) -> Option<&'static str> {
 pub(super) enum Rendered {
     /// Render this value the way an unformatted cell renders.
     General { value: f64, prefix: String, suffix: String },
-    /// The section is a date/time format: render the serial as a date, time
-    /// of day, or (when `elapsed`) a duration.
-    DateTime { elapsed: bool },
+    /// The section is a date/time format: render the serial as the parts it
+    /// asks for.
+    DateTime(DateParts),
     /// The formatted text, ready to emit.
     Text(String),
+}
+
+/// Which of a date/time format's parts it asks to see. A code naming only
+/// months and days must not gain a time, and one naming only hours must not
+/// gain a date.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(super) struct DateParts {
+    pub(super) date: bool,
+    pub(super) time: bool,
+    /// `[h]`, `[m]` or `[s]`: a span rather than a point in time.
+    pub(super) elapsed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -146,9 +157,7 @@ enum Body {
         prefix: String,
         suffix: String,
     },
-    DateTime {
-        elapsed: bool,
-    },
+    DateTime(DateParts),
     Number(NumSpec),
     Text(Vec<Tok>),
 }
@@ -215,7 +224,7 @@ impl NumberFormat {
             Body::General { prefix, suffix } => {
                 Rendered::General { value, prefix: prefix.clone(), suffix: suffix.clone() }
             }
-            Body::DateTime { elapsed } => Rendered::DateTime { elapsed: *elapsed },
+            Body::DateTime(parts) => Rendered::DateTime(*parts),
             Body::Number(spec) => {
                 match render_number(spec, value.abs(), auto_minus && value < 0.0) {
                     Some(s) => Rendered::Text(s),
@@ -336,6 +345,32 @@ fn decoration(toks: &[Tok]) -> String {
         .collect()
 }
 
+/// Which parts a date/time section asks for. `m` is minutes when an hour run
+/// precedes it or a seconds run follows it, and months otherwise.
+fn date_parts(runs: &[char], elapsed: bool) -> DateParts {
+    let mut parts = DateParts { elapsed, ..DateParts::default() };
+    for (i, &run) in runs.iter().enumerate() {
+        match run {
+            'y' | 'd' => parts.date = true,
+            'h' | 's' | 'a' => parts.time = true,
+            'm' => {
+                if runs[..i].last() == Some(&'h') || runs.get(i + 1) == Some(&'s') {
+                    parts.time = true;
+                } else {
+                    parts.date = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    // An elapsed span is a duration, and a section with no run at all came
+    // from a bracket alone, so treat both as a time.
+    if elapsed || (!parts.date && !parts.time) {
+        parts.time = true;
+    }
+    parts
+}
+
 fn push_literal(raw: &mut Vec<Tok>, c: char) {
     match raw.last_mut() {
         Some(Tok::Literal(s)) => s.push(c),
@@ -351,6 +386,9 @@ fn parse_section(s: &str) -> Option<Section> {
     let mut condition: Option<Cond> = None;
     let mut has_date = false;
     let mut elapsed = false;
+    // The date/time runs in order, one letter each, so `m` can be read as
+    // months or minutes from what sits beside it.
+    let mut runs: Vec<char> = Vec::new();
     let mut has_general = false;
     while i < chars.len() {
         let c = chars[i];
@@ -408,6 +446,7 @@ fn parse_section(s: &str) -> Option<Section> {
             }
             'y' | 'Y' | 'd' | 'D' | 'h' | 'H' | 's' | 'S' | 'm' | 'M' => {
                 has_date = true;
+                runs.push(c.to_ascii_lowercase());
                 while i < chars.len() && chars[i].eq_ignore_ascii_case(&c) {
                     i += 1;
                 }
@@ -437,6 +476,7 @@ fn parse_section(s: &str) -> Option<Section> {
                     })
                     .map(|t| t.len())?;
                 has_date = true;
+                runs.push('a');
                 i += len;
             }
             '1'..='9' => {
@@ -469,7 +509,7 @@ fn parse_section(s: &str) -> Option<Section> {
         if raw.iter().any(|t| matches!(t, Tok::At | Tok::Exp { .. } | Tok::BareDigits(_))) {
             return None;
         }
-        Body::DateTime { elapsed }
+        Body::DateTime(date_parts(&runs, elapsed))
     } else if raw.iter().any(|t| matches!(t, Tok::At)) {
         if raw.iter().any(|t| {
             matches!(
@@ -1088,11 +1128,20 @@ mod tests {
     #[test]
     fn date_sections_classify_without_rendering() {
         let f = NumberFormat::parse("yyyy\\-mm\\-dd").unwrap();
-        assert_eq!(f.format_number(45000.0), Rendered::DateTime { elapsed: false });
+        assert_eq!(
+            f.format_number(45000.0),
+            Rendered::DateTime(DateParts { date: true, time: false, elapsed: false })
+        );
         let f = NumberFormat::parse("[hh]:mm:ss").unwrap();
-        assert_eq!(f.format_number(1.5), Rendered::DateTime { elapsed: true });
+        assert_eq!(
+            f.format_number(1.5),
+            Rendered::DateTime(DateParts { date: false, time: true, elapsed: true })
+        );
         let f = NumberFormat::parse("h:mm AM/PM").unwrap();
-        assert_eq!(f.format_number(0.5), Rendered::DateTime { elapsed: false });
+        assert_eq!(
+            f.format_number(0.5),
+            Rendered::DateTime(DateParts { date: false, time: true, elapsed: false })
+        );
     }
 
     #[test]
@@ -1151,5 +1200,21 @@ mod tests {
         // show 7.5, not 7.4.
         assert_eq!(fmt("0.0%", 0.075), "7.5%");
         assert_eq!(fmt("0", 2.5), "3");
+    }
+
+    #[test]
+    fn a_date_section_names_only_the_parts_it_asks_for() {
+        let parts = |code: &str| match NumberFormat::parse(code).unwrap().format_number(45000.5) {
+            Rendered::DateTime(p) => (p.date, p.time, p.elapsed),
+            other => panic!("expected a date/time section, got {other:?}"),
+        };
+        assert_eq!(parts("yyyy-mm-dd"), (true, false, false));
+        assert_eq!(parts("d mmm yyyy"), (true, false, false));
+        assert_eq!(parts("h:mm"), (false, true, false));
+        assert_eq!(parts("yyyy-mm-dd hh:mm:ss"), (true, true, false));
+        assert_eq!(parts("[h]:mm:ss"), (false, true, true));
+        // `m` is minutes beside an hour or a second, and months otherwise.
+        assert_eq!(parts("mm:ss"), (false, true, false));
+        assert_eq!(parts("mm/dd/yyyy"), (true, false, false));
     }
 }

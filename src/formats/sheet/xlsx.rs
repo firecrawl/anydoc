@@ -3,7 +3,7 @@
 //! merge regions. Rows, columns, and sheets the source hides are omitted,
 //! and merge regions are remapped onto the surviving grid.
 
-use super::numfmt::{NumberFormat, Rendered, builtin_code};
+use super::numfmt::{DateParts, NumberFormat, Rendered, builtin_code};
 use super::{format_duration_days, format_float, format_time_of_day};
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, Table, TableKind};
@@ -369,7 +369,7 @@ pub(super) fn render_number(fmt: &CellFormat, n: f64, date1904: bool) -> String 
                 format!("{prefix}{}{suffix}", format_float(value))
             }
             Rendered::Text(s) => s,
-            Rendered::DateTime { elapsed } => render_serial(n, elapsed, date1904),
+            Rendered::DateTime(parts) => render_serial(n, parts, date1904),
         },
     };
     clean_text(&text)
@@ -559,16 +559,17 @@ fn first_visible(hidden: &[u32], lo: u32, hi: u32) -> Option<u32> {
 /// Render a date/time serial the way the crate always has: elapsed formats
 /// as a duration, sub-day serials as a time of day, everything else as an
 /// ISO-like date with the midnight time omitted.
-fn render_serial(serial: f64, elapsed: bool, date1904: bool) -> String {
+fn render_serial(serial: f64, parts: DateParts, date1904: bool) -> String {
     if !serial.is_finite() {
         return format_float(serial);
     }
-    if elapsed {
+    if parts.elapsed {
         return format_duration_days(serial);
     }
-    // A serial below one whole day carries no date: it is a time of day.
-    if serial.abs() < 1.0 {
-        return format_time_of_day(serial);
+    // A format naming no date shows the clock alone, as does a serial that
+    // carries no whole day.
+    if !parts.date || serial.abs() < 1.0 {
+        return format_time_of_day(serial.fract());
     }
     // Out of the representable date range (through 9999-12-31): the serial
     // is not a date, show the number.
@@ -599,7 +600,7 @@ fn render_serial(serial: f64, elapsed: bool, date1904: bool) -> String {
         return format_float(serial);
     }
     let mut out = format!("{y:04}-{m:02}-{d:02}");
-    if secs != 0 {
+    if parts.time && secs != 0 {
         out.push_str(&format!(" {:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60));
     }
     out
@@ -973,16 +974,18 @@ mod tests {
         );
     }
 
+    const DATE_ONLY: DateParts = DateParts { date: true, time: false, elapsed: false };
+
     #[test]
     fn the_fictitious_leap_day_keeps_its_own_value() {
         // Serial 60 is 1900-02-29, a day that never existed, and mapping it
         // onto a real date would make it indistinguishable from serial 59.
-        assert_eq!(render_serial(59.0, false, false), "1900-02-28");
-        assert_eq!(render_serial(60.0, false, false), "60");
-        assert_eq!(render_serial(61.0, false, false), "1900-03-01");
+        assert_eq!(render_serial(59.0, DATE_ONLY, false), "1900-02-28");
+        assert_eq!(render_serial(60.0, DATE_ONLY, false), "60");
+        assert_eq!(render_serial(61.0, DATE_ONLY, false), "1900-03-01");
         // A value late on serial 59 still belongs to its own day.
-        assert_eq!(render_serial(59.9999999, false, false), "1900-02-28");
+        assert_eq!(render_serial(59.9999999, DATE_ONLY, false), "1900-02-28");
         // The 1904 system has no such day.
-        assert_eq!(render_serial(60.0, false, true), "1904-03-01");
+        assert_eq!(render_serial(60.0, DATE_ONLY, true), "1904-03-01");
     }
 }
