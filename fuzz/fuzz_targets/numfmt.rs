@@ -5,12 +5,14 @@ use std::io::{Cursor, Write};
 
 // A number format code, carried into the engine on a minimal workbook. The
 // grammar is where the parsing complexity lives, and reaching it through a
-// discovered styles part would cost the fuzzer most of its budget.
+// discovered styles part would cost the fuzzer most of its budget. Only the
+// control characters XML forbids are dropped, so whitespace a code may carry
+// still reaches the parser.
 fuzz_target!(|data: &[u8]| {
     let code = String::from_utf8_lossy(data);
     let escaped: String = code
         .chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r'))
         .map(|c| match c {
             '&' => "&amp;".to_string(),
             '<' => "&lt;".to_string(),
