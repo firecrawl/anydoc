@@ -63,6 +63,12 @@ impl Delims {
         }
     }
 
+    pub(crate) fn union(&mut self, other: Delims) {
+        for (slot, set) in self.0.iter_mut().zip(other.0) {
+            *slot |= set;
+        }
+    }
+
     fn contains(self, slot: usize) -> bool {
         self.0[slot]
     }

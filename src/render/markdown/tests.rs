@@ -119,6 +119,31 @@ fn delimiters_do_not_pair_across_run_seams() {
 }
 
 #[test]
+fn unresolved_link_fallback_counts_toward_seam_pairing() {
+    // The fallback text supplies the `]` that pairs with the earlier `[`.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("[click"),
+        Inline::LineBreak,
+        Inline::Link {
+            content: vec![Inline::plain("here]")],
+            target: LinkTarget::Anchor("nowhere".into()),
+        },
+        Inline::plain("(https://e.test)"),
+    ])]);
+    assert_eq!(md, "\\[click\\\nhere](https://e.test)\n");
+    // Same seam with an emphasis delimiter in the fallback.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a *"),
+        Inline::LineBreak,
+        Inline::Link {
+            content: vec![Inline::plain("b*")],
+            target: LinkTarget::Anchor("nowhere".into()),
+        },
+    ])]);
+    assert_eq!(md, "a \\*\\\nb*\n");
+}
+
+#[test]
 fn bold_trailing_space_moved_out() {
     let md = doc(vec![Block::Paragraph(vec![styled("bold ", BOLD), Inline::plain("plain")])]);
     assert_eq!(md, "**bold** plain\n");

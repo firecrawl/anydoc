@@ -104,7 +104,7 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
                 let opts = EscapeOpts {
                     trailing_active: next_active,
                     trailing_nonspace: next_nonspace,
-                    trailing_delims: delims_ahead(&runs[idx + 1..]),
+                    trailing_delims: delims_ahead(&runs[idx + 1..], rc),
                     in_label,
                     ..Default::default()
                 };
@@ -196,7 +196,7 @@ fn render_image(
 /// line: literal characters in plain text, plus the markup that styled runs,
 /// code spans, links and images produce. A delimiter in an earlier run can
 /// pair with any of them across the run seam, hard breaks included.
-fn delims_ahead(runs: &[Norm]) -> Delims {
+fn delims_ahead(runs: &[Norm], rc: &Ctx) -> Delims {
     let mut delims = Delims::default();
     for run in runs {
         match run {
@@ -215,13 +215,21 @@ fn delims_ahead(runs: &[Norm]) -> Delims {
                     delims.insert(']');
                 }
             }
-            // Emphasis cannot cross a link boundary, but a code span can: a
-            // backtick in the label or destination pairs with one outside.
-            Norm::Link { content, target } => {
-                if emits_backtick(content) || target_has_backtick(target) {
-                    delims.insert('`');
+            Norm::Link { content, target } => match target {
+                // An unresolved target degrades to its rendered content
+                // (see render_link), which emits like any sibling runs.
+                LinkTarget::Anchor(id) if rc.anchors.fragment(id).is_none() => {
+                    delims.union(delims_ahead(&normalize(content, rc), rc));
                 }
-            }
+                // Emphasis cannot cross a link boundary, but a code span
+                // can: a backtick in the label or destination pairs with
+                // one outside.
+                _ => {
+                    if emits_backtick(content) || target_has_backtick(target) {
+                        delims.insert('`');
+                    }
+                }
+            },
             Norm::Image { alt, source } => match source {
                 ImageSource::External(_) if alt.contains('`') => delims.insert('`'),
                 ImageSource::External(_) => {}
