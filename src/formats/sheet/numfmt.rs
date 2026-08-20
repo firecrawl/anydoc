@@ -847,9 +847,9 @@ fn emit(
     let min_frac = frac_places.iter().rposition(|&p| p == '0').map_or(0, |i| i + 1);
     let keep_frac = frac_digits.trim_end_matches('0').len().max(min_frac);
 
-    // The point shows only when something follows it: kept digits, or the
-    // alignment spaces a `?` place emits.
-    let show_decimal = keep_frac > 0 || frac_places.contains(&'?');
+    // The point hides only when its placeholders all produced nothing; a
+    // point with no placeholder at all (`0.`) is written as it stands.
+    let show_decimal = keep_frac > 0 || frac_places.contains(&'?') || frac_places.is_empty();
 
     let mut out = String::new();
     let (mut int_i, mut frac_i, mut exp_i) = (0usize, 0usize, 0usize);
@@ -1084,6 +1084,12 @@ mod tests {
         assert_eq!(fmt("0.0#", 5.25), "5.25");
         assert_eq!(fmt("0.00", 5.255), "5.26");
         assert_eq!(fmt("???", 42.0), " 42");
+    }
+
+    #[test]
+    fn a_decimal_point_with_no_placeholders_still_shows() {
+        assert_eq!(fmt("0.", 5.0), "5.");
+        assert_eq!(fmt("0.\"kg\"", 5.0), "5.kg");
     }
 
     #[test]
