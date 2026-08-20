@@ -12,6 +12,7 @@ use crate::error::ConvertError;
 use crate::model::Document;
 use crate::package::archive::probe_ole;
 use crate::package::relationships::{read_rels, rel_type};
+use crate::package::xml::ns;
 use crate::package::{Package, path};
 use std::io::Cursor;
 
@@ -39,7 +40,8 @@ enum Container {
 }
 
 /// Which workbook container the bytes hold: an OLE compound file (xls), or a
-/// ZIP holding `xl/workbook.xml` (xlsx, xlsm) or `xl/workbook.bin` (xlsb).
+/// package whose main part is SpreadsheetML (xlsx, xlsm) or its binary form
+/// (xlsb).
 fn container(bytes: &[u8]) -> Result<Option<Container>, ConvertError> {
     const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
     if bytes.starts_with(&OLE_MAGIC) {
@@ -48,34 +50,43 @@ fn container(bytes: &[u8]) -> Result<Option<Container>, ConvertError> {
     let Ok(zip) = zip::ZipArchive::new(Cursor::new(bytes)) else {
         return Ok(None);
     };
+    let mut pkg = Package::open(bytes)?;
+    // The root relationship names the main part wherever it lives, so it
+    // decides ahead of the conventional locations, which a package may also
+    // contain as leftovers.
+    if let Some(target) = read_rels(&mut pkg, "_rels/.rels")?
+        .first_of_type(rel_type::OFFICE_DOCUMENT)
+        .and_then(|rel| path::resolve("", &rel.target).ok())
+    {
+        return classify(&mut pkg, &target.path);
+    }
     if zip.index_for_name("xl/workbook.xml").is_some() {
-        return Ok(Some(Container::Xml));
+        return classify(&mut pkg, "xl/workbook.xml");
     }
     if zip.index_for_name("xl/workbook.bin").is_some() {
         return Ok(Some(Container::Bin));
     }
-    // A package may name its workbook anywhere, and detection resolves the
-    // root relationship to find it, so the conventional paths alone would
-    // reject a workbook the reader can open.
-    let mut pkg = Package::open(bytes)?;
-    let Some(target) = read_rels(&mut pkg, "_rels/.rels")?
-        .first_of_type(rel_type::OFFICE_DOCUMENT)
-        .and_then(|rel| path::resolve("", &rel.target).ok())
-    else {
+    Ok(None)
+}
+
+/// The container a main part belongs to, from its own bytes rather than its
+/// name. An XML part has to be a SpreadsheetML workbook: any other package
+/// resolves here too, and would otherwise convert to an empty document.
+fn classify(pkg: &mut Package, part: &str) -> Result<Option<Container>, ConvertError> {
+    let Some(bytes) = pkg.part(part)? else {
         return Ok(None);
     };
-    // The part's own bytes decide, since the name carries no guarantee: a
-    // SpreadsheetML workbook is XML, an xlsb one is a record stream.
-    let Some(part) = pkg.part(&target.path)? else {
+    let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+    // A UTF-16 part opens on its byte order mark rather than the tag.
+    let is_xml = matches!(body.iter().find(|b| !b.is_ascii_whitespace()), Some(b'<' | 0xFF | 0xFE));
+    if !is_xml {
+        return Ok((!body.is_empty()).then_some(Container::Bin));
+    }
+    let Some(tree) = pkg.optional_xml_part(part)? else {
         return Ok(None);
     };
-    let body = part.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&part);
-    Ok(match body.iter().find(|b| !b.is_ascii_whitespace()) {
-        // A UTF-16 part opens on its byte order mark rather than the tag.
-        Some(b'<') | Some(0xFF) | Some(0xFE) => Some(Container::Xml),
-        Some(_) => Some(Container::Bin),
-        None => None,
-    })
+    let workbook = tree.child_elems().next().is_some_and(|e| e.is(ns::SML, "workbook"));
+    Ok(workbook.then_some(Container::Xml))
 }
 
 /// Float formatting at the 15 significant decimal digits a spreadsheet
@@ -179,5 +190,28 @@ mod tests {
         let bytes = ole.into_inner().into_inner();
 
         assert!(matches!(parse(&bytes), Err(ConvertError::Encrypted)));
+    }
+
+    #[test]
+    fn a_package_that_is_not_a_workbook_does_not_convert_as_one() {
+        use std::io::Write as _;
+
+        // Resolving the root relationship reaches any OOXML main part, so
+        // without a workbook check a document would convert to nothing.
+        const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        let rels = format!(
+            r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>"#
+        );
+        let doc = r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>"#;
+
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, body) in [("_rels/.rels", rels.as_str()), ("word/document.xml", doc)] {
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(body.as_bytes()).unwrap();
+        }
+        let bytes = zip.finish().unwrap().into_inner();
+
+        assert!(matches!(parse(&bytes), Err(ConvertError::Malformed { .. })));
     }
 }
