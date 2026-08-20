@@ -15,6 +15,7 @@ mod render;
 mod shared;
 
 pub use error::ConvertError;
+pub use formats::pdf::MarkdownPage;
 
 use render::markdown::document_to_markdown;
 
@@ -32,8 +33,10 @@ pub enum Format {
     /// OpenDocument Text (`.odt`).
     Odt,
     /// Converted with [pdf-inspector], which emits Markdown directly:
-    /// [`to_document`] is unsupported for PDFs. Scanned/image-only PDFs
-    /// (needing OCR) error as unsupported.
+    /// [`to_document`] is unsupported for PDFs. Use [`to_markdown`],
+    /// [`to_markdown_bytes`], or [`to_markdown_pages`]. Scanned/image-only
+    /// PDFs (needing OCR) error as unsupported from the single-blob APIs;
+    /// [`to_markdown_pages`] reports OCR needs per page instead.
     ///
     /// [pdf-inspector]: https://github.com/firecrawl/pdf-inspector
     Pdf,
@@ -125,11 +128,34 @@ pub fn to_markdown_bytes(
     Ok(document_to_markdown(&to_document(bytes, format)?))
 }
 
+/// Convert a PDF file to per-page Markdown.
+///
+/// This is the page-aware counterpart of [`to_markdown`] for PDFs. Other
+/// formats should keep using [`to_markdown`] or [`to_document`]. See
+/// [`to_markdown_pages_bytes`] for the in-memory form and page semantics.
+pub fn to_markdown_pages(path: impl AsRef<Path>) -> Result<Vec<MarkdownPage>, ConvertError> {
+    let bytes = std::fs::read(path.as_ref())?;
+    to_markdown_pages_bytes(&bytes)
+}
+
+/// Convert an in-memory PDF to per-page Markdown.
+///
+/// Wraps pdf-inspector's per-page extraction. Unlike [`to_markdown_bytes`],
+/// the result keeps page boundaries and reports OCR needs on each
+/// [`MarkdownPage`] instead of failing when the whole document needs OCR.
+///
+/// `page` is 0-indexed. Pages that need OCR have empty `markdown` and
+/// `needs_ocr = true`.
+pub fn to_markdown_pages_bytes(bytes: &[u8]) -> Result<Vec<MarkdownPage>, ConvertError> {
+    formats::pdf::to_markdown_pages(bytes)
+}
+
 /// Parse an in-memory document into the document model. Pass a [`Format`] to
 /// select the parser, or `None` to detect it from the content.
 ///
 /// Unsupported for [`Format::Pdf`]: PDF conversion produces Markdown
-/// directly and has no document-model form; use [`to_markdown_bytes`].
+/// directly and has no document-model form; use [`to_markdown_bytes`] or
+/// [`to_markdown_pages_bytes`].
 pub fn to_document(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
