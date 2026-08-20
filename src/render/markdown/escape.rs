@@ -35,9 +35,9 @@ pub(crate) struct EscapeOpts {
     pub in_label: bool,
 }
 
-/// Set of pairable delimiter characters (`*` `_` `~` `` ` `` `]`).
+/// Set of pairable delimiter characters (`*` `_` `~` `` ` `` `]` `$`).
 #[derive(Clone, Copy, Default)]
-pub(crate) struct Delims([bool; 5]);
+pub(crate) struct Delims([bool; 6]);
 
 impl Delims {
     fn slot(c: char) -> Option<usize> {
@@ -47,6 +47,7 @@ impl Delims {
             '~' => Some(2),
             '`' => Some(3),
             ']' => Some(4),
+            '$' => Some(5),
             _ => None,
         }
     }
@@ -95,11 +96,26 @@ fn run_end(chars: &[char], j: usize) -> usize {
 /// Slot for the delimiter run `j..end` when it can act as a pairing partner.
 /// Backticks and `]` always can: code spans pair by backtick-string length
 /// (even a backslash-escaped backtick still closes one) and brackets pair
-/// as link structure. `*`, `_` and `~` pair by flanking, so they only
-/// count where they can close.
+/// as link structure. `*`, `_` and `~` pair by flanking, and `$` closes
+/// math only after a non-space and before a non-digit, so those count only
+/// where they can close.
 fn partner_slot(chars: &[char], j: usize, end: usize) -> Option<usize> {
     let slot = Delims::slot(chars[j])?;
-    (matches!(chars[j], '`' | ']') || can_close(chars, j, end)).then_some(slot)
+    let closes = match chars[j] {
+        '`' | ']' => true,
+        '$' => can_close_math(chars, j, end),
+        _ => can_close(chars, j, end),
+    };
+    closes.then_some(slot)
+}
+
+/// Whether the `$` run `j..end` could close a math span: not preceded by
+/// whitespace, not followed by a digit. Unknown neighbours at the edges
+/// assume the worst.
+fn can_close_math(chars: &[char], j: usize, end: usize) -> bool {
+    let prev = j.checked_sub(1).map(|p| chars[p]);
+    let next = chars.get(end).copied();
+    !prev.is_some_and(char::is_whitespace) && !next.is_some_and(|n| n.is_ascii_digit())
 }
 
 /// Whether the emphasis or strikethrough run `j..end` could close a pair:
@@ -134,7 +150,7 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
     let chars: Vec<char> = text.chars().collect();
     // Last position of each delimiter that can pair; one with no later
     // partner is inert.
-    let mut last: [Option<usize>; 5] = [None; 5]; // * _ ~ ` ]
+    let mut last: [Option<usize>; 6] = [None; 6]; // * _ ~ ` ] $
     let mut j = 0;
     while j < chars.len() {
         let end = run_end(&chars, j);
@@ -169,9 +185,9 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
         };
         let escape = match c {
             '\\' => true,
-            // A bare `$` could pair with an emitted math delimiter, or with
-            // another `$` in the text, into a math span.
-            '$' => true,
+            // Opens a math span only directly before non-space, and only
+            // when a `$` that can close follows.
+            '$' => next_nonspace && paired(5),
             ']' if in_label => true,
             '`' => styled || paired(3),
             '*' => styled || start_of_line || (next_nonspace && paired(0)),

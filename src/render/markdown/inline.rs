@@ -237,6 +237,7 @@ fn delims_of(run: &Norm, rc: &Ctx) -> Delims {
             if text.contains(']') {
                 delims.insert(']');
             }
+            delims.insert_closers(&text.replace(|c: char| c != '$' && !c.is_whitespace(), "x"));
         }
         Norm::Link { content, target } => match target {
             // An unresolved target degrades to its rendered content

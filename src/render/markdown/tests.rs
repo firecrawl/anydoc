@@ -38,8 +38,14 @@ fn math_renders_in_dollar_delimiters_and_text_dollars_are_escaped() {
             Inline::plain(" holds."),
         ]),
         Block::Math("\\sum_{i=1}^{n} i $".into()),
+        Block::Paragraph(vec![Inline::plain("Plans at $20 or $17.50.")]),
+        Block::Paragraph(vec![Inline::plain("Pair $x with y$ here.")]),
     ]);
-    assert_eq!(md, "Costs \\$5 or \\$6, and $x_1 < y$ holds.\n\n$$\n\\sum_{i=1}^{n} i \\$\n$$\n");
+    assert_eq!(
+        md,
+        "Costs \\$5 or \\$6, and $x_1 < y$ holds.\n\n$$\n\\sum_{i=1}^{n} i \\$\n$$\n\n\
+         Plans at $20 or $17.50.\n\nPair \\$x with y$ here.\n"
+    );
 }
 
 #[test]
