@@ -1,7 +1,7 @@
 // Smoke test: the bindings load and every entry point round-trips a fixture.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -136,6 +136,64 @@ test('cli help and version go to stdout and exit 0', async () => {
   const help = await runCli(['--help'])
   assert.equal(help.code, undefined)
   assert.match(help.stdout, /Exit codes:/)
+  assert.match(help.stdout, /--batch/)
   const version = await runCli(['--version'])
   assert.match(version.stdout.trim(), /^\d+\.\d+\.\d+/)
+})
+
+test('cli --batch converts a tree and copies passthrough files', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'anydoc-batch-'))
+  const input = join(dir, 'in')
+  const output = join(dir, 'out')
+  try {
+    await mkdir(join(input, 'nested'), { recursive: true })
+    await copyFile(OUTLINE, join(input, 'nested', 'handbook.docx'))
+    await copyFile(CSV, join(input, 'sheet.csv'))
+    await writeFile(join(input, 'notes.txt'), 'plain text\n')
+    await writeFile(join(input, 'nested', 'skip.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+
+    const { code, stdout, stderr } = await runCli(['--batch', input, '-o', output])
+    assert.equal(code, undefined)
+    assert.equal(stdout, '')
+    assert.equal(stderr, '')
+
+    assert.match(await readFile(join(output, 'nested', 'handbook.docx.md'), 'utf8'), /^# /m)
+    assert.match(await readFile(join(output, 'sheet.csv.md'), 'utf8'), /\| --- \|/)
+    assert.equal(await readFile(join(output, 'notes.txt'), 'utf8'), 'plain text\n')
+    await assert.rejects(stat(join(output, 'nested', 'skip.png')))
+    await assert.rejects(stat(join(output, 'nested', 'skip.png.md')))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('cli --batch continues after a conversion failure and exits 1', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'anydoc-batch-fail-'))
+  const input = join(dir, 'in')
+  const output = join(dir, 'out')
+  try {
+    await mkdir(input, { recursive: true })
+    await copyFile(OUTLINE, join(input, 'ok.docx'))
+    await copyFile(ENCRYPTED, join(input, 'bad.odt'))
+
+    const { code, stderr } = await runCli(['--batch', input, '-o', output])
+    assert.equal(code, 1)
+    assert.match(stderr, /bad\.odt/)
+    assert.match(await readFile(join(output, 'ok.docx.md'), 'utf8'), /^# /m)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('cli --batch usage errors exit 2', async () => {
+  for (const args of [
+    ['--batch', CSV, '-o', 'out'],
+    ['--batch', '-o', 'out'],
+    ['--batch', OUTLINE],
+    ['--batch', OUTLINE, '-o', 'out', '--format', 'docx'],
+  ]) {
+    const { code, stderr } = await runCli(args)
+    assert.equal(code, 2, `expected usage error for ${JSON.stringify(args)}`)
+    assert.match(stderr, /^anydoc: /)
+  }
 })

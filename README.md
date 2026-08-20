@@ -29,6 +29,7 @@ The [skill](skills/convert-documents-to-markdown/SKILL.md) teaches the agent to 
 ```bash
 npx @firecrawl/anydoc report.docx               # Markdown to stdout
 npx @firecrawl/anydoc slides.pptx -o slides.md  # or to a file
+npx @firecrawl/anydoc --batch ./docs -o ./out   # convert a directory tree
 npx @firecrawl/anydoc - --format csv < data.csv # read stdin
 ```
 

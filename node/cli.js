@@ -1,26 +1,42 @@
 #!/usr/bin/env node
 'use strict'
 
-const { readFile, writeFile } = require('node:fs/promises')
+const { copyFile, mkdir, readdir, readFile, stat, writeFile } = require('node:fs/promises')
+const { dirname, extname, join, relative, resolve, sep } = require('node:path')
 
 const FORMATS = 'doc, docx, odt, pdf, ppt, pptx, rtf, epub, xlsx, ods, odp, csv'
+
+// Plain-text extensions copied as-is in batch mode (names unchanged).
+const PASSTHROUGH_EXTS = new Set(['.txt', '.json', '.md', '.py'])
 
 const HELP = `anydoc: convert documents to GitHub-Flavored Markdown
 
 Usage:
   anydoc <file> [options]
+  anydoc --batch <dir> -o <dir> [options]
   anydoc - [options] < file
 
-Converts one document per invocation and writes the Markdown to stdout.
-Pass - as the input to read the document from stdin. Never prompts; all
-diagnostics go to stderr.
+Converts one document per invocation and writes the Markdown to stdout,
+or converts a directory tree in batch mode. Pass - as the input to read
+the document from stdin. Never prompts; all diagnostics go to stderr.
 
 Options:
-  -o, --output <path>    Write the Markdown to <path> instead of stdout
+  --batch                Convert every supported file under <dir>
+                         recursively into -o, preserving relative paths.
+                         Requires -o. Converted files keep the original
+                         name and gain a .md suffix (report.pdf becomes
+                         report.pdf.md). Plain-text files (.txt, .json,
+                         .md, .py) are copied with names unchanged.
+                         Unsupported files are skipped silently. Existing
+                         outputs are overwritten. A conversion failure on
+                         one file is logged to stderr and the run continues;
+                         the process exits 1 if any conversion failed.
+  -o, --output <path>    Write Markdown to <path> (single-file), or the
+                         output directory (required with --batch)
   -f, --format <format>  Name the input format instead of detecting it:
                          ${FORMATS}
                          (extension aliases like xls, docm, ppsx resolve
-                         to these)
+                         to these). Not valid with --batch.
   -h, --help             Print this help and exit
   -V, --version          Print the version and exit
 
@@ -31,12 +47,14 @@ which anydoc does not do, and error as unsupported.
 
 Exit codes:
   0  success
-  1  the document could not be read or converted
+  1  the document could not be read or converted (in batch mode: at least
+     one file failed to convert)
   2  usage error: unknown option, missing input, or invalid --format
 
 Examples:
   anydoc report.docx
   anydoc slides.pptx -o slides.md
+  anydoc --batch ./docs -o ./out
   anydoc - --format csv < data.csv
   curl -s https://example.com/paper.pdf | anydoc -
 `
@@ -50,7 +68,7 @@ function fail(code, message) {
 }
 
 function parseArgs(argv) {
-  const args = { input: null, output: null, format: null }
+  const args = { input: null, output: null, format: null, batch: false }
   let positionalOnly = false
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i]
@@ -87,6 +105,21 @@ function parseArgs(argv) {
         process.stdout.write(`${require('./package.json').version}\n`)
         process.exit(0)
         break
+      case '--batch':
+        // Allow --batch <dir> (value form) or --batch with a separate positional.
+        if (inline !== null) {
+          if (args.input !== null) {
+            fail(USAGE_ERROR, `one document per invocation: unexpected second input '${inline}'`)
+          }
+          args.input = inline
+        } else if (i + 1 < argv.length && !argv[i + 1].startsWith('-')) {
+          if (args.input !== null) {
+            fail(USAGE_ERROR, `one document per invocation: unexpected second input '${argv[i + 1]}'`)
+          }
+          args.input = argv[++i]
+        }
+        args.batch = true
+        break
       case '-o':
       case '--output':
         args.output = value()
@@ -113,16 +146,93 @@ async function readStdin() {
   return Buffer.concat(chunks)
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2))
-  if (args.input === null) {
-    fail(USAGE_ERROR, 'missing input: pass a document path, or - for stdin (see anydoc --help)')
+function isPassthrough(path) {
+  return PASSTHROUGH_EXTS.has(extname(path).toLowerCase())
+}
+
+/** Walk a directory tree depth-first; yield absolute file paths. */
+async function* walkFiles(root) {
+  const entries = await readdir(root, { withFileTypes: true })
+  for (const entry of entries) {
+    const path = join(root, entry.name)
+    if (entry.isDirectory()) {
+      yield* walkFiles(path)
+    } else if (entry.isFile()) {
+      yield path
+    }
+  }
+}
+
+async function runBatch(args, { formatFromPath, toMarkdown }) {
+  if (args.input === '-') {
+    fail(USAGE_ERROR, '--batch does not read stdin; pass an input directory')
+  }
+  if (args.output === null) {
+    fail(USAGE_ERROR, '--batch requires -o/--output naming an output directory')
+  }
+  if (args.format !== null) {
+    fail(USAGE_ERROR, '--format is not valid with --batch (format is detected per file)')
   }
 
-  // Loaded after argument handling so --help and --version work even where
-  // no native binding is available.
-  const { formatFromExtension, toMarkdown, toMarkdownBytes } = require('./index.js')
+  let inputStat
+  try {
+    inputStat = await stat(args.input)
+  } catch (error) {
+    fail(CONVERSION_ERROR, error.message)
+  }
+  if (!inputStat.isDirectory()) {
+    fail(USAGE_ERROR, `--batch expects a directory, got '${args.input}'`)
+  }
 
+  const inputRoot = resolve(args.input)
+  const outputRoot = resolve(args.output)
+
+  try {
+    await mkdir(outputRoot, { recursive: true })
+  } catch (error) {
+    fail(CONVERSION_ERROR, error.message)
+  }
+
+  let failed = 0
+  for await (const absPath of walkFiles(inputRoot)) {
+    const rel = relative(inputRoot, absPath)
+    // Guard against path escape on odd relative() results.
+    if (rel.startsWith(`..${sep}`) || rel === '..') continue
+
+    if (isPassthrough(absPath)) {
+      const outPath = join(outputRoot, rel)
+      try {
+        await mkdir(dirname(outPath), { recursive: true })
+        await copyFile(absPath, outPath)
+      } catch (error) {
+        process.stderr.write(`anydoc: ${rel}: ${error.message}\n`)
+        failed++
+      }
+      continue
+    }
+
+    if (formatFromPath(absPath) === null) {
+      // Unsupported (images, videos, archives, unknown extensions): skip.
+      continue
+    }
+
+    const outPath = join(outputRoot, `${rel}.md`)
+    try {
+      const markdown = await toMarkdown(absPath)
+      await mkdir(dirname(outPath), { recursive: true })
+      await writeFile(outPath, markdown)
+    } catch (error) {
+      process.stderr.write(`anydoc: ${rel}: ${error.message}\n`)
+      failed++
+    }
+  }
+
+  if (failed > 0) {
+    process.exit(CONVERSION_ERROR)
+  }
+}
+
+async function runSingle(args, { formatFromExtension, toMarkdown, toMarkdownBytes }) {
   let format
   if (args.format !== null) {
     format = formatFromExtension(args.format)
@@ -157,6 +267,28 @@ async function main() {
       process.exit(error.code === 'EPIPE' ? 0 : CONVERSION_ERROR)
     })
     process.stdout.write(markdown)
+  }
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2))
+  if (args.input === null) {
+    fail(
+      USAGE_ERROR,
+      args.batch
+        ? 'missing input: pass a directory with --batch (see anydoc --help)'
+        : 'missing input: pass a document path, or - for stdin (see anydoc --help)',
+    )
+  }
+
+  // Loaded after argument handling so --help and --version work even where
+  // no native binding is available.
+  const bindings = require('./index.js')
+
+  if (args.batch) {
+    await runBatch(args, bindings)
+  } else {
+    await runSingle(args, bindings)
   }
 }
 
