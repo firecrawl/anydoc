@@ -165,10 +165,16 @@ fn render_image(
                 escape_text(alt.trim(), ctx, EscapeOpts { in_label: true, ..Default::default() });
             let _ = write!(out, "![{}]({})", alt, format_url(url));
         }
-        // Embedded assets render as their alt text: Markdown cannot embed
-        // bytes, and the bytes stay available in `Document::assets`. A
-        // source-less image has only its alt text to offer.
-        ImageSource::Asset(_) | ImageSource::Unavailable => {
+        // Embedded assets cannot carry bytes in Markdown, but they keep a
+        // stable positional marker (`asset:N`) that indexes `Document::assets`
+        // so callers can rewrite the href after writing files out.
+        ImageSource::Asset(id) => {
+            let alt =
+                escape_text(alt.trim(), ctx, EscapeOpts { in_label: true, ..Default::default() });
+            let _ = write!(out, "![{}](asset:{})", alt, id.0);
+        }
+        // A source-less image has only its alt text to offer.
+        ImageSource::Unavailable => {
             if !alt.trim().is_empty() {
                 out.push_str(&escape_text(
                     alt.trim(),
