@@ -178,6 +178,12 @@ export interface Table {
   /** Number of leading rows that are header rows (0 = no header). */
   headerRows: number
   kind: TableKind
+  /** Spreadsheet worksheet name when known. */
+  sheetName?: string
+  /** Zero-based absolute row of the used-range origin in the source sheet. */
+  sourceRow?: number
+  /** Zero-based absolute column of the used-range origin in the source sheet. */
+  sourceCol?: number
 }
 
 export type CellSlotKind = 'origin' | 'covered'

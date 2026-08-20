@@ -105,6 +105,11 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             continue;
         }
         table.header_rows = resolve_header_rows(&table, 0);
+        // Preserve worksheet identity and the used-range origin so callers can
+        // map cropped grid cells back to absolute sheet coordinates (C3, …).
+        table.sheet_name = Some(name.clone());
+        table.source_row = Some(start.0);
+        table.source_col = Some(start.1);
         if multi_sheet {
             doc.blocks.push(Block::heading(2, vec![Inline::plain(name.clone())]));
         }
@@ -306,5 +311,57 @@ mod tests {
         let days = (26.0 * 3600.0 + 30.0 * 60.0 + 15.0) / 86_400.0;
         assert_eq!(format_duration_days(days), "26:30:15");
         assert_eq!(format_duration_days(-0.5), "-12:00:00");
+    }
+
+    /// Minimal xlsx: single sheet "Data Sheet", sole value at C3.
+    fn xlsx_value_at_c3() -> Vec<u8> {
+        let sheet = r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="3"><c r="C3" t="inlineStr"><is><t>Only value</t></is></c></row></sheetData></worksheet>"#;
+        let parts: &[(&str, &str)] = &[
+            (
+                "[Content_Types].xml",
+                r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#,
+            ),
+            (
+                "_rels/.rels",
+                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
+            ),
+            (
+                "xl/workbook.xml",
+                r#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data Sheet" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+            ),
+        ];
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, body) in parts {
+            w.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(body.as_bytes()).unwrap();
+        }
+        w.start_file("xl/worksheets/sheet1.xml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        w.write_all(sheet.as_bytes()).unwrap();
+        w.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn single_sheet_exposes_name_and_used_range_origin() {
+        let doc = parse(&xlsx_value_at_c3()).unwrap();
+        let Some(Block::Table(t)) = doc.blocks.first() else {
+            panic!("expected a table, got {:?}", doc.blocks.first());
+        };
+        assert_eq!(t.sheet_name.as_deref(), Some("Data Sheet"));
+        // C3 is zero-based (2, 2); the cropped grid still starts at [0][0].
+        assert_eq!(t.source_row, Some(2));
+        assert_eq!(t.source_col, Some(2));
+        assert_eq!(t.grid.len(), 1);
+        assert_eq!(t.grid[0].len(), 1);
+        match &t.grid[0][0] {
+            crate::model::CellSlot::Origin(c) => {
+                assert!(!c.is_empty());
+            }
+            other => panic!("expected origin cell, got {other:?}"),
+        }
     }
 }
