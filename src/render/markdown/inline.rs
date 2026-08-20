@@ -85,6 +85,7 @@ pub(crate) fn render_inlines(inlines: &[Inline], ctx: InlineContext, rc: &Ctx) -
 
 fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, rc: &Ctx) -> String {
     let runs = normalize(inlines, rc);
+    let suffix = delims_ahead(&runs, rc);
     let mut out = String::new();
     for (idx, run) in runs.iter().enumerate() {
         match run {
@@ -104,7 +105,7 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
                 let opts = EscapeOpts {
                     trailing_active: next_active,
                     trailing_nonspace: next_nonspace,
-                    trailing_delims: delims_ahead(&runs[idx + 1..], rc),
+                    trailing_delims: suffix[idx + 1],
                     in_label,
                     ..Default::default()
                 };
@@ -196,53 +197,66 @@ fn render_image(
 /// line: literal characters in plain text, plus the markup that styled runs,
 /// code spans, links and images produce. A delimiter in an earlier run can
 /// pair with any of them across the run seam, hard breaks included.
-fn delims_ahead(runs: &[Norm], rc: &Ctx) -> Delims {
+/// The delimiters each suffix of `runs` emits, indexed by where the suffix
+/// starts, so one reverse pass answers every run's lookahead.
+fn delims_ahead(runs: &[Norm], rc: &Ctx) -> Vec<Delims> {
+    let mut suffix = vec![Delims::default(); runs.len() + 1];
+    for idx in (0..runs.len()).rev() {
+        let mut delims = suffix[idx + 1];
+        delims.union(delims_of(&runs[idx], rc));
+        suffix[idx] = delims;
+    }
+    suffix
+}
+
+/// What one run contributes to a later run's pairing partners.
+fn delims_of(run: &Norm, rc: &Ctx) -> Delims {
     let mut delims = Delims::default();
-    for run in runs {
-        match run {
-            Norm::Text { style, .. } if style.code => delims.insert('`'),
-            Norm::Text { text, style } if *style == Style::PLAIN => delims.insert_text(text),
-            Norm::Text { text, style } => {
-                // Emphasis content is escaped, which neutralizes everything
-                // but backticks: code spans ignore backslash escapes, so an
-                // emitted `\`` still closes a span an earlier raw backtick
-                // opens. `]` is the one character escaping leaves raw.
-                if style.bold || style.italic {
-                    delims.insert('*');
-                }
-                if style.strike {
-                    delims.insert('~');
-                }
-                if text.contains('`') {
-                    delims.insert('`');
-                }
-                if text.contains(']') {
-                    delims.insert(']');
+    match run {
+        Norm::Text { style, .. } if style.code => delims.insert('`'),
+        Norm::Text { text, style } if *style == Style::PLAIN => delims.insert_text(text),
+        Norm::Text { text, style } => {
+            // Emphasis content is escaped, which neutralizes everything
+            // but backticks: code spans ignore backslash escapes, so an
+            // emitted `\`` still closes a span an earlier raw backtick
+            // opens. `]` is the one character escaping leaves raw.
+            if style.bold || style.italic {
+                delims.insert('*');
+            }
+            if style.strike {
+                delims.insert('~');
+            }
+            if text.contains('`') {
+                delims.insert('`');
+            }
+            if text.contains(']') {
+                delims.insert(']');
+            }
+        }
+        Norm::Link { content, target } => match target {
+            // An unresolved target degrades to its rendered content
+            // (see render_link), which emits like any sibling runs.
+            LinkTarget::Anchor(id) if rc.anchors.fragment(id).is_none() => {
+                for run in &normalize(content, rc) {
+                    delims.union(delims_of(run, rc));
                 }
             }
-            Norm::Link { content, target } => match target {
-                // An unresolved target degrades to its rendered content
-                // (see render_link), which emits like any sibling runs.
-                LinkTarget::Anchor(id) if rc.anchors.fragment(id).is_none() => {
-                    delims.union(delims_ahead(&normalize(content, rc), rc));
+            // Emphasis cannot cross a link boundary, but a code span
+            // can: a backtick in the label or destination pairs with
+            // one outside.
+            _ => {
+                if emits_backtick(content) || target_has_backtick(target) {
+                    delims.insert('`');
                 }
-                // Emphasis cannot cross a link boundary, but a code span
-                // can: a backtick in the label or destination pairs with
-                // one outside.
-                _ => {
-                    if emits_backtick(content) || target_has_backtick(target) {
-                        delims.insert('`');
-                    }
-                }
-            },
-            Norm::Image { alt, source } => match source {
-                ImageSource::External(_) if alt.contains('`') => delims.insert('`'),
-                ImageSource::External(_) => {}
-                // Sourceless images degrade to their alt as plain text.
-                ImageSource::Asset(_) | ImageSource::Unavailable => delims.insert_text(alt),
-            },
-            Norm::NoteRef(_) | Norm::Anchor(_) | Norm::LineBreak => {}
-        }
+            }
+        },
+        Norm::Image { alt, source } => match source {
+            ImageSource::External(_) if alt.contains('`') => delims.insert('`'),
+            ImageSource::External(_) => {}
+            // Sourceless images degrade to their alt as plain text.
+            ImageSource::Asset(_) | ImageSource::Unavailable => delims.insert_text(alt),
+        },
+        Norm::NoteRef(_) | Norm::Anchor(_) | Norm::LineBreak => {}
     }
     delims
 }
