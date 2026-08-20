@@ -629,7 +629,7 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
         let Some((part, bytes)) = self.ctx.rel_part(rel_id)? else {
             return Ok(Vec::new());
         };
-        match crate::package::xml::parse_xml(&bytes) {
+        match self.ctx.pkg.borrow_mut().parse_part(&part, &bytes) {
             Ok(root) => Ok(crate::shared::drawingml::chart_blocks(&root)),
             Err(e) if e.is_fatal() => Err(e),
             Err(e) => {
@@ -644,7 +644,7 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
         let Some((part, bytes)) = self.ctx.rel_part(rel_id)? else {
             return Ok(Vec::new());
         };
-        match crate::package::xml::parse_xml(&bytes) {
+        match self.ctx.pkg.borrow_mut().parse_part(&part, &bytes) {
             Ok(root) => Ok(crate::shared::drawingml::diagram_blocks(&root)),
             Err(e) if e.is_fatal() => Err(e),
             Err(e) => {

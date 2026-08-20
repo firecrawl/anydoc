@@ -192,8 +192,10 @@ impl<'a> Iterator for DescendantNodes<'a> {
 /// Parse an XML part into a synthetic root element containing the top-level
 /// nodes. Encoding comes from the BOM or XML declaration; the part is
 /// transcoded to UTF-8 before parsing so namespace resolution sees one
-/// consistent encoding.
-pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
+/// consistent encoding. Nodes are charged against `document_nodes` as well
+/// as the per-part cap, so that a package re-parsing one part for every
+/// reference to it stays bounded.
+pub fn parse_xml_counted(bytes: &[u8], document_nodes: &mut u64) -> Result<Element, ConvertError> {
     let utf8 = to_utf8(bytes);
     let mut reader = NsReader::from_reader(utf8.as_ref());
     reader.config_mut().check_end_names = false;
@@ -202,7 +204,7 @@ pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
     let mut root =
         Element { ns: None, local: String::new(), attrs: Vec::new(), children: Vec::new() };
     let mut stack: Vec<Element> = Vec::new();
-    let mut nodes: usize = 0;
+    let mut nodes = NodeCount { part: 0, document: document_nodes };
     let mut recovered = false;
 
     loop {
@@ -310,12 +312,32 @@ fn declared_encoding(head: &[u8]) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-fn bump_nodes(nodes: &mut usize) -> Result<(), ConvertError> {
-    *nodes += 1;
-    if *nodes > limits::MAX_XML_NODES {
+/// [`parse_xml_counted`] against a throwaway document total.
+#[cfg(test)]
+pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
+    parse_xml_counted(bytes, &mut 0)
+}
+
+/// Node counters for one parse: the part's own count, and the running total
+/// for the document the part belongs to.
+struct NodeCount<'a> {
+    part: usize,
+    document: &'a mut u64,
+}
+
+fn bump_nodes(nodes: &mut NodeCount<'_>) -> Result<(), ConvertError> {
+    nodes.part += 1;
+    if nodes.part > limits::MAX_XML_NODES {
         return Err(ConvertError::ResourceLimit {
             limit: "max_xml_nodes",
             detail: format!("part exceeds {} xml nodes", limits::MAX_XML_NODES),
+        });
+    }
+    *nodes.document += 1;
+    if *nodes.document > limits::MAX_DOCUMENT_XML_NODES {
+        return Err(ConvertError::ResourceLimit {
+            limit: "max_document_xml_nodes",
+            detail: format!("document exceeds {} parsed xml nodes", limits::MAX_DOCUMENT_XML_NODES),
         });
     }
     Ok(())

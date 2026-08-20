@@ -1739,6 +1739,27 @@ def malformed():
         # structurally unusable -> the labelled raw-recovery path must run.
         raw = ppt.read_bytes().replace(b"\xf5\x0f", b"\xf5\xff")
         (m / "brokenpersist--recovers.ppt").write_bytes(raw)
+    # Every reading-order entry resolves to the package document itself, so
+    # the part read once per entry is the one that grows with the entry
+    # count. Parsing it per entry is quadratic; the package's parsed-tree
+    # cache is what keeps this linear. No entry yields a chapter, so the book
+    # itself is unreadable.
+    n = 6400
+    items = "".join(
+        f'<item id="i{i}" href="c.opf" media-type="application/xhtml+xml"/>'
+        for i in range(n))
+    refs = "".join(f'<itemref idref="i{i}"/>' for i in range(n))
+    write_zip(m / "selfref--errors.epub", [
+        ("META-INF/container.xml",
+         '<?xml version="1.0"?>'
+         '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+         '<rootfiles><rootfile full-path="c.opf"'
+         ' media-type="application/oebps-package+xml"/></rootfiles></container>'),
+        ("c.opf",
+         '<?xml version="1.0"?>'
+         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+         f'<metadata/><manifest>{items}</manifest><spine>{refs}</spine></package>'),
+    ], mimetype_first="application/epub+zip")
 
 
 def abuse():

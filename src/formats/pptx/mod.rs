@@ -13,7 +13,7 @@ use crate::model::{
 use crate::package::relationships::{
     RelTarget, Relationships, TargetMode, read_rels, rel_target_bytes, rel_type, rels_part_for,
 };
-use crate::package::xml::{Element, ns, parse_xml};
+use crate::package::xml::{Element, ns};
 use crate::package::{Package, archive::probe_ole, path};
 use crate::shared::assets::AssetSink;
 use crate::shared::delta::rebase_emphasis;
@@ -580,7 +580,7 @@ fn parse_graphic_frame(
         && let Some(rid) = chart_ref.attr_qualified(ns::R, "id")
         && let Some((part, bytes)) = ctx.rel_part(rid)?
     {
-        match parse_xml(&bytes) {
+        match ctx.pkg.borrow_mut().parse_part(&part, &bytes) {
             Ok(root) => blocks.extend(crate::shared::drawingml::chart_blocks(&root)),
             Err(e) if e.is_fatal() => return Err(e),
             Err(e) => log::warn!("skipping corrupt chart part {part}: {e}"),
@@ -591,7 +591,7 @@ fn parse_graphic_frame(
         && let Some(rid) = rel_ids.attr_qualified(ns::R, "dm")
         && let Some((part, bytes)) = ctx.rel_part(rid)?
     {
-        match parse_xml(&bytes) {
+        match ctx.pkg.borrow_mut().parse_part(&part, &bytes) {
             Ok(root) => blocks.extend(crate::shared::drawingml::diagram_blocks(&root)),
             Err(e) if e.is_fatal() => return Err(e),
             Err(e) => log::warn!("skipping corrupt diagram part {part}: {e}"),
