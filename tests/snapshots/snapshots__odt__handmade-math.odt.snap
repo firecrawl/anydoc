@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+Einstein wrote $E=mc^{2}$ on the board.
+
+Inline object: $\frac{a}{b}+\sqrt{x}$ done.

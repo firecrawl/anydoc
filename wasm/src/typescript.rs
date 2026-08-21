@@ -45,6 +45,7 @@ export type BlockKind =
   | 'blockQuote'
   | 'codeBlock'
   | 'rule'
+  | 'math'
 
 export interface Block {
   kind: BlockKind
@@ -60,7 +61,7 @@ export interface Block {
   blocks?: Array<Block>
   /** codeBlock. */
   lang?: string
-  /** codeBlock. */
+  /** codeBlock, math (LaTeX source without delimiters). */
   text?: string
 }
 
@@ -72,10 +73,14 @@ export type InlineKind =
   | 'anchor'
   | 'noteRef'
   | 'lineBreak'
+  /** An inline formula. */
+  | 'math'
+  /** A checkbox control. */
+  | 'checkbox'
 
 export interface Inline {
   kind: InlineKind
-  /** text. */
+  /** text; math (LaTeX source without delimiters). */
   text?: string
   /** text. */
   style?: Style
@@ -91,6 +96,8 @@ export interface Inline {
   anchor?: string
   /** noteRef: the id of the note in `Document.notes`. */
   noteId?: string
+  /** checkbox: its state. */
+  checked?: boolean
 }
 
 /** Fully resolved character style. */
@@ -152,8 +159,6 @@ export interface List {
 
 export interface ListItem {
   blocks: Array<Block>
-  /** Task-list state, when the item carries a checkbox. */
-  checked?: boolean
   /**
    * Literal marker text that overrides the list marker when the source
    * number text cannot be reproduced from the marker and position alone

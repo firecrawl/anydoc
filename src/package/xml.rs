@@ -25,6 +25,7 @@ pub mod ns {
     pub const CHART: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
     pub const DGM: &str = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
     pub const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
+    pub const SML: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
     pub const PKG_RELS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 
     pub const OFFICE: &str = "urn:oasis:names:tc:opendocument:xmlns:office:1.0";
@@ -38,11 +39,17 @@ pub mod ns {
     pub const XLINK: &str = "http://www.w3.org/1999/xlink";
     pub const XML: &str = "http://www.w3.org/XML/1998/namespace";
     pub const SVG_COMPAT: &str = "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0";
+    pub const FORM: &str = "urn:oasis:names:tc:opendocument:xmlns:form:1.0";
 
     pub const VML: &str = "urn:schemas-microsoft-com:vml";
     pub const O_VML: &str = "urn:schemas-microsoft-com:office:office";
+    pub const X_VML: &str = "urn:schemas-microsoft-com:office:excel";
     pub const WPS: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape";
     pub const WPG: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup";
+    pub const A14: &str = "http://schemas.microsoft.com/office/drawing/2010/main";
+
+    pub const M: &str = "http://schemas.openxmlformats.org/officeDocument/2006/math";
+    pub const MATHML: &str = "http://www.w3.org/1998/Math/MathML";
 }
 
 #[derive(Debug)]

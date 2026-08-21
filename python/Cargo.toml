@@ -2,7 +2,7 @@
 # dynamic version), so bump it together with the workspace release version.
 [package]
 name = "anydoc-python"
-version = "0.1.9"
+version = "0.2.3"
 edition = "2024"
 description = "Python bindings for anydoc"
 license = "MIT"

@@ -30,6 +30,35 @@ fn heading_and_paragraph() {
 }
 
 #[test]
+fn math_renders_in_dollar_delimiters_and_text_dollars_are_escaped() {
+    let md = doc(vec![
+        Block::Paragraph(vec![
+            Inline::plain("Costs $5 or $6, and "),
+            Inline::Math("x_1 < y".into()),
+            Inline::plain(" holds."),
+        ]),
+        Block::Math("\\sum_{i=1}^{n} i $".into()),
+        Block::Paragraph(vec![Inline::plain("Plans at $20 or $17.50.")]),
+        Block::Paragraph(vec![Inline::plain("Pair $x with y$ here.")]),
+    ]);
+    assert_eq!(
+        md,
+        "Costs \\$5 or \\$6, and $x_1 < y$ holds.\n\n$$\n\\sum_{i=1}^{n} i \\$\n$$\n\n\
+         Plans at $20 or $17.50.\n\nPair \\$x with y$ here.\n"
+    );
+}
+
+#[test]
+fn math_in_a_table_cell_escapes_pipes() {
+    let cell = |inlines| Cell { blocks: vec![Block::Paragraph(inlines)], col_span: 1, row_span: 1 };
+    let md = doc(vec![table_from(
+        vec![vec![cell(vec![Inline::plain("abs")]), cell(vec![Inline::Math("|x|".into())])]],
+        0,
+    )]);
+    assert!(md.contains("| $\\|x\\|$ |"), "{md}");
+}
+
+#[test]
 fn escapes_paired_syntax_chars() {
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("a *bold* _it_ ~st~ `code`")])]);
     assert_eq!(md, "a \\*bold* \\_it_ \\~st~ \\`code`\n");
@@ -43,6 +72,35 @@ fn lone_syntax_chars_left_alone() {
     assert_eq!(md, "2 * 3 = 6 and 5*6 #tag\n");
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("x < 5, ~10%, file_name, a[1")])]);
     assert_eq!(md, "x < 5, ~10%, file_name, a[1\n");
+}
+
+#[test]
+fn partners_that_cannot_close_leave_delimiters_raw() {
+    // The space-padded `*` is not right-flanking, so the opener is inert.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("a *b 2 * 3")])]);
+    assert_eq!(md, "a *b 2 * 3\n");
+    // Same across a run seam.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a *"),
+        Inline::LineBreak,
+        Inline::plain("2 * 3"),
+    ])]);
+    assert_eq!(md, "a *\\\n2 * 3\n");
+    // Intraword underscores can neither open nor close.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a _"),
+        Inline::LineBreak,
+        Inline::plain("snake_case"),
+    ])]);
+    assert_eq!(md, "a _\\\nsnake_case\n");
+    // A `*` after punctuation and before a word character is not
+    // right-flanking either.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("a *b .*c")])]);
+    assert_eq!(md, "a *b .*c\n");
+    // Flanking is judged at the delimiter run's edges: `__` between
+    // letters is intraword even though each `_` neighbours the other.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("a _x foo__bar")])]);
+    assert_eq!(md, "a _x foo__bar\n");
 }
 
 #[test]
@@ -91,6 +149,78 @@ fn negative_number_in_cell_unescaped() {
 fn trailing_delimiter_before_styled_run_escaped() {
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("star*"), styled("x", BOLD)])]);
     assert_eq!(md, "star\\***x**\n");
+}
+
+#[test]
+fn delimiters_do_not_pair_across_run_seams() {
+    // Two lines each ending in a backtick must not form a code span (#45).
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        Inline::plain("b `"),
+    ])]);
+    assert_eq!(md, "a \\`\\\nb `\n");
+    // Emphasis pairs across a hard break just as code spans do.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a *"),
+        Inline::LineBreak,
+        Inline::plain("b*"),
+    ])]);
+    assert_eq!(md, "a \\*\\\nb*\n");
+    // A raw backtick pairs with a later code span's fence.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        styled("x", Style { code: true, ..Style::PLAIN }),
+    ])]);
+    assert_eq!(md, "a \\`\\\n`x`\n");
+}
+
+#[test]
+fn unresolved_link_fallback_counts_toward_seam_pairing() {
+    // The fallback text supplies the `]` that pairs with the earlier `[`.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("[click"),
+        Inline::LineBreak,
+        Inline::Link {
+            content: vec![Inline::plain("here]")],
+            target: LinkTarget::Anchor("nowhere".into()),
+        },
+        Inline::plain("(https://e.test)"),
+    ])]);
+    assert_eq!(md, "\\[click\\\nhere](https://e.test)\n");
+    // Same seam with an emphasis delimiter in the fallback.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a *"),
+        Inline::LineBreak,
+        Inline::Link {
+            content: vec![Inline::plain("b*")],
+            target: LinkTarget::Anchor("nowhere".into()),
+        },
+    ])]);
+    assert_eq!(md, "a \\*\\\nb*\n");
+}
+
+#[test]
+fn escaped_backtick_in_later_run_still_pairs() {
+    // A styled run's backtick is emitted as `\\``, yet still closes a span
+    // an earlier raw backtick opens: code spans ignore backslash escapes.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        styled("x`y", BOLD),
+    ])]);
+    assert_eq!(md, "a \\`\\\n**x\\`y**\n");
+    // A whitespace-only code run loses its styling and emits no fence.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        Inline::Link {
+            content: vec![styled("  ", Style { code: true, ..Style::PLAIN }), Inline::plain("x")],
+            target: LinkTarget::External("https://e.test".into()),
+        },
+    ])]);
+    assert_eq!(md, "a `\\\n[  x](https://e.test)\n");
 }
 
 #[test]
@@ -173,7 +303,6 @@ fn composite_marker_labels_are_escaped() {
         start: 1,
         items: vec![crate::model::ListItem {
             blocks: vec![Block::Paragraph(vec![Inline::plain("x")])],
-            checked: None,
             marker_label: Some("#1\n*a*".into()),
         }],
     };
@@ -296,6 +425,18 @@ fn url_pipes_cannot_split_table_cells() {
 }
 
 #[test]
+fn code_span_pipes_cannot_split_table_cells() {
+    let code = |t: &str| {
+        Cell::from_inlines(vec![Inline::Text {
+            text: t.into(),
+            style: Style { code: true, ..Style::PLAIN },
+        }])
+    };
+    let md = doc(vec![table_from(vec![vec![code("a | b"), code(r"a \| b")]], 0)]);
+    assert_eq!(md, concat!("|  |  |\n", "| --- | --- |\n", r"| `a \| b` | `a \\\| b` |", "\n"));
+}
+
+#[test]
 fn url_angle_brackets_are_encoded_without_bracketing() {
     let md = doc(vec![Block::Paragraph(vec![Inline::Link {
         content: vec![Inline::plain("link")],
@@ -330,12 +471,10 @@ fn nested_list() {
                     start: 3,
                     items: vec![ListItem {
                         blocks: vec![Block::Paragraph(vec![Inline::plain("inner")])],
-                        checked: None,
                         marker_label: None,
                     }],
                 }),
             ],
-            checked: None,
             marker_label: None,
         }],
     })]);
@@ -346,7 +485,6 @@ fn nested_list() {
 fn roman_and_alpha_markers_render_literally() {
     let item = |text: &str| ListItem {
         blocks: vec![Block::Paragraph(vec![Inline::plain(text)])],
-        checked: None,
         marker_label: None,
     };
     let md = doc(vec![
@@ -493,7 +631,6 @@ fn an_empty_item_keeps_its_marker_and_the_numbering() {
         } else {
             vec![Block::Paragraph(vec![Inline::plain(text)])]
         },
-        checked: None,
         marker_label: None,
     };
     let md = doc(vec![Block::List(List {
@@ -517,18 +654,31 @@ fn task_list() {
         start: 1,
         items: vec![
             ListItem {
-                blocks: vec![Block::Paragraph(vec![Inline::plain("done")])],
-                checked: Some(true),
+                blocks: vec![Block::Paragraph(vec![Inline::Checkbox(true), Inline::plain("done")])],
                 marker_label: None,
             },
             ListItem {
-                blocks: vec![Block::Paragraph(vec![Inline::plain("todo")])],
-                checked: Some(false),
+                blocks: vec![Block::Paragraph(vec![
+                    Inline::Checkbox(false),
+                    Inline::plain(" todo"),
+                ])],
                 marker_label: None,
             },
         ],
     })]);
     assert_eq!(md, "- [x] done\n- [ ] todo\n");
+}
+
+#[test]
+fn checkbox_in_a_table_cell() {
+    let md = doc(vec![table_from(
+        vec![vec![
+            Cell::from_inlines(vec![Inline::Checkbox(true)]),
+            Cell::from_inlines(vec![Inline::Checkbox(false), Inline::plain("Wall")]),
+        ]],
+        0,
+    )]);
+    assert_eq!(md, "|  |  |\n| --- | --- |\n| [x] | [ ] Wall |\n");
 }
 
 // ---------------------------------------------------------------------------

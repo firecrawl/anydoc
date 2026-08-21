@@ -5,9 +5,9 @@ exclude = ["fuzz"]
 
 [package]
 name = "anydoc"
-version = "0.1.9"
+version = "0.2.3"
 edition = "2024"
-# Edition 2024 needs 1.85; zip and calamine both raise it to 1.88.
+# Edition 2024 needs 1.85; zip raises it to 1.88.
 rust-version = "1.88"
 description = "Convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown"
 license = "MIT"
@@ -22,7 +22,6 @@ insta = "1"
 sha2 = "0.11"
 
 [dependencies]
-calamine = { version = "0.36.1", features = ["dates"] }
 cfb = "0.14.0"
 csv = "1.4.0"
 flate2 = "1"
