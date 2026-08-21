@@ -1,0 +1,27 @@
+# The cdylib backing the Firecrawl.Anydoc NuGet package. csbindgen reads the
+# extern "C" surface in `src/lib.rs` (via `build.rs`) and emits the C# DllImport
+# wrapper into `../src/NativeMethods.g.cs`.
+[package]
+name = "anydoc-dotnet"
+version = "0.1.7"
+edition = "2024"
+description = ".NET bindings for anydoc"
+license = "MIT"
+repository = "https://github.com/firecrawl/anydoc"
+publish = false
+
+[lib]
+name = "anydoc_dotnet"
+crate-type = ["cdylib"]
+
+[dependencies]
+anydoc = { path = "../.." }
+base64 = "0.22"
+serde_json = "1"
+
+[build-dependencies]
+csbindgen = "1.9"
+
+# The workspace root already sets the release profile (LTO, symbol strip);
+# the cdylib carries no unit bodies, so there is nothing to test without a
+# managed host (the same constraint the Node/Python bindings note).
