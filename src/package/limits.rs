@@ -9,6 +9,22 @@
 /// Maximum decompressed size of a single archive entry: 128 MiB.
 pub const MAX_ENTRY_BYTES: u64 = 128 * 1024 * 1024;
 
+/// Maximum size of a standalone, non-archive input: 128 MiB.
+///
+/// CSV and RTF do not pass through the archive layer, so this prevents
+/// them from duplicating an already-unbounded input before their model
+/// materialization budgets can take effect.
+pub const MAX_STANDALONE_INPUT_BYTES: usize = 128 * 1024 * 1024;
+
+/// Maximum text bytes copied into the document model: 64 MiB.
+pub const MAX_MATERIALIZED_TEXT_BYTES: usize = 64 * 1024 * 1024;
+
+/// Maximum table cells materialized by a standalone frontend.
+pub const MAX_MATERIALIZED_CELLS: usize = 4_000_000;
+
+/// Maximum separately allocated text runs in the document model.
+pub const MAX_MATERIALIZED_TEXT_RUNS: usize = 2_000_000;
+
 /// Maximum total decompressed bytes read from one archive: 512 MiB.
 pub const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 

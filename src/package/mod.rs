@@ -4,6 +4,7 @@
 
 pub mod archive;
 pub mod limits;
+pub(crate) mod materialization;
 pub mod path;
 pub mod relationships;
 pub mod xml;
