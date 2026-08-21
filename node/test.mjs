@@ -1,7 +1,7 @@
 // Smoke test: the bindings load and every entry point round-trips a fixture.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { copyFile, link, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -106,6 +106,42 @@ test('cli writes to --output instead of stdout', async () => {
     assert.equal(code, undefined)
     assert.equal(stdout, '')
     assert.match(await readFile(out, 'utf8'), /^# /m)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('cli refuses to overwrite its input file', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'anydoc-cli-'))
+  try {
+    const input = join(dir, 'input.docx')
+    await copyFile(OUTLINE, input)
+    const before = await readFile(input)
+
+    const { code, stderr } = await runCli([input, '--output', input])
+
+    assert.equal(code, 2)
+    assert.match(stderr, /output.*input/i)
+    assert.deepEqual(await readFile(input), before)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('cli refuses to overwrite its input through a hard link', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'anydoc-cli-'))
+  try {
+    const input = join(dir, 'input.docx')
+    const output = join(dir, 'output.md')
+    await copyFile(OUTLINE, input)
+    await link(input, output)
+    const before = await readFile(input)
+
+    const { code, stderr } = await runCli([input, '--output', output])
+
+    assert.equal(code, 2)
+    assert.match(stderr, /output.*input/i)
+    assert.deepEqual(await readFile(input), before)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
