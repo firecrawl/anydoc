@@ -25,7 +25,8 @@ use std::path::Path;
 /// [`Format::from_extension`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Format {
-    /// Binary Word 97-2003 (`.doc`).
+    /// Binary Word 97-2003 (`.doc`), and the OLE2-based Kingsoft WPS Writer
+    /// / Microsoft Works wrapper that shares its `WordDocument` stream (`.wps`).
     Doc,
     /// WordprocessingML (`.docx`, `.docm`), both Transitional and Strict.
     Docx,
@@ -45,8 +46,9 @@ pub enum Format {
     Rtf,
     /// EPUB 2 and 3 (`.epub`).
     Epub,
-    /// Excel workbooks: `.xlsx`, `.xlsm`, binary `.xlsb`, and legacy
-    /// OLE-based `.xls`.
+    /// Excel workbooks in every container calamine reads: `.xlsx`, `.xlsm`,
+    /// `.xlsb`, binary `.xls`, and the OLE2-based Kingsoft WPS Spreadsheet
+    /// wrapper that shares its `Workbook`/`Book` stream (`.et`).
     Excel,
     /// OpenDocument Spreadsheet (`.ods`).
     Ods,
@@ -71,7 +73,9 @@ impl Format {
     /// case-insensitively. `None` for anything unrecognized.
     pub fn from_extension(ext: &str) -> Option<Format> {
         Some(match ext.to_ascii_lowercase().as_str() {
-            "doc" => Format::Doc,
+            // `.wps` is the Kingsoft WPS Writer / Microsoft Works wrapper,
+            // an OLE2 compound file with a `WordDocument` stream like `.doc`.
+            "doc" | "wps" => Format::Doc,
             "docx" | "docm" => Format::Docx,
             "odt" => Format::Odt,
             "pdf" => Format::Pdf,
@@ -79,7 +83,9 @@ impl Format {
             "ppt" | "pps" | "pot" => Format::Ppt,
             "rtf" => Format::Rtf,
             "epub" => Format::Epub,
-            "xlsx" | "xlsm" | "xlsb" | "xls" => Format::Excel,
+            // `.et` is the Kingsoft WPS Spreadsheet wrapper; modern files are
+            // an OLE2 compound file with a `Workbook`/`Book` stream like `.xls`.
+            "xlsx" | "xlsm" | "xlsb" | "xls" | "et" => Format::Excel,
             "ods" => Format::Ods,
             "odp" => Format::Odp,
             "csv" => Format::Csv,
