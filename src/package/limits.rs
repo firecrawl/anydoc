@@ -23,6 +23,9 @@ pub const MAX_XML_DEPTH: usize = 256;
 /// memory test) so a saturating part stays around the archive budget.
 pub const MAX_XML_NODES: usize = 2_000_000;
 
+/// Maximum grid positions one spreadsheet table may materialize: 4 million.
+pub const MAX_GRID_SLOTS: u64 = 4_000_000;
+
 /// Maximum content-bearing cells a repeat expansion may produce per table.
 pub const MAX_EXPANSION: u64 = 4_000_000;
 

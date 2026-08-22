@@ -93,6 +93,7 @@ fn fixtures_detect_from_content() {
         ("pptx", Some(Format::Pptx)),
         ("rtf", Some(Format::Rtf)),
         ("xls", Some(Format::Excel)),
+        ("xlsb", Some(Format::Excel)),
         ("xlsx", Some(Format::Excel)),
         ("csv", None),
     ];
