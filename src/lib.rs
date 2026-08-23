@@ -115,12 +115,10 @@ pub fn to_markdown_with_password(
 ) -> Result<String, ConvertError> {
     let path = path.as_ref();
     let bytes = std::fs::read(path)?;
-    let Some(format) = Format::from_bytes(&bytes).or_else(|| Format::from_path(path)) else {
-        return Err(ConvertError::Unsupported(format!(
-            "unrecognized file content and extension: {}",
-            path.display()
-        )));
-    };
+    // Detection is allowed to fail here: an encrypted OOXML container has no
+    // recognizable signature until after decryption, so hand the unresolved
+    // format down and let the byte-level entry point decide (#130 review).
+    let format = Format::from_bytes(&bytes).or_else(|| Format::from_path(path));
     to_markdown_bytes_with_password(&bytes, format, password)
 }
 
@@ -162,6 +160,19 @@ pub fn to_markdown_bytes_with_password(
         return formats::pdf::to_markdown(bytes);
     }
     Ok(document_to_markdown(&to_document(bytes, format)?))
+}
+
+/// True when `bytes` are a password-protected OOXML package.
+pub fn is_encrypted_ooxml(bytes: &[u8]) -> bool {
+    package::archive::is_encrypted_ooxml(bytes)
+}
+
+/// Decrypt a password-protected OOXML package into its plaintext zip bytes.
+///
+/// Wrong passwords and unsupported schemes end in [`ConvertError::Encrypted`];
+/// see [`package::crypto::decrypt_ooxml`] for details.
+pub fn decrypt_ooxml(bytes: Vec<u8>, password: &str) -> Result<Vec<u8>, ConvertError> {
+    package::crypto::decrypt_ooxml(bytes, password)
 }
 
 /// Parse an in-memory document into the document model. Pass a [`Format`] to

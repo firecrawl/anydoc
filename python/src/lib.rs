@@ -157,10 +157,8 @@ fn to_markdown(py: Python<'_>, path: PathBuf) -> PyResult<String> {
 /// Convert an in-memory document to Markdown. Without a format, it is
 /// detected from the content, which signature-less formats (CSV) have to name
 /// explicitly.
-/// Convert an in-memory document to Markdown. Without a format, it is
-/// detected from the content, which signature-less formats (CSV) have to name
-/// explicitly. A non-None `password` decrypts a password-protected OOXML
-/// package first; wrong passwords still raise `EncryptedError`.
+/// A non-None `password` decrypts a password-protected OOXML package first;
+/// wrong passwords still raise `EncryptedError`.
 #[pyfunction]
 #[pyo3(signature = (data, format=None, password=None))]
 fn to_markdown_bytes(

@@ -19,15 +19,34 @@ pub fn decrypt_ooxml(bytes: Vec<u8>, password: &str) -> Result<Vec<u8>, ConvertE
         log::debug!("OOXML decryption failed: {e}");
         ConvertError::Encrypted
     })?;
+    // The same archive budget that governs plaintext packages must bound the
+    // decrypted one too, or a small encrypted file could inflate past every
+    // limit before any part is read.
+    let total: u64 = plain.len() as u64;
+    if total > crate::package::limits::MAX_TOTAL_BYTES {
+        return Err(ConvertError::ResourceLimit {
+            limit: "max_total_bytes",
+            detail: format!(
+                "decrypted OOXML package is {total} bytes, over the {} byte budget",
+                crate::package::limits::MAX_TOTAL_BYTES
+            ),
+        });
+    }
     // office-crypto does not check the EncryptionInfo password verifier, so a
     // wrong password still "succeeds" — into noise. The decrypted payload is
-    // always the OOXML zip itself (the 8-byte size header is stripped), so its
-    // signature is the cheapest reliable wrong-password test.
-    if !plain.starts_with(b"PK") {
+    // always an OOXML zip (the 8-byte size header is stripped), and the
+    // signature alone is not proof, so validate it with the same archive
+    // reader every package goes through next.
+    if !plain.starts_with(b"PK") || zip_check_broken(&plain) {
         log::debug!("OOXML decryption produced a non-zip payload (wrong password?)");
         return Err(ConvertError::Encrypted);
     }
     Ok(plain)
+}
+
+/// Cheap structural probe: can the shared zip reader actually open this?
+fn zip_check_broken(plain: &[u8]) -> bool {
+    zip::ZipArchive::new(std::io::Cursor::new(plain)).map(|z| z.len()).is_err()
 }
 
 #[cfg(test)]

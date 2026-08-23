@@ -39,7 +39,13 @@ fn main() -> ExitCode {
             }
             "-p" | "--password" => {
                 i += 1;
-                password = args.get(i).map(String::from);
+                match args.get(i) {
+                    Some(pw) => password = Some(pw.clone()),
+                    None => {
+                        eprintln!("error: --password requires a value");
+                        return ExitCode::FAILURE;
+                    }
+                }
             }
             other => input = Some(PathBuf::from(other)),
         }
@@ -81,8 +87,19 @@ fn run(
             }
         };
 
+    // Decrypt once so the asset pass below sees the same plaintext instead
+    // of re-reading the still-encrypted container (#130 review).
+    let decrypted;
+    let bytes: &[u8] = match password.as_deref() {
+        Some(pw) if !pw.is_empty() && anydoc::is_encrypted_ooxml(&bytes) => {
+            decrypted = anydoc::decrypt_ooxml(bytes.to_vec(), pw)?;
+            &decrypted
+        }
+        _ => &bytes,
+    };
+
     let start = std::time::Instant::now();
-    let markdown = anydoc::to_markdown_bytes_with_password(&bytes, format, password.as_deref())?;
+    let markdown = anydoc::to_markdown_bytes(bytes, format)?;
     let elapsed = start.elapsed().as_secs_f64() * 1000.0;
     eprintln!("converted {} in {}", input.display(), millis(elapsed));
 
@@ -97,7 +114,7 @@ fn run(
     // Images and embedded objects live on the document model, not in the
     // Markdown, so they need a second pass to write out.
     if let Some(dir) = assets {
-        let document = anydoc::to_document(&bytes, format)?;
+        let document = anydoc::to_document(bytes, format)?;
         std::fs::create_dir_all(dir)?;
         let stem = input.file_stem().unwrap_or_default().to_string_lossy();
         for asset in &document.assets {
