@@ -46,6 +46,15 @@ struct AbstractNum {
 pub struct Instance {
     pub levels: [LevelDef; LEVELS],
     pstyles: [Option<String>; LEVELS],
+    /// Identity of the abstract definition this instance resolves to (after
+    /// any numStyleLink indirection). Instances sharing an abstract are one
+    /// logical list in Word, so their counters continue across instance
+    /// switches (#96).
+    pub(crate) abstract_key: u64,
+    /// Levels this instance overrides (`lvlOverride` with a nested `w:lvl` or
+    /// a `startOverride`). Entering the list through such an instance restarts
+    /// exactly those levels; every other level keeps counting (#96).
+    pub(crate) overrides: [bool; LEVELS],
 }
 
 impl Instance {
@@ -104,24 +113,39 @@ pub fn parse(
         direct.insert(num_id, (abs_id, num));
     }
 
+    // Stable identity per abstract definition (document order). Counters key
+    // on this so instances that share an abstract continue one logical list.
+    let mut abstract_keys: HashMap<&str, u64> = HashMap::new();
+    for abs in root.find_all(ns::W, "abstractNum") {
+        let Some(id) = abs.attr(ns::W, "abstractNumId") else { continue };
+        let key = abstract_keys.len() as u64;
+        abstract_keys.entry(id).or_insert(key);
+    }
+
     let mut numbering = Numbering::default();
     for (&num_id, &(abs_id, num_elem)) in &direct {
-        let Some(abs) = resolve_abstract(abs_id, &abstracts, &direct, style_num_id)? else {
+        let Some((resolved_id, abs)) = resolve_abstract(abs_id, &abstracts, &direct, style_num_id)?
+        else {
             log::warn!("numbering instance {num_id} references unknown abstract {abs_id:?}");
             continue;
         };
         let mut levels = abs.levels.clone();
         let mut pstyles = abs.pstyles.clone();
+        let mut overrides = [false; LEVELS];
         for over in num_elem.find_all(ns::W, "lvlOverride") {
             let ilvl: usize = over.attr(ns::W, "ilvl").and_then(|v| v.parse().ok()).unwrap_or(0);
             if ilvl >= LEVELS {
                 continue;
             }
             // A nested w:lvl replaces the level wholesale; startOverride is
-            // applied last so it survives the replacement.
+            // applied last so it survives the replacement. Both count as an
+            // override: entering the list through this instance restarts the
+            // level instead of continuing the shared sequence (#96).
+            let mut overridden = false;
             if let Some(lvl) = over.find(ns::W, "lvl") {
                 levels[ilvl] = parse_level(lvl);
                 pstyles[ilvl] = level_pstyle(lvl);
+                overridden = true;
             }
             if let Some(start) = over
                 .find(ns::W, "startOverride")
@@ -129,9 +153,19 @@ pub fn parse(
                 .and_then(parse_start)
             {
                 levels[ilvl].start = start;
+                overridden = true;
             }
+            overrides[ilvl] = overridden;
         }
-        numbering.instances.insert(num_id, Instance { levels, pstyles });
+        numbering.instances.insert(
+            num_id,
+            Instance {
+                levels,
+                pstyles,
+                abstract_key: abstract_keys.get(resolved_id.as_str()).copied().unwrap_or(u64::MAX),
+                overrides,
+            },
+        );
     }
     Ok(numbering)
 }
@@ -143,7 +177,7 @@ fn resolve_abstract<'n>(
     abstracts: &'n HashMap<&str, AbstractNum>,
     direct: &HashMap<u64, (&str, &Element)>,
     style_num_id: &impl Fn(&str) -> Option<u64>,
-) -> Result<Option<&'n AbstractNum>, ConvertError> {
+) -> Result<Option<(String, &'n AbstractNum)>, ConvertError> {
     let mut seen: Vec<String> = Vec::new();
     let mut current = abs_id.to_string();
     loop {
@@ -157,14 +191,14 @@ fn resolve_abstract<'n>(
             return Ok(None);
         };
         let Some(style_id) = &abs.num_style_link else {
-            return Ok(Some(abs));
+            return Ok(Some((current.clone(), abs)));
         };
         let linked = style_num_id(style_id)
             .and_then(|num_id| direct.get(&num_id))
             .map(|(abs_id, _)| abs_id.to_string());
         match linked {
             Some(next) => current = next,
-            None => return Ok(Some(abs)),
+            None => return Ok(Some((current.clone(), abs))),
         }
     }
 }
@@ -226,6 +260,11 @@ struct InstanceState {
     value: [u64; LEVELS],
     initialized: [bool; LEVELS],
     restart_pending: [bool; LEVELS],
+    /// The instance currently driving this abstract (`u64::MAX` = none yet;
+    /// real `numId`s never reach the counters as `u64::MAX`). Switching
+    /// instances inside one logical list restarts only the levels the
+    /// entering instance overrides (#96).
+    last_num: u64,
 }
 
 impl Counters {
@@ -234,7 +273,22 @@ impl Counters {
     /// reproducible from the marker kind alone, the composite label.
     pub fn next(&mut self, num_id: u64, ilvl: usize, instance: &Instance) -> (u64, Option<String>) {
         let ilvl = ilvl.min(LEVELS - 1);
-        let state = self.state.entry(num_id).or_default();
+        let state = self
+            .state
+            .entry(instance.abstract_key)
+            .or_insert_with(|| InstanceState { last_num: u64::MAX, ..Default::default() });
+        if state.last_num != num_id {
+            // First paragraph of this list, or an instance switch within it:
+            // overridden levels restart, everything else keeps counting.
+            if state.last_num != u64::MAX {
+                for (l, overridden) in instance.overrides.iter().enumerate() {
+                    if *overridden {
+                        state.restart_pending[l] = true;
+                    }
+                }
+            }
+            state.last_num = num_id;
+        }
         let def = &instance.levels[ilvl];
         if !state.initialized[ilvl] || state.restart_pending[ilvl] {
             state.value[ilvl] = def.start;

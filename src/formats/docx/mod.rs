@@ -192,6 +192,47 @@ mod tests {
     }
 
     #[test]
+    fn instances_sharing_an_abstract_continue_one_sequence() {
+        // #96: Word treats every w:num that references one w:abstractNum as
+        // the same logical list; converters emit exactly this shape for a
+        // single outline split across several numIds. Counters must continue
+        // across the instance switches, and a startOverride must restart.
+        let document = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:body>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>one</w:t></w:r></w:p>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>two</w:t></w:r></w:p>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>three</w:t></w:r></w:p>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>ten</w:t></w:r></w:p>
+            </w:body></w:document>"#;
+        let numbering = r#"<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:abstractNum w:abstractNumId="7">
+                <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:start w:val="1"/></w:lvl>
+            </w:abstractNum>
+            <w:num w:numId="1"><w:abstractNumId w:val="7"/></w:num>
+            <w:num w:numId="2"><w:abstractNumId w:val="7"/></w:num>
+            <w:num w:numId="3"><w:abstractNumId w:val="7"/>
+                <w:lvlOverride w:ilvl="0"><w:startOverride w:val="10"/></w:lvlOverride>
+            </w:num>
+            </w:numbering>"#;
+        let bytes =
+            docx_parts(&[("word/document.xml", document), ("word/numbering.xml", numbering)]);
+        let doc = parse(&bytes).unwrap();
+        let starts: Vec<u64> = doc
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::List(list) if list.ordered() => Some(list.start),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            starts,
+            [1, 3, 10],
+            "instance 2 continues at three; the override restarts at ten"
+        );
+    }
+
+    #[test]
     fn huge_numbering_start_values_cannot_overflow() {
         // H2: w:start is ST_DecimalNumber (xsd:int); out-of-range values are
         // clamped so document-order increments can never overflow.
