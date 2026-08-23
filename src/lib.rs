@@ -98,15 +98,28 @@ impl Format {
 /// file content ([`Format::from_bytes`]); the extension is the fallback for
 /// signature-less formats (CSV) and unrecognizable containers.
 pub fn to_markdown(path: impl AsRef<Path>) -> Result<String, ConvertError> {
+    to_markdown_with_password(path, None)
+}
+
+/// Convert a document file to Markdown, decrypting it first when a
+/// [`Some`]`password` is supplied and the file is a password-protected OOXML
+/// package. Otherwise behaves exactly like [`to_markdown`].
+///
+/// A wrong password, or an encrypted file without one, is
+/// [`ConvertError::Encrypted`] — the same rejection the no-password path has
+/// always produced. Legacy encrypted binary formats (`.doc`, `.ppt`, `.xls`)
+/// are out of scope and stay `Encrypted`.
+pub fn to_markdown_with_password(
+    path: impl AsRef<Path>,
+    password: Option<&str>,
+) -> Result<String, ConvertError> {
     let path = path.as_ref();
     let bytes = std::fs::read(path)?;
-    let Some(format) = Format::from_bytes(&bytes).or_else(|| Format::from_path(path)) else {
-        return Err(ConvertError::Unsupported(format!(
-            "unrecognized file content and extension: {}",
-            path.display()
-        )));
-    };
-    to_markdown_bytes(&bytes, format)
+    // Detection is allowed to fail here: an encrypted OOXML container has no
+    // recognizable signature until after decryption, so hand the unresolved
+    // format down and let the byte-level entry point decide (#130 review).
+    let format = Format::from_bytes(&bytes).or_else(|| Format::from_path(path));
+    to_markdown_bytes_with_password(&bytes, format, password)
 }
 
 /// Convert an in-memory document to Markdown. Pass a [`Format`] to select the
@@ -116,6 +129,30 @@ pub fn to_markdown_bytes(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
 ) -> Result<String, ConvertError> {
+    to_markdown_bytes_with_password(bytes, format, None)
+}
+
+/// [`to_markdown_bytes`] with optional decryption of password-protected
+/// OOXML packages (`.docx`/`.xlsx`/`.pptx` and their macro variants).
+///
+/// A `None` or empty password behaves exactly like [`to_markdown_bytes`]:
+/// encrypted input is rejected with [`ConvertError::Encrypted`]. With a
+/// password, an encrypted package is decrypted first — a wrong password
+/// still ends in `Encrypted`, and the converted result comes from the
+/// plaintext package, so every resource limit applies unchanged.
+pub fn to_markdown_bytes_with_password(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+    password: Option<&str>,
+) -> Result<String, ConvertError> {
+    let decrypted;
+    let bytes = match password.filter(|p| !p.is_empty()) {
+        Some(pw) if package::archive::is_encrypted_ooxml(bytes) => {
+            decrypted = package::crypto::decrypt_ooxml(bytes.to_vec(), pw)?;
+            decrypted.as_slice()
+        }
+        _ => bytes,
+    };
     let format = resolve_format(bytes, format.into())?;
     // PDFs convert to Markdown directly (pdf-inspector) without passing
     // through the document model.
@@ -123,6 +160,19 @@ pub fn to_markdown_bytes(
         return formats::pdf::to_markdown(bytes);
     }
     Ok(document_to_markdown(&to_document(bytes, format)?))
+}
+
+/// True when `bytes` are a password-protected OOXML package.
+pub fn is_encrypted_ooxml(bytes: &[u8]) -> bool {
+    package::archive::is_encrypted_ooxml(bytes)
+}
+
+/// Decrypt a password-protected OOXML package into its plaintext zip bytes.
+///
+/// Wrong passwords and unsupported schemes end in [`ConvertError::Encrypted`];
+/// see [`package::crypto::decrypt_ooxml`] for details.
+pub fn decrypt_ooxml(bytes: Vec<u8>, password: &str) -> Result<Vec<u8>, ConvertError> {
+    package::crypto::decrypt_ooxml(bytes, password)
 }
 
 /// Parse an in-memory document into the document model. Pass a [`Format`] to

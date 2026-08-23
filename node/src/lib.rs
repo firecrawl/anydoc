@@ -110,10 +110,12 @@ pub fn to_markdown(path: String) -> AsyncTask<MarkdownFileTask> {
 pub fn to_markdown_bytes(
     bytes: Uint8Array,
     format: Option<Format>,
+    password: Option<String>,
 ) -> AsyncTask<MarkdownBytesTask> {
     AsyncTask::new(MarkdownBytesTask {
         bytes: bytes.to_vec(),
         format: format.map(Into::into),
+        password,
         failure: Failure::default(),
     })
 }
@@ -185,6 +187,7 @@ impl Task for MarkdownFileTask {
 pub struct MarkdownBytesTask {
     bytes: Vec<u8>,
     format: Option<anydoc::Format>,
+    password: Option<String>,
     failure: Failure,
 }
 
@@ -193,7 +196,8 @@ impl Task for MarkdownBytesTask {
     type JsValue = String;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        anydoc::to_markdown_bytes(&self.bytes, self.format).map_err(|e| self.failure.capture(e))
+        anydoc::to_markdown_bytes_with_password(&self.bytes, self.format, self.password.as_deref())
+            .map_err(|e| self.failure.capture(e))
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
