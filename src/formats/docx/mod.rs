@@ -233,6 +233,51 @@ mod tests {
     }
 
     #[test]
+    fn override_restart_does_not_leak_into_the_next_instance() {
+        // Entering an overriding instance schedules ITS levels' restarts; a
+        // following plain instance of the same abstract must keep counting
+        // instead of consuming a restart it never earned. Also exercises a
+        // numId that would collide with a u64::MAX sentinel if one existed.
+        let document = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:body>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="18446744073709551615"/></w:numPr></w:pPr><w:r><w:t>one</w:t></w:r></w:p>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>sub</w:t></w:r></w:p>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>two</w:t></w:r></w:p>
+            </w:body></w:document>"#;
+        let numbering = r#"<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:abstractNum w:abstractNumId="0">
+                <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:start w:val="1"/></w:lvl>
+                <w:lvl w:ilvl="1"><w:numFmt w:val="lowerLetter"/><w:start w:val="1"/></w:lvl>
+            </w:abstractNum>
+            <w:num w:numId="18446744073709551615"><w:abstractNumId w:val="0"/></w:num>
+            <w:num w:numId="2"><w:abstractNumId w:val="0"/>
+                <w:lvlOverride w:ilvl="0"><w:startOverride w:val="10"/></w:lvlOverride>
+            </w:num>
+            <w:num w:numId="3"><w:abstractNumId w:val="0"/></w:num>
+            </w:numbering>"#;
+        let bytes =
+            docx_parts(&[("word/document.xml", document), ("word/numbering.xml", numbering)]);
+        let doc = parse(&bytes).unwrap();
+        let mut starts: Vec<Option<u64>> = Vec::new();
+        fn walk_lists(blocks: &[Block], out: &mut Vec<Option<u64>>) {
+            for b in blocks {
+                if let Block::List(list) = b {
+                    out.push(list.ordered().then_some(list.start));
+                    for item in &list.items {
+                        walk_lists(&item.blocks, out);
+                    }
+                }
+            }
+        }
+        walk_lists(&doc.blocks, &mut starts);
+        assert_eq!(
+            starts,
+            [Some(1), Some(1), Some(2)],
+            "sub-list starts at a; the outer sequence continues at two across              the overriding instance instead of restarting"
+        );
+    }
+
+    #[test]
     fn huge_numbering_start_values_cannot_overflow() {
         // H2: w:start is ST_DecimalNumber (xsd:int); out-of-range values are
         // clamped so document-order increments can never overflow.

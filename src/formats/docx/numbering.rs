@@ -263,8 +263,15 @@ struct InstanceState {
     /// The instance currently driving this abstract (`u64::MAX` = none yet;
     /// real `numId`s never reach the counters as `u64::MAX`). Switching
     /// instances inside one logical list restarts only the levels the
-    /// entering instance overrides (#96).
-    last_num: u64,
+    /// entering instance overrides (#96). `None` until the list's first
+    /// paragraph; `Some` never collides with a real id because it is
+    /// compared as an `Option`, not against a sentinel value.
+    last_num: Option<u64>,
+    /// The overridden levels of the currently active instance. Each restarts
+    /// on its first USE under this instance — not eagerly at the switch, so a
+    /// following plain instance cannot consume a restart that was never
+    /// earned (cubic review of #129).
+    fresh_overrides: [bool; LEVELS],
 }
 
 impl Counters {
@@ -273,24 +280,15 @@ impl Counters {
     /// reproducible from the marker kind alone, the composite label.
     pub fn next(&mut self, num_id: u64, ilvl: usize, instance: &Instance) -> (u64, Option<String>) {
         let ilvl = ilvl.min(LEVELS - 1);
-        let state = self
-            .state
-            .entry(instance.abstract_key)
-            .or_insert_with(|| InstanceState { last_num: u64::MAX, ..Default::default() });
-        if state.last_num != num_id {
-            // First paragraph of this list, or an instance switch within it:
-            // overridden levels restart, everything else keeps counting.
-            if state.last_num != u64::MAX {
-                for (l, overridden) in instance.overrides.iter().enumerate() {
-                    if *overridden {
-                        state.restart_pending[l] = true;
-                    }
-                }
-            }
-            state.last_num = num_id;
+        let state = self.state.entry(instance.abstract_key).or_default();
+        if state.last_num != Some(num_id) {
+            // First paragraph of this list, or an instance switch within it.
+            state.fresh_overrides = instance.overrides;
+            state.last_num = Some(num_id);
         }
         let def = &instance.levels[ilvl];
-        if !state.initialized[ilvl] || state.restart_pending[ilvl] {
+        let override_restart = std::mem::take(&mut state.fresh_overrides[ilvl]);
+        if !state.initialized[ilvl] || state.restart_pending[ilvl] || override_restart {
             state.value[ilvl] = def.start;
             state.initialized[ilvl] = true;
             state.restart_pending[ilvl] = false;
