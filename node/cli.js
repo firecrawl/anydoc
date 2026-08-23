@@ -129,7 +129,13 @@ async function main() {
 
   // Loaded after argument handling so --help and --version work even where
   // no native binding is available.
-  const { formatFromBytes, formatFromExtension, toMarkdown, toMarkdownBytes } = require('./index.js')
+  const {
+  formatFromBytes,
+  formatFromExtension,
+  formatFromPath,
+  toMarkdown,
+  toMarkdownBytes,
+} = require('./index.js')
 
   let format
   if (args.format !== null) {
@@ -145,7 +151,9 @@ async function main() {
     // --format would otherwise drop it on the floor (#130 review).
     if (args.input === '-' || format !== undefined || args.password !== null) {
       const bytes = await (args.input === '-' ? readStdin() : readFile(args.input))
-      const resolved = format ?? formatFromBytes(bytes)
+      // CSV has no content signature, so the path extension stays the last
+      // fallback exactly as the no-password flow treats it (#130 review).
+      const resolved = format ?? formatFromBytes(bytes) ?? formatFromPath(args.input)
       markdown = await toMarkdownBytes(bytes, resolved, args.password)
     } else {
       markdown = await toMarkdown(args.input)

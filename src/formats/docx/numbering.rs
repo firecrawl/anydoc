@@ -260,12 +260,9 @@ struct InstanceState {
     value: [u64; LEVELS],
     initialized: [bool; LEVELS],
     restart_pending: [bool; LEVELS],
-    /// The instance currently driving this abstract (`u64::MAX` = none yet;
-    /// real `numId`s never reach the counters as `u64::MAX`). Switching
-    /// instances inside one logical list restarts only the levels the
-    /// entering instance overrides (#96). `None` until the list's first
-    /// paragraph; `Some` never collides with a real id because it is
-    /// compared as an `Option`, not against a sentinel value.
+    /// The instance currently driving this abstract. Switching instances
+    /// inside one logical list restarts only the levels the entering
+    /// instance overrides (#96). `None` until the list's first paragraph.
     last_num: Option<u64>,
     /// The overridden levels of the currently active instance. Each restarts
     /// on its first USE under this instance — not eagerly at the switch, so a

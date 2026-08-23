@@ -73,11 +73,24 @@ fn run(
     password: Option<String>,
 ) -> Result<(), ConvertError> {
     let password = password.or_else(|| std::env::var(PASSWORD_ENV).ok());
-    let bytes = std::fs::read(input)?;
-    // Without -f the format comes from the file content, with the extension as
-    // the fallback.
+    let raw = std::fs::read(input)?;
+
+    // Decrypt before detection: an encrypted OOXML container has no
+    // recognizable signature until after decryption, mirroring the library's
+    // to_markdown_with_password semantics (#130 review).
+    let decrypted;
+    let bytes: &[u8] = match password.as_deref() {
+        Some(pw) if !pw.is_empty() && anydoc::is_encrypted_ooxml(&raw) => {
+            decrypted = anydoc::decrypt_ooxml(raw.clone(), pw)?;
+            &decrypted
+        }
+        _ => &raw,
+    };
+
+    // Without -f the format comes from the (now plaintext) content, with the
+    // extension as the fallback.
     let format =
-        match format.or_else(|| Format::from_bytes(&bytes)).or_else(|| Format::from_path(input)) {
+        match format.or_else(|| Format::from_bytes(bytes)).or_else(|| Format::from_path(input)) {
             Some(format) => format,
             None => {
                 return Err(ConvertError::Unsupported(format!(
@@ -86,17 +99,6 @@ fn run(
                 )));
             }
         };
-
-    // Decrypt once so the asset pass below sees the same plaintext instead
-    // of re-reading the still-encrypted container (#130 review).
-    let decrypted;
-    let bytes: &[u8] = match password.as_deref() {
-        Some(pw) if !pw.is_empty() && anydoc::is_encrypted_ooxml(&bytes) => {
-            decrypted = anydoc::decrypt_ooxml(bytes.to_vec(), pw)?;
-            &decrypted
-        }
-        _ => &bytes,
-    };
 
     let start = std::time::Instant::now();
     let markdown = anydoc::to_markdown_bytes(bytes, format)?;
