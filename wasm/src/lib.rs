@@ -99,8 +99,17 @@ pub fn format_from_path(path: &str) -> Option<Format> {
 ///
 /// Throws an `Error` carrying a `ConvertErrorCode` on `code`.
 #[wasm_bindgen(js_name = toMarkdownBytes)]
-pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String, JsValue> {
-    anydoc::to_markdown_bytes(bytes, format.map(anydoc::Format::from)).map_err(convert_error)
+pub fn to_markdown_bytes(
+    bytes: &[u8],
+    format: Option<Format>,
+    password: Option<String>,
+) -> Result<String, JsValue> {
+    anydoc::to_markdown_bytes_with_password(
+        bytes,
+        format.map(anydoc::Format::from),
+        password.as_deref(),
+    )
+    .map_err(convert_error)
 }
 
 /// Parse an in-memory document into the document model, which also carries

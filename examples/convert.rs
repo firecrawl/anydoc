@@ -6,7 +6,9 @@ use std::process::ExitCode;
 
 use anydoc::{ConvertError, Format};
 
-const USAGE: &str = "usage: convert <file> [-f csv] [-o out.md] [--assets dir]";
+const USAGE: &str = "usage: convert <file> [-f csv] [-o out.md] [--assets dir] [-p PASSWORD]";
+/// Env fallback for `-p/--password`: argv leaks into shell history and `ps`.
+const PASSWORD_ENV: &str = "ANYDOC_PASSWORD";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -14,6 +16,7 @@ fn main() -> ExitCode {
     let mut output: Option<PathBuf> = None;
     let mut format: Option<Format> = None;
     let mut assets: Option<PathBuf> = None;
+    let mut password: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -34,6 +37,10 @@ fn main() -> ExitCode {
                 i += 1;
                 assets = args.get(i).map(PathBuf::from);
             }
+            "-p" | "--password" => {
+                i += 1;
+                password = args.get(i).map(String::from);
+            }
             other => input = Some(PathBuf::from(other)),
         }
         i += 1;
@@ -43,7 +50,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    match run(&input, output.as_deref(), format, assets.as_deref()) {
+    match run(&input, output.as_deref(), format, assets.as_deref(), password) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e:#}");
@@ -57,7 +64,9 @@ fn run(
     output: Option<&Path>,
     format: Option<Format>,
     assets: Option<&Path>,
+    password: Option<String>,
 ) -> Result<(), ConvertError> {
+    let password = password.or_else(|| std::env::var(PASSWORD_ENV).ok());
     let bytes = std::fs::read(input)?;
     // Without -f the format comes from the file content, with the extension as
     // the fallback.
@@ -73,7 +82,7 @@ fn run(
         };
 
     let start = std::time::Instant::now();
-    let markdown = anydoc::to_markdown_bytes(&bytes, format)?;
+    let markdown = anydoc::to_markdown_bytes_with_password(&bytes, format, password.as_deref())?;
     let elapsed = start.elapsed().as_secs_f64() * 1000.0;
     eprintln!("converted {} in {}", input.display(), millis(elapsed));
 

@@ -293,6 +293,11 @@ export declare function toMarkdown(path: string): Promise<string>
  * detected from the content, which signature-less formats (CSV) have to name
  * explicitly.
  *
+ * With a non-null `password`, decrypts a password-protected OOXML package
+ * (`.docx`/`.xlsx`/`.pptx`) before converting; a wrong password rejects with
+ * the same encrypted error as no password at all. Legacy binary formats
+ * (`.doc`, `.ppt`, `.xls`) are not supported encrypted.
+ *
  * Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
  */
-export declare function toMarkdownBytes(bytes: Uint8Array, format?: Format | undefined | null): Promise<string>
+export declare function toMarkdownBytes(bytes: Uint8Array, format?: Format | undefined | null, password?: string | undefined | null): Promise<string>

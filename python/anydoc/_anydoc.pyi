@@ -58,10 +58,15 @@ def to_markdown(path: str | os.PathLike[str]) -> str:
     file content; the extension is the fallback for signature-less formats
     (CSV) and unrecognizable containers."""
 
-def to_markdown_bytes(data: bytes | bytearray, format: Format | None = None) -> str:
+def to_markdown_bytes(
+    data: bytes | bytearray,
+    format: Format | None = None,
+    password: str | None = None,
+) -> str:
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
-    name explicitly."""
+    name explicitly. A non-None `password` decrypts a password-protected
+    OOXML package first; wrong passwords still raise `EncryptedError`."""
 
 def to_document(data: bytes | bytearray, format: Format | None = None) -> Document:
     """Parse an in-memory document into the document model, which also
