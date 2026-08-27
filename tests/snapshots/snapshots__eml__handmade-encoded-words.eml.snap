@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# $32,000 and café
+
+**From:** Ada Lovelace \<ada@example.com>
+
+Body follows the encoded headers.

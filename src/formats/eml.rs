@@ -35,23 +35,37 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         doc.blocks.push(Block::Paragraph(meta));
     }
 
-    let text = extract_text(&headers, body, 0)?;
-    for para in text.split("\n\n") {
-        let para = para.trim_matches('\n');
-        if para.trim().is_empty() {
-            continue;
+    // Normalise CRLF: line iteration below keys off bare newlines, and mail
+    // bodies are CRLF throughout.
+    let text = extract_text(&headers, body, 0)?.replace("\r\n", "\n");
+
+    // A paragraph break is a run of whitespace-only lines. Senders emit lines
+    // holding a single space as often as truly empty ones, so splitting on
+    // "\n\n" alone leaves the space-only line inside the paragraph, where it
+    // renders as a hard break with nothing after it.
+    let mut para: Vec<&str> = Vec::new();
+    let flush = |para: &mut Vec<&str>, doc: &mut Document| {
+        if para.is_empty() {
+            return;
         }
         let mut inlines = Vec::new();
-        for (i, line) in para.lines().enumerate() {
+        for (i, line) in para.iter().enumerate() {
             if i > 0 {
                 inlines.push(Inline::LineBreak);
             }
             inlines.push(Inline::plain(clean_text(line)));
         }
-        if !inlines.is_empty() {
-            doc.blocks.push(Block::Paragraph(inlines));
+        doc.blocks.push(Block::Paragraph(inlines));
+        para.clear();
+    };
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            flush(&mut para, &mut doc);
+        } else {
+            para.push(line);
         }
     }
+    flush(&mut para, &mut doc);
 
     Ok(doc)
 }
@@ -99,8 +113,15 @@ struct Headers(Vec<(String, String)>);
 
 impl Headers {
     /// Unfold continuation lines (leading whitespace) into their parent field.
+    ///
+    /// Header bytes are ASCII per RFC 5322; anything else is a producer quirk.
+    /// Latin-1 round-trips those bytes instead of replacing them, which is what
+    /// mail clients do in practice.
     fn parse(bytes: &[u8]) -> Self {
-        let text = String::from_utf8_lossy(bytes);
+        let text: Cow<'_, str> = match std::str::from_utf8(bytes) {
+            Ok(s) => Cow::Borrowed(s),
+            Err(_) => Cow::Owned(encoding_rs::WINDOWS_1252.decode(bytes).0.into_owned()),
+        };
         let mut fields: Vec<(String, String)> = Vec::new();
         for line in text.lines() {
             if line.starts_with(' ') || line.starts_with('\t') {
@@ -155,6 +176,12 @@ fn extract_text(headers: &Headers, body: &[u8], depth: usize) -> Result<String, 
             return Ok(decode_body(headers, body).into_owned());
         };
         let parts = split_parts(body, &boundary);
+        if parts.is_empty() {
+            // Declared a boundary that never appears: recover by reading the
+            // body as flat text rather than reporting no body at all.
+            log::warn!("multipart boundary {boundary:?} never appears; treating body as flat text");
+            return Ok(decode_body(headers, body).into_owned());
+        }
         let mut html_seen = false;
 
         // Prefer text/plain anywhere in this level, then recurse into nested
@@ -216,7 +243,16 @@ fn split_parts<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
         let trimmed = trimmed.strip_suffix(b"\r").unwrap_or(trimmed);
         if trimmed.starts_with(delim.as_bytes()) {
             if let Some(s) = start {
-                parts.push(&body[s..pos]);
+                // RFC 2046: the CRLF before a delimiter belongs to the
+                // delimiter, not to the part it terminates.
+                let mut end = pos;
+                if body[s..end].ends_with(b"\n") {
+                    end -= 1;
+                    if body[s..end].ends_with(b"\r") {
+                        end -= 1;
+                    }
+                }
+                parts.push(&body[s..end]);
             }
             // Closing delimiter is `--boundary--`.
             if trimmed.ends_with(b"--") && trimmed.len() > delim.len() {
@@ -451,6 +487,50 @@ Content-Type: multipart/alternative; boundary=\"BB\"\r\n\r\n\
 --B\r\nContent-Type: text/html\r\n\r\n<p>only html</p>\r\n--B--\r\n";
         let err = parse(eml).unwrap_err();
         assert!(matches!(err, ConvertError::Unsupported(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn whitespace_only_line_separates_paragraphs() {
+        // Real senders emit a line holding one space as a paragraph break.
+        let doc = parse(b"Subject: T\r\n\r\nHey, \r\n \r\nIn today's video").unwrap();
+        let paras: Vec<_> =
+            doc.blocks.iter().filter(|b| matches!(b, Block::Paragraph(_))).collect();
+        assert_eq!(paras.len(), 2, "{paras:?}");
+        if let Some(Block::Paragraph(i)) = paras.first() {
+            assert!(!matches!(i.last(), Some(Inline::LineBreak)), "dangling break: {i:?}");
+        }
+    }
+
+    #[test]
+    fn crlf_blank_line_splits_paragraphs() {
+        let eml = b"Subject: T\r\nContent-Type: text/plain\r\n\r\none\r\n\r\ntwo";
+        let doc = parse(eml).unwrap();
+        let paras: Vec<_> =
+            doc.blocks.iter().filter(|b| matches!(b, Block::Paragraph(_))).collect();
+        assert_eq!(paras.len(), 2, "expected two paragraphs, got {paras:?}");
+    }
+
+    #[test]
+    fn non_ascii_header_bytes_survive_as_latin1() {
+        // "Café" as raw latin-1 in a header, not an encoded-word.
+        let h = Headers::parse(b"Subject: Caf\xe9 accounts");
+        assert_eq!(h.get("subject").unwrap(), "Café accounts");
+    }
+
+    #[test]
+    fn trailing_blank_line_emits_no_dangling_break() {
+        let doc = parse(b"Subject: T\r\n\r\nline one\r\n\r\n").unwrap();
+        let last = doc.blocks.last().unwrap();
+        if let Block::Paragraph(inlines) = last {
+            assert!(!matches!(inlines.last(), Some(Inline::LineBreak)), "{inlines:?}");
+        }
+    }
+
+    #[test]
+    fn declared_boundary_that_never_appears_recovers() {
+        let eml = b"Subject: T\r\nContent-Type: multipart/alternative; boundary=\"nope\"\r\n\r\nflat text";
+        let doc = parse(eml).unwrap();
+        assert!(body_text(&doc).contains("flat text"));
     }
 
     #[test]
