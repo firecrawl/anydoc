@@ -1,6 +1,7 @@
 //! One frontend per input format; each parses bytes into the document model.
 
 mod csv;
+mod eml;
 pub mod detect;
 mod doc;
 mod docx;
@@ -20,6 +21,7 @@ pub fn parse(bytes: &[u8], format: Format) -> Result<Document, ConvertError> {
     match format {
         Format::Excel => sheet::parse(bytes),
         Format::Csv => csv::parse(bytes),
+        Format::Eml => eml::parse(bytes),
         Format::Docx => docx::parse(bytes),
         Format::Odt | Format::Ods | Format::Odp => odf::parse(bytes),
         Format::Pptx => pptx::parse(bytes),
