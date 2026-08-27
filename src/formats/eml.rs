@@ -173,10 +173,10 @@ fn extract_text(headers: &Headers, body: &[u8], depth: usize) -> Result<String, 
                     }
                     0 if pct == "text/html" => html_seen = true,
                     1 if pct.starts_with("multipart/") => {
-                        if let Ok(s) = extract_text(&ph, pb, depth + 1) {
-                            if !s.trim().is_empty() {
-                                return Ok(s);
-                            }
+                        if let Ok(s) = extract_text(&ph, pb, depth + 1)
+                            && !s.trim().is_empty()
+                        {
+                            return Ok(s);
                         }
                     }
                     _ => {}
@@ -226,10 +226,10 @@ fn split_parts<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
         }
         pos += line.len();
     }
-    if let Some(s) = start {
-        if s < body.len() {
-            parts.push(&body[s..]);
-        }
+    if let Some(s) = start
+        && s < body.len()
+    {
+        parts.push(&body[s..]);
     }
     parts
 }

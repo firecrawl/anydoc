@@ -1,10 +1,10 @@
 //! One frontend per input format; each parses bytes into the document model.
 
 mod csv;
-mod eml;
 pub mod detect;
 mod doc;
 mod docx;
+mod eml;
 mod epub;
 mod odf;
 pub mod pdf;
