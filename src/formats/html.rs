@@ -78,7 +78,7 @@ fn decode_html(bytes: &[u8]) -> String {
 }
 
 fn sniff_meta_charset(bytes: &[u8]) -> Option<&'static Encoding> {
-    const SNIFF_BYTES: usize = 1024;
+    const SNIFF_BYTES: usize = 64 * 1024;
     let prefix = String::from_utf8_lossy(&bytes[..bytes.len().min(SNIFF_BYTES)]);
     let parsed = Html::parse_document(prefix.as_ref());
     let root = parsed.root_element();
@@ -106,18 +106,31 @@ fn sniff_meta_charset(bytes: &[u8]) -> Option<&'static Encoding> {
 }
 
 fn content_type_charset(content: &str) -> Option<&str> {
-    for parameter in content.split(';') {
-        let Some((name, value)) = parameter.split_once('=') else {
-            continue;
-        };
-        if name.trim().eq_ignore_ascii_case("charset") {
-            let label = value.trim().trim_matches(|c| c == '\'' || c == '"').trim();
-            if !label.is_empty() {
-                return Some(label);
+    let mut start = 0usize;
+    let mut quote = None;
+    for (index, ch) in content.char_indices() {
+        match (quote, ch) {
+            (Some(active), current) if current == active => quote = None,
+            (None, '\'' | '"') => quote = Some(ch),
+            (None, ';') => {
+                if let Some(label) = charset_parameter(&content[start..index]) {
+                    return Some(label);
+                }
+                start = index + ch.len_utf8();
             }
+            _ => {}
         }
     }
-    None
+    charset_parameter(&content[start..])
+}
+
+fn charset_parameter(parameter: &str) -> Option<&str> {
+    let (name, value) = parameter.split_once('=')?;
+    if !name.trim().eq_ignore_ascii_case("charset") {
+        return None;
+    }
+    let label = value.trim().trim_matches(|c| c == '\'' || c == '"').trim();
+    (!label.is_empty()).then_some(label)
 }
 
 #[derive(Default)]
@@ -139,6 +152,7 @@ impl HtmlComplexitySink {
 
     fn push_element(&self, name: &LocalName) {
         let mut open = self.open_elements.borrow_mut();
+        close_implied_before_start(&mut open, name.as_ref());
         open.push(name.clone());
         if open.len() > limits::MAX_XML_DEPTH {
             self.depth_limit_exceeded.set(true);
@@ -192,6 +206,24 @@ impl TokenSink for HtmlComplexitySink {
             }
             Token::EOFToken | Token::ParseError(_) => TokenSinkResult::Continue,
         }
+    }
+}
+
+fn close_implied_before_start(open: &mut Vec<LocalName>, name: &str) {
+    let implied = match name {
+        "li" => &["li"][..],
+        "p" => &["p"][..],
+        "dt" | "dd" => &["dt", "dd"][..],
+        "rt" | "rp" => &["rt", "rp"][..],
+        "option" => &["option"][..],
+        "optgroup" => &["option", "optgroup"][..],
+        "tr" => &["tr"][..],
+        "td" | "th" => &["td", "th"][..],
+        _ => return,
+    };
+    if let Some(position) = open.iter().rposition(|candidate| implied.contains(&candidate.as_ref()))
+    {
+        open.truncate(position);
     }
 }
 
@@ -345,7 +377,8 @@ impl HtmlCtx for StandaloneCtx {
         if src.is_empty() {
             return Ok(None);
         }
-        Ok(is_absolute_uri(src).then(|| ImageSource::External(src.to_owned())))
+        Ok((is_absolute_uri(src) || src.starts_with("//"))
+            .then(|| ImageSource::External(src.to_owned())))
     }
 
     fn anchor_id(&self, raw: &str) -> AnchorId {
