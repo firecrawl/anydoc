@@ -60,6 +60,26 @@ fn utf16_html_detection_allows_long_leading_whitespace() {
 }
 
 #[test]
+fn utf16le_doctype_allows_long_whitespace_between_keyword_and_name() {
+    let source = format!("<!DOCTYPE{}html><html></html>", " ".repeat(80));
+    let mut bytes = vec![0xFF, 0xFE];
+    for unit in source.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    assert_eq!(Format::from_bytes(&bytes), Some(Format::Html));
+}
+
+#[test]
+fn utf16be_doctype_allows_long_whitespace_between_keyword_and_name() {
+    let source = format!("<!DOCTYPE{}html><html></html>", " ".repeat(80));
+    let mut bytes = vec![0xFE, 0xFF];
+    for unit in source.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    assert_eq!(Format::from_bytes(&bytes), Some(Format::Html));
+}
+
+#[test]
 fn unrelated_charset_attribute_does_not_change_decoding() {
     let html = "<!doctype html><p data-note='charset=windows-1252'>café</p>".as_bytes();
     let markdown = to_markdown_bytes(html, None).unwrap();

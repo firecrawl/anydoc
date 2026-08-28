@@ -65,18 +65,61 @@ fn looks_like_html(bytes: &[u8]) -> bool {
 
 fn looks_like_utf16_html(bytes: &[u8], little_endian: bool) -> bool {
     let (pairs, _) = bytes.as_chunks::<2>();
-    let mut units = pairs.iter().map(|pair| {
-        if little_endian { u16::from_le_bytes(*pair) } else { u16::from_be_bytes(*pair) }
-    });
-    let mut prefix = Vec::with_capacity(64);
-    if let Some(first) =
-        units.find(|unit| !matches!(*unit, 0x0009 | 0x000A | 0x000C | 0x000D | 0x0020))
-    {
-        prefix.push(first);
-        prefix.extend(units.take(63));
+    let mut index = 0;
+    while pairs.get(index).is_some_and(|pair| {
+        utf16_ascii_unit(*pair, little_endian).is_some_and(|b| b.is_ascii_whitespace())
+    }) {
+        index += 1;
     }
-    let decoded = String::from_utf16_lossy(&prefix);
-    looks_like_ascii_html(decoded.as_bytes())
+
+    if utf16_html_prefix(pairs, index, little_endian, b"<html") {
+        return true;
+    }
+
+    const DOCTYPE: &[u8] = b"<!doctype";
+    if !utf16_prefix_eq_ignore_ascii_case(pairs, index, little_endian, DOCTYPE) {
+        return false;
+    }
+    index += DOCTYPE.len();
+    if !pairs.get(index).is_some_and(|pair| {
+        utf16_ascii_unit(*pair, little_endian).is_some_and(|b| b.is_ascii_whitespace())
+    }) {
+        return false;
+    }
+    while pairs.get(index).is_some_and(|pair| {
+        utf16_ascii_unit(*pair, little_endian).is_some_and(|b| b.is_ascii_whitespace())
+    }) {
+        index += 1;
+    }
+    utf16_html_prefix(pairs, index, little_endian, b"html")
+}
+
+fn utf16_ascii_unit(pair: [u8; 2], little_endian: bool) -> Option<u8> {
+    let unit = if little_endian { u16::from_le_bytes(pair) } else { u16::from_be_bytes(pair) };
+    (unit <= 0x7F).then_some(unit as u8)
+}
+
+fn utf16_prefix_eq_ignore_ascii_case(
+    pairs: &[[u8; 2]],
+    start: usize,
+    little_endian: bool,
+    prefix: &[u8],
+) -> bool {
+    let Some(slice) = pairs.get(start..start + prefix.len()) else {
+        return false;
+    };
+    slice.iter().zip(prefix).all(|(pair, expected)| {
+        utf16_ascii_unit(*pair, little_endian)
+            .is_some_and(|byte| byte.eq_ignore_ascii_case(expected))
+    })
+}
+
+fn utf16_html_prefix(pairs: &[[u8; 2]], start: usize, little_endian: bool, prefix: &[u8]) -> bool {
+    utf16_prefix_eq_ignore_ascii_case(pairs, start, little_endian, prefix)
+        && pairs.get(start + prefix.len()).is_none_or(|pair| {
+            utf16_ascii_unit(*pair, little_endian)
+                .is_some_and(|b| b.is_ascii_whitespace() || matches!(b, b'>' | b'/'))
+        })
 }
 
 fn looks_like_ascii_html(bytes: &[u8]) -> bool {
