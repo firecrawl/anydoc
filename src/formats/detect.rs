@@ -1,7 +1,9 @@
 //! Content-based format detection.
 //!
-//! Identifies the format from what each specification designates as the
-//! container's identity, never from heuristics over document content:
+//! Identifies the format primarily from what each specification designates as
+//! the container's identity. Standalone HTML is the one intentional content
+//! heuristic: after an optional BOM/leading whitespace, a leading HTML5
+//! `<!DOCTYPE ... html>` or `<html>` marker identifies `Format::Html`.
 //!
 //! - PDF: the `%PDF-` header (ISO 32000; implementations accept leading
 //!   junk, bounded here at 1024 bytes).
@@ -41,19 +43,62 @@ pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Format> {
     if bytes.starts_with(b"PK\x03\x04") {
         return detect_zip(bytes);
     }
-    if bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-") {
-        return Some(Format::Pdf);
-    }
     if looks_like_html(bytes) {
         return Some(Format::Html);
+    }
+    if bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-") {
+        return Some(Format::Pdf);
     }
     None
 }
 
 fn looks_like_html(bytes: &[u8]) -> bool {
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return looks_like_utf16_html(rest, true);
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return looks_like_utf16_html(rest, false);
+    }
     let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    looks_like_ascii_html(bytes)
+}
+
+fn looks_like_utf16_html(bytes: &[u8], little_endian: bool) -> bool {
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .take(256)
+        .map(|pair| {
+            if little_endian {
+                u16::from_le_bytes([pair[0], pair[1]])
+            } else {
+                u16::from_be_bytes([pair[0], pair[1]])
+            }
+        })
+        .collect();
+    let decoded = String::from_utf16_lossy(&units);
+    looks_like_ascii_html(decoded.as_bytes())
+}
+
+fn looks_like_ascii_html(bytes: &[u8]) -> bool {
     let bytes = bytes.trim_ascii_start();
-    html_prefix(bytes, b"<!doctype html") || html_prefix(bytes, b"<html")
+    html_doctype_prefix(bytes) || html_prefix(bytes, b"<html")
+}
+
+fn html_doctype_prefix(bytes: &[u8]) -> bool {
+    const DOCTYPE: &[u8] = b"<!doctype";
+    let Some(head) = bytes.get(..DOCTYPE.len()) else {
+        return false;
+    };
+    if !head.eq_ignore_ascii_case(DOCTYPE) {
+        return false;
+    }
+    let Some(rest) = bytes.get(DOCTYPE.len()..) else {
+        return false;
+    };
+    if !rest.first().is_some_and(u8::is_ascii_whitespace) {
+        return false;
+    }
+    html_prefix(rest.trim_ascii_start(), b"html")
 }
 
 fn html_prefix(bytes: &[u8], prefix: &[u8]) -> bool {
