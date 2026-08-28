@@ -24,6 +24,7 @@ pub enum BlockKind {
     BlockQuote,
     CodeBlock,
     Rule,
+    Math,
 }
 
 #[derive(Serialize)]
@@ -48,7 +49,7 @@ pub struct Block {
     /// codeBlock.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
-    /// codeBlock.
+    /// codeBlock, math (LaTeX source without delimiters).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
 }
@@ -94,6 +95,7 @@ impl From<model::Block> for Block {
                 Block { lang, text: Some(text), ..Block::of(BlockKind::CodeBlock) }
             }
             model::Block::Rule => Block::of(BlockKind::Rule),
+            model::Block::Math(tex) => Block { text: Some(tex), ..Block::of(BlockKind::Math) },
         }
     }
 }
@@ -108,13 +110,17 @@ pub enum InlineKind {
     Anchor,
     NoteRef,
     LineBreak,
+    /// An inline formula.
+    Math,
+    /// A checkbox control.
+    Checkbox,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Inline {
     pub kind: InlineKind,
-    /// text.
+    /// text; math (LaTeX source without delimiters).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     /// text.
@@ -138,6 +144,9 @@ pub struct Inline {
     /// noteRef: the id of the note in `Document.notes`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note_id: Option<String>,
+    /// checkbox: its state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
 }
 
 impl Inline {
@@ -152,6 +161,7 @@ impl Inline {
             source: None,
             anchor: None,
             note_id: None,
+            checked: None,
         }
     }
 }
@@ -181,6 +191,10 @@ impl From<model::Inline> for Inline {
                 Inline { note_id: Some(id), ..Inline::of(InlineKind::NoteRef) }
             }
             model::Inline::LineBreak => Inline::of(InlineKind::LineBreak),
+            model::Inline::Math(tex) => Inline { text: Some(tex), ..Inline::of(InlineKind::Math) },
+            model::Inline::Checkbox(checked) => {
+                Inline { checked: Some(checked), ..Inline::of(InlineKind::Checkbox) }
+            }
         }
     }
 }
@@ -316,9 +330,6 @@ impl From<model::List> for List {
 #[serde(rename_all = "camelCase")]
 pub struct ListItem {
     pub blocks: Vec<Block>,
-    /// Task-list state, when the item carries a checkbox.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checked: Option<bool>,
     /// Literal marker text that overrides the list marker when the source
     /// number text cannot be reproduced from the marker and position alone
     /// (composite number text such as `1-a)`).
@@ -328,11 +339,7 @@ pub struct ListItem {
 
 impl From<model::ListItem> for ListItem {
     fn from(item: model::ListItem) -> Self {
-        ListItem {
-            blocks: blocks(item.blocks),
-            checked: item.checked,
-            marker_label: item.marker_label,
-        }
+        ListItem { blocks: blocks(item.blocks), marker_label: item.marker_label }
     }
 }
 

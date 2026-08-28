@@ -14,6 +14,8 @@ use crate::model::{Block, Cell, GridBuilder, Inline, TableKind};
 use crate::package::limits;
 use crate::package::xml::{Element, ns};
 use crate::shared::header::resolve_header_rows;
+use crate::shared::text::clean_text;
+use std::collections::HashMap;
 
 pub fn parse_table(elem: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError> {
     let mut state = TableState {
@@ -23,6 +25,7 @@ pub fn parse_table(elem: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError
         pending_rows: 0,
         header_rows: 0,
         rows_emitted: 0,
+        checkboxes: read_checkboxes(elem),
     };
     walk_rows(elem, ctx, &mut state, true)?;
     let mut table = state.builder.finish(TableKind::Data);
@@ -42,6 +45,57 @@ struct TableState {
     pending_rows: u64,
     header_rows: usize,
     rows_emitted: usize,
+    /// The sheet's form checkboxes by control id, as the inlines a
+    /// `draw:control` in a cell expands to.
+    checkboxes: HashMap<String, Vec<Inline>>,
+}
+
+/// Checkbox controls declared in the table's `office:forms`. The mixed
+/// ("unknown") state has no token and is left out.
+fn read_checkboxes(table: &Element) -> HashMap<String, Vec<Inline>> {
+    let mut out = HashMap::new();
+    for cb in table.find_all(ns::OFFICE, "forms").flat_map(|f| f.descendants(ns::FORM, "checkbox"))
+    {
+        let Some(id) = cb.attr_qualified(ns::XML, "id").or_else(|| cb.attr(ns::FORM, "id")) else {
+            continue;
+        };
+        let state = cb.attr(ns::FORM, "current-state").or_else(|| cb.attr(ns::FORM, "state"));
+        let checked = match state {
+            Some("checked") => true,
+            Some("unchecked") | None => false,
+            Some(_) => continue,
+        };
+        let mut inlines = vec![Inline::Checkbox(checked)];
+        let label = cb.attr(ns::FORM, "label").map(clean_text).unwrap_or_default();
+        if !label.is_empty() {
+            inlines.push(Inline::plain(format!(" {label}")));
+        }
+        out.insert(id.to_string(), inlines);
+    }
+    out
+}
+
+/// Append the checkboxes anchored in a cell after its content, on the same
+/// line. Controls under `table:shapes` are anchored to the page by
+/// coordinates alone, so they are not placed.
+fn append_cell_checkboxes(
+    cell: &Element,
+    checkboxes: &HashMap<String, Vec<Inline>>,
+    blocks: &mut Vec<Block>,
+) {
+    for control in cell.find_all(ns::DRAW, "control") {
+        let Some(found) = control.attr(ns::DRAW, "control").and_then(|id| checkboxes.get(id))
+        else {
+            continue;
+        };
+        match blocks.last_mut() {
+            Some(Block::Paragraph(inlines)) => {
+                inlines.push(Inline::plain(" "));
+                inlines.extend(found.iter().cloned());
+            }
+            _ => blocks.push(Block::Paragraph(found.clone())),
+        }
+    }
 }
 
 impl TableState {
@@ -93,7 +147,9 @@ fn block_bytes(blocks: &[Block]) -> u64 {
                     inline_bytes(content) + target_len
                 }
                 Inline::Image { alt, .. } => alt.len() as u64,
+                Inline::Math(tex) => tex.len() as u64,
                 Inline::Anchor(id) | Inline::NoteRef(id) => id.len() as u64,
+                Inline::Checkbox(_) => 3,
                 Inline::LineBreak => 1,
             })
             .sum()
@@ -102,6 +158,7 @@ fn block_bytes(blocks: &[Block]) -> u64 {
         .iter()
         .map(|b| match b {
             Block::Paragraph(i) | Block::Heading { content: i, .. } => inline_bytes(i),
+            Block::Math(tex) => tex.len() as u64,
             Block::List(list) => {
                 list.items.iter().map(|item| block_bytes(&item.blocks)).sum::<u64>()
             }
@@ -178,7 +235,7 @@ fn emit_row(
     // Parse the row template exactly once: repeated rows clone the parsed
     // cells instead of reparsing, so per-parse side effects (notes, assets)
     // happen once and the duplicated text bytes are charged up front.
-    let cells = parse_row_cells(row, ctx)?;
+    let cells = parse_row_cells(row, ctx, &state.checkboxes)?;
     state.charge(repeat.saturating_sub(1))?;
     for cell in &cells {
         if let RowCell::Cell { repeat: cell_repeat, bytes, .. } = cell {
@@ -195,7 +252,11 @@ fn emit_row(
 }
 
 /// Parse one row's cells into the reusable template.
-fn parse_row_cells(row: &Element, ctx: &Ctx) -> Result<Vec<RowCell>, ConvertError> {
+fn parse_row_cells(
+    row: &Element,
+    ctx: &Ctx,
+    checkboxes: &HashMap<String, Vec<Inline>>,
+) -> Result<Vec<RowCell>, ConvertError> {
     let mut out = Vec::new();
     for cell in row.child_elems() {
         let repeat: u64 = cell
@@ -220,7 +281,8 @@ fn parse_row_cells(row: &Element, ctx: &Ctx) -> Result<Vec<RowCell>, ConvertErro
             .and_then(|v| v.parse().ok())
             .unwrap_or(1)
             .max(1);
-        let blocks = cell_blocks(cell, ctx)?;
+        let mut blocks = cell_blocks(cell, ctx)?;
+        append_cell_checkboxes(cell, checkboxes, &mut blocks);
         let bytes = block_bytes(&blocks);
         out.push(RowCell::Cell { repeat, col_span, row_span, blocks, bytes });
     }

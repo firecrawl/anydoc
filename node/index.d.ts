@@ -2,12 +2,17 @@
 /* eslint-disable */
 /**
  * `code` on the `Error` a failed conversion rejects with. Conversion fails
- * only when no meaningful Markdown could be produced; producer quirks are
+ * only when no complete Markdown could be produced; producer quirks are
  * recovered or skipped instead.
  */
 export type ConvertErrorCode =
-  /** Unknown format, or one that cannot be converted (an image-only PDF). */
+  /** Unknown format, or one that cannot be converted. */
   | 'unsupported'
+  /**
+   * Pages of a PDF are scanned or image-only and need OCR, which anydoc does
+   * not do. The error is a `NeedsOcrError` naming them.
+   */
+  | 'needsOcr'
   /** Structurally unusable: no meaningful content could be extracted. */
   | 'malformed'
   /** Encrypted or password-protected. */
@@ -18,6 +23,17 @@ export type ConvertErrorCode =
   | 'missingPart'
   /** The file could not be read, from `toMarkdown` only. */
   | 'io'
+  /** `ocr: 'hosted'` could not get the document through Firecrawl Parse. */
+  | 'hosted'
+
+/** The rejection for a PDF with pages that need OCR. */
+export interface NeedsOcrError extends Error {
+  code: 'needsOcr'
+  /** 1-indexed pages that need OCR. */
+  pages: number[]
+  /** Pages in the document. */
+  pageCount: number
+}
 /**
  * An embedded binary asset (image, object payload). Bytes are always
  * retained, so a document stays self-contained.
@@ -46,7 +62,7 @@ export interface Block {
   blocks?: Array<Block>
   /** codeBlock. */
   lang?: string
-  /** codeBlock. */
+  /** codeBlock, math (LaTeX source without delimiters). */
   text?: string
 }
 
@@ -57,7 +73,8 @@ export declare const enum BlockKind {
   table = 'table',
   blockQuote = 'blockQuote',
   codeBlock = 'codeBlock',
-  rule = 'rule'
+  rule = 'rule',
+  math = 'math'
 }
 
 export interface Cell {
@@ -102,8 +119,9 @@ export declare const enum Format {
   odt = 'odt',
   /**
    * Converted with pdf-inspector, which emits Markdown directly:
-   * `toDocument` is unsupported for PDFs. Scanned or image-only PDFs
-   * (needing OCR) error as unsupported.
+   * `toDocument` is unsupported for PDFs. Scanned or image-only pages
+   * need OCR, which anydoc does not do: the document rejects with
+   * `needsOcr` naming them.
    */
   pdf = 'pdf',
   ppt = 'ppt',
@@ -152,7 +170,7 @@ export declare const enum ImageSourceKind {
 
 export interface Inline {
   kind: InlineKind
-  /** text. */
+  /** text; math (LaTeX source without delimiters). */
   text?: string
   /** text. */
   style?: Style
@@ -168,6 +186,8 @@ export interface Inline {
   anchor?: string
   /** noteRef: the id of the note in `Document.notes`. */
   noteId?: string
+  /** checkbox: its state. */
+  checked?: boolean
 }
 
 export declare const enum InlineKind {
@@ -177,7 +197,11 @@ export declare const enum InlineKind {
   /** Zero-width marker for an internal link target at this position. */
   anchor = 'anchor',
   noteRef = 'noteRef',
-  lineBreak = 'lineBreak'
+  lineBreak = 'lineBreak',
+  /** An inline formula. */
+  math = 'math',
+  /** A checkbox control. */
+  checkbox = 'checkbox'
 }
 
 export interface LinkTarget {
@@ -204,8 +228,6 @@ export interface List {
 
 export interface ListItem {
   blocks: Array<Block>
-  /** Task-list state, when the item carries a checkbox. */
-  checked?: boolean
   /**
    * Literal marker text that overrides the list marker when the source
    * number text cannot be reproduced from the marker and position alone

@@ -11,13 +11,18 @@ use wasm_bindgen::prelude::*;
 const TYPESCRIPT: &str = r#"
 /**
  * `code` on the `Error` a failed conversion throws. Conversion fails only
- * when no meaningful Markdown could be produced; producer quirks are
+ * when no complete Markdown could be produced; producer quirks are
  * recovered or skipped instead. The crate's `io` code has no wasm
  * counterpart: there is no filesystem to read from.
  */
 export type ConvertErrorCode =
-  /** Unknown format, or one that cannot be converted (an image-only PDF). */
+  /** Unknown format, or one that cannot be converted. */
   | 'unsupported'
+  /**
+   * Pages of a PDF are scanned or image-only and need OCR, which anydoc does
+   * not do. The error is a `NeedsOcrError` naming them.
+   */
+  | 'needsOcr'
   /** Structurally unusable: no meaningful content could be extracted. */
   | 'malformed'
   /** Encrypted or password-protected. */
@@ -26,6 +31,15 @@ export type ConvertErrorCode =
   | 'resourceLimit'
   /** A part required for any meaningful output is absent. */
   | 'missingPart'
+
+/** The error thrown for a PDF with pages that need OCR. */
+export interface NeedsOcrError extends Error {
+  code: 'needsOcr'
+  /** 1-indexed pages that need OCR. */
+  pages: number[]
+  /** Pages in the document. */
+  pageCount: number
+}
 
 export interface Document {
   blocks: Array<Block>
@@ -45,6 +59,7 @@ export type BlockKind =
   | 'blockQuote'
   | 'codeBlock'
   | 'rule'
+  | 'math'
 
 export interface Block {
   kind: BlockKind
@@ -60,7 +75,7 @@ export interface Block {
   blocks?: Array<Block>
   /** codeBlock. */
   lang?: string
-  /** codeBlock. */
+  /** codeBlock, math (LaTeX source without delimiters). */
   text?: string
 }
 
@@ -72,10 +87,14 @@ export type InlineKind =
   | 'anchor'
   | 'noteRef'
   | 'lineBreak'
+  /** An inline formula. */
+  | 'math'
+  /** A checkbox control. */
+  | 'checkbox'
 
 export interface Inline {
   kind: InlineKind
-  /** text. */
+  /** text; math (LaTeX source without delimiters). */
   text?: string
   /** text. */
   style?: Style
@@ -91,6 +110,8 @@ export interface Inline {
   anchor?: string
   /** noteRef: the id of the note in `Document.notes`. */
   noteId?: string
+  /** checkbox: its state. */
+  checked?: boolean
 }
 
 /** Fully resolved character style. */
@@ -152,8 +173,6 @@ export interface List {
 
 export interface ListItem {
   blocks: Array<Block>
-  /** Task-list state, when the item carries a checkbox. */
-  checked?: boolean
   /**
    * Literal marker text that overrides the list marker when the source
    * number text cannot be reproduced from the marker and position alone

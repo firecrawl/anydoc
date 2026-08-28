@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Math Book
+
+# Formulas
+
+Euler: $e^{i\pi} + 1 = 0$ holds.
+
+$$
+\sum_{k=0}^{\infty}\frac{x^{k}}{k!}=\exp\left(x\right)
+$$
+
+Vectors: $\vec{v}\cdot\vec{w}$.
