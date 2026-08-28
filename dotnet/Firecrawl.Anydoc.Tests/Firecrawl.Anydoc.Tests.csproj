@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Firecrawl.Anydoc/Firecrawl.Anydoc.csproj" />
+  </ItemGroup>
+
+  <!-- The fixtures the smoke tests round-trip. Copied into the build output so
+       tests run from any working directory. -->
+  <ItemGroup>
+    <None Include="../../tests/fixtures/docx/handmade-outline.docx" Link="fixtures/docx/handmade-outline.docx" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../tests/fixtures/docx/handmade-rich.docx" Link="fixtures/docx/handmade-rich.docx" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../tests/fixtures/csv/sheet.csv" Link="fixtures/csv/sheet.csv" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../tests/fixtures/malformed/encrypted--errors.odt" Link="fixtures/malformed/encrypted--errors.odt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../tests/fixtures/abuse/zipbomb--errors.docx" Link="fixtures/abuse/zipbomb--errors.docx" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

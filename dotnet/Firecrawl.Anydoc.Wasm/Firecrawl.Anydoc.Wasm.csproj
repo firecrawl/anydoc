@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+
+    <AssemblyName>Firecrawl.Anydoc.Wasm</AssemblyName>
+    <RootNamespace>Firecrawl.Anydoc</RootNamespace>
+
+    <Version>0.1.7</Version>
+    <Description>WebAssembly binding for anydoc: convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown inside a Blazor WebAssembly app, without any native platform library.</Description>
+    <PackageId>Firecrawl.Anydoc.Wasm</PackageId>
+    <Authors>Firecrawl;Junian Triajianto</Authors>
+    <Owners>Firecrawl;junian</Owners>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/firecrawl/anydoc</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/firecrawl/anydoc</RepositoryUrl>
+    <PackageTags>markdown; docx; pptx; xlsx; epub; pdf; converter; blazor; wasm; document</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <!-- A Razor class library so wwwroot/** ships as static web assets to Blazor
+       WASM hosts under /_content/Firecrawl.Anydoc.Wasm/. It carries three
+       files: the wasm-bindgen glue, the wasm binary, and our interop shim.
+       The first two are produced by `cargo build` of the wasm/ crate and copied
+       here by dotnet/build-wasm.sh. -->
+  <ItemGroup>
+    <None Include="wwwroot/**/*" />
+  </ItemGroup>
+
+  <!-- Reuse the exact document model and shared types the native binding
+       publishes, so both packages expose the same Firecrawl.Anydoc types. -->
+  <ItemGroup>
+    <Compile Include="../Firecrawl.Anydoc.Shared/Model.cs" Link="Shared/Model.cs" />
+    <Compile Include="../Firecrawl.Anydoc.Shared/Types.cs" Link="Shared/Types.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.JSInterop" Version="8.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
