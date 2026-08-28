@@ -74,46 +74,155 @@ fn sniff_meta_charset(bytes: &[u8]) -> Option<&'static Encoding> {
     prefix.make_ascii_lowercase();
 
     let mut offset = 0usize;
-    while let Some(found) = find_bytes(&prefix[offset..], b"charset") {
-        let mut pos = offset + found + b"charset".len();
-        while prefix.get(pos).is_some_and(u8::is_ascii_whitespace) {
-            pos += 1;
-        }
-        if prefix.get(pos) != Some(&b'=') {
-            offset = offset + found + 1;
+    while let Some(found) = find_bytes(&prefix[offset..], b"<meta") {
+        let start = offset + found;
+        let attrs_start = start + b"<meta".len();
+        if prefix
+            .get(attrs_start)
+            .is_some_and(|b| !b.is_ascii_whitespace() && !matches!(b, b'/' | b'>'))
+        {
+            offset = start + 1;
             continue;
         }
-        pos += 1;
-        while prefix.get(pos).is_some_and(u8::is_ascii_whitespace) {
-            pos += 1;
-        }
-        let quote = match prefix.get(pos) {
-            Some(b'\'') | Some(b'"') => {
-                let q = prefix[pos];
-                pos += 1;
-                Some(q)
-            }
-            _ => None,
+
+        let Some(end_rel) = find_tag_end(&prefix[attrs_start..]) else {
+            break;
         };
-        let start = pos;
-        while let Some(&byte) = prefix.get(pos) {
-            let stop = quote.map_or_else(
-                || byte.is_ascii_whitespace() || matches!(byte, b';' | b'>' | b'/' | b'\'' | b'"'),
-                |q| byte == q,
-            );
-            if stop {
-                break;
-            }
-            pos += 1;
-        }
-        if pos > start
-            && let Some(encoding) = Encoding::for_label(&prefix[start..pos])
+        let end = attrs_start + end_rel;
+        let attrs = &prefix[attrs_start..end];
+
+        if let Some(label) = html_attr(attrs, b"charset")
+            && let Some(encoding) = Encoding::for_label(label)
         {
             return Some(encoding);
         }
-        offset = offset + found + 1;
+
+        let is_content_type = html_attr(attrs, b"http-equiv")
+            .is_some_and(|value| value.eq_ignore_ascii_case(b"content-type"));
+        if is_content_type
+            && let Some(content) = html_attr(attrs, b"content")
+            && let Some(label) = content_type_charset(content)
+            && let Some(encoding) = Encoding::for_label(label)
+        {
+            return Some(encoding);
+        }
+
+        offset = end.saturating_add(1);
     }
     None
+}
+
+fn find_tag_end(bytes: &[u8]) -> Option<usize> {
+    let mut quote = None;
+    for (index, &byte) in bytes.iter().enumerate() {
+        match (quote, byte) {
+            (Some(q), b) if b == q => quote = None,
+            (Some(_), _) => {}
+            (None, b'\'' | b'"') => quote = Some(byte),
+            (None, b'>') => return Some(index),
+            (None, _) => {}
+        }
+    }
+    None
+}
+
+fn html_attr<'a>(attrs: &'a [u8], wanted: &[u8]) -> Option<&'a [u8]> {
+    let mut pos = 0usize;
+    while pos < attrs.len() {
+        while attrs.get(pos).is_some_and(|b| b.is_ascii_whitespace() || *b == b'/') {
+            pos += 1;
+        }
+        if pos >= attrs.len() {
+            break;
+        }
+
+        let name_start = pos;
+        while attrs
+            .get(pos)
+            .is_some_and(|b| !b.is_ascii_whitespace() && !matches!(b, b'=' | b'/' | b'>'))
+        {
+            pos += 1;
+        }
+        if pos == name_start {
+            pos += 1;
+            continue;
+        }
+        let name = &attrs[name_start..pos];
+
+        while attrs.get(pos).is_some_and(u8::is_ascii_whitespace) {
+            pos += 1;
+        }
+
+        let mut value = &attrs[pos..pos];
+        if attrs.get(pos) == Some(&b'=') {
+            pos += 1;
+            while attrs.get(pos).is_some_and(u8::is_ascii_whitespace) {
+                pos += 1;
+            }
+
+            if let Some(&quote @ (b'\'' | b'"')) = attrs.get(pos) {
+                pos += 1;
+                let value_start = pos;
+                while attrs.get(pos).is_some_and(|b| *b != quote) {
+                    pos += 1;
+                }
+                value = &attrs[value_start..pos];
+                if attrs.get(pos) == Some(&quote) {
+                    pos += 1;
+                }
+            } else {
+                let value_start = pos;
+                while attrs
+                    .get(pos)
+                    .is_some_and(|b| !b.is_ascii_whitespace() && !matches!(b, b'/' | b'>'))
+                {
+                    pos += 1;
+                }
+                value = &attrs[value_start..pos];
+            }
+        }
+
+        if name.eq_ignore_ascii_case(wanted) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn content_type_charset(content: &[u8]) -> Option<&[u8]> {
+    let found = find_bytes(content, b"charset")?;
+    let mut pos = found + b"charset".len();
+    while content.get(pos).is_some_and(u8::is_ascii_whitespace) {
+        pos += 1;
+    }
+    if content.get(pos) != Some(&b'=') {
+        return None;
+    }
+    pos += 1;
+    while content.get(pos).is_some_and(u8::is_ascii_whitespace) {
+        pos += 1;
+    }
+
+    let quote = match content.get(pos) {
+        Some(b'\'') | Some(b'"') => {
+            let quote = content[pos];
+            pos += 1;
+            Some(quote)
+        }
+        _ => None,
+    };
+    let start = pos;
+    while let Some(&byte) = content.get(pos) {
+        let stop = quote.map_or_else(
+            || byte.is_ascii_whitespace() || matches!(byte, b';' | b'\'' | b'"'),
+            |q| byte == q,
+        );
+        if stop {
+            break;
+        }
+        pos += 1;
+    }
+    (pos > start).then_some(&content[start..pos])
 }
 
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -235,5 +344,10 @@ mod tests {
             .map(Encoding::name),
             Some("windows-1252")
         );
+    }
+
+    #[test]
+    fn charset_sniff_ignores_non_meta_text_and_attributes() {
+        assert_eq!(sniff_meta_charset(b"<p data-note='charset=windows-1252'>utf-8</p>"), None);
     }
 }
