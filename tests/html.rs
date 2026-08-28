@@ -13,6 +13,42 @@ fn html_doctype_is_detected_from_content() {
 }
 
 #[test]
+fn html_doctype_allows_html5_ascii_whitespace() {
+    assert_eq!(Format::from_bytes(b"<!DOCTYPE\thtml><html></html>"), Some(Format::Html));
+    assert_eq!(Format::from_bytes(b"<!DOCTYPE\nhtml><html></html>"), Some(Format::Html));
+}
+
+#[test]
+fn html_prefix_wins_over_embedded_pdf_marker() {
+    let html = b"<!doctype html><html><body>%PDF-1.7 is text here</body></html>";
+    assert_eq!(Format::from_bytes(html), Some(Format::Html));
+}
+
+#[test]
+fn utf16_html_is_detected_from_content() {
+    let source = "<html><body>hello</body></html>";
+
+    let mut le = vec![0xFF, 0xFE];
+    for unit in source.encode_utf16() {
+        le.extend_from_slice(&unit.to_le_bytes());
+    }
+    assert_eq!(Format::from_bytes(&le), Some(Format::Html));
+
+    let mut be = vec![0xFE, 0xFF];
+    for unit in source.encode_utf16() {
+        be.extend_from_slice(&unit.to_be_bytes());
+    }
+    assert_eq!(Format::from_bytes(&be), Some(Format::Html));
+}
+
+#[test]
+fn unrelated_charset_attribute_does_not_change_decoding() {
+    let html = "<!doctype html><p data-note='charset=windows-1252'>café</p>".as_bytes();
+    let markdown = to_markdown_bytes(html, None).unwrap();
+    assert_eq!(markdown, "café\n");
+}
+
+#[test]
 fn malformed_html5_is_repaired_before_conversion() {
     let html = br#"<!doctype html><html><body><h1>Hello</h1><p>first<p><strong>second</strong></body></html>"#;
     let markdown = to_markdown_bytes(html, None).unwrap();
