@@ -176,7 +176,9 @@ impl TokenSink for HtmlComplexitySink {
                 StartTag => {
                     self.bump_node();
                     let name = tag.name.as_ref();
-                    if !tag.self_closing && !is_void_html_element(name) {
+                    let honor_self_closing = tag.self_closing
+                        && html5_self_closing_is_honored(&self.open_elements.borrow(), name);
+                    if !is_void_html_element(name) && !honor_self_closing {
                         self.push_element(&tag.name);
                     }
                     match name {
@@ -210,6 +212,12 @@ impl TokenSink for HtmlComplexitySink {
 }
 
 fn close_implied_before_start(open: &mut Vec<LocalName>, name: &str) {
+    if is_heading_element(name)
+        && open.last().is_some_and(|candidate| is_heading_element(candidate.as_ref()))
+    {
+        open.pop();
+    }
+
     let implied = match name {
         "li" => &["li"][..],
         "p" => &["p"][..],
@@ -225,6 +233,81 @@ fn close_implied_before_start(open: &mut Vec<LocalName>, name: &str) {
     {
         open.truncate(position);
     }
+}
+
+fn is_heading_element(name: &str) -> bool {
+    matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6")
+}
+
+fn html5_self_closing_is_honored(open: &[LocalName], name: &str) -> bool {
+    if matches!(name, "svg" | "math") {
+        return true;
+    }
+
+    let mut in_foreign_content = false;
+    for candidate in open.iter().rev() {
+        match candidate.as_ref() {
+            "foreignobject" | "desc" | "title" | "mi" | "mo" | "mn" | "ms" | "mtext"
+            | "annotation-xml" => return false,
+            "svg" | "math" => {
+                in_foreign_content = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    in_foreign_content && !is_foreign_content_html_breakout(name)
+}
+
+fn is_foreign_content_html_breakout(name: &str) -> bool {
+    matches!(
+        name,
+        "b" | "big"
+            | "blockquote"
+            | "body"
+            | "br"
+            | "center"
+            | "code"
+            | "dd"
+            | "div"
+            | "dl"
+            | "dt"
+            | "em"
+            | "embed"
+            | "font"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "head"
+            | "hr"
+            | "i"
+            | "img"
+            | "li"
+            | "listing"
+            | "menu"
+            | "meta"
+            | "nobr"
+            | "ol"
+            | "p"
+            | "pre"
+            | "ruby"
+            | "s"
+            | "small"
+            | "span"
+            | "strike"
+            | "strong"
+            | "sub"
+            | "sup"
+            | "table"
+            | "tt"
+            | "u"
+            | "ul"
+            | "var"
+    )
 }
 
 fn is_void_html_element(name: &str) -> bool {
