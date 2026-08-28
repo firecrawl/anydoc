@@ -9,6 +9,7 @@ mod tables;
 
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Note, NoteKind, Style, inlines_are_empty};
+use crate::package::limits;
 use crate::package::xml::{Element, Node, ns};
 use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
@@ -292,7 +293,15 @@ impl MathState {
         MathState { depth, open: vec![(depth, math_elem("zone"))] }
     }
 
+    /// Open a nested group. Past [`limits::MAX_XML_DEPTH`] the group is
+    /// dropped and its content stays in the nearest open ancestor: this tree
+    /// is hand-built rather than produced by `parse_xml`, so nothing else
+    /// applies that bound, and the OMML serializer that consumes it recurses
+    /// once per level — as does dropping the tree.
     fn open_group(&mut self, depth: usize) {
+        if self.open.len() >= limits::MAX_XML_DEPTH {
+            return;
+        }
         self.open.push((depth, math_elem("")));
     }
 
@@ -652,6 +661,15 @@ impl<'a> Parser<'a> {
             match token {
                 Token::Open => {
                     self.flush_pending();
+                    if self.stack.len() >= limits::MAX_RTF_GROUP_DEPTH {
+                        return Err(ConvertError::ResourceLimit {
+                            limit: "max_rtf_group_depth",
+                            detail: format!(
+                                "group nesting exceeds {}",
+                                limits::MAX_RTF_GROUP_DEPTH
+                            ),
+                        });
+                    }
                     self.stack.push(self.state);
                     if self.state.capture == Capture::Math
                         && let Some(math) = &mut self.dest.math
@@ -1328,6 +1346,36 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every open group retains a character-state snapshot, so unbounded
+    /// nesting is a memory-amplification vector on its own.
+    #[test]
+    fn deep_group_nesting_hits_the_depth_bound() {
+        let mut src = String::from(r"{\rtf1\ansi ");
+        src.push_str(&"{".repeat(limits::MAX_RTF_GROUP_DEPTH + 8));
+        let err = parse(src.as_bytes()).unwrap_err();
+        assert!(
+            matches!(&err, ConvertError::ResourceLimit { limit: "max_rtf_group_depth", .. }),
+            "expected max_rtf_group_depth, got {err:?}"
+        );
+    }
+
+    /// Inside a math zone every group also opens an element. That tree is
+    /// hand-built rather than parsed, so `MAX_XML_DEPTH` has to be applied
+    /// here — the OMML serializer recurses once per level, and so does
+    /// dropping the tree.
+    #[test]
+    fn deep_math_nesting_stays_within_the_xml_depth_bound() {
+        let mut src = String::from(r"{\rtf1\ansi {\*\mmath ");
+        // Stay under the group bound so this exercises the math cap alone.
+        let groups = limits::MAX_XML_DEPTH * 2;
+        src.push_str(&"{".repeat(groups));
+        src.push('x');
+        src.push_str(&"}".repeat(groups));
+        src.push_str("}}");
+        // The contract is that it terminates without overflowing the stack.
+        let _ = parse(src.as_bytes());
+    }
 
     #[test]
     fn missing_list_table_keeps_listtext_marker() {
