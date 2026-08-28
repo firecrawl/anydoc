@@ -44,7 +44,26 @@ pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Format> {
     if bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-") {
         return Some(Format::Pdf);
     }
+    if looks_like_html(bytes) {
+        return Some(Format::Html);
+    }
     None
+}
+
+fn looks_like_html(bytes: &[u8]) -> bool {
+    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    let bytes = bytes.trim_ascii_start();
+    html_prefix(bytes, b"<!doctype html") || html_prefix(bytes, b"<html")
+}
+
+fn html_prefix(bytes: &[u8], prefix: &[u8]) -> bool {
+    let Some(head) = bytes.get(..prefix.len()) else {
+        return false;
+    };
+    head.eq_ignore_ascii_case(prefix)
+        && bytes
+            .get(prefix.len())
+            .is_none_or(|b| b.is_ascii_whitespace() || matches!(b, b'>' | b'/'))
 }
 
 /// Classify an OLE compound file by its mandated content stream. Encrypted
@@ -236,6 +255,8 @@ mod tests {
         junk.extend_from_slice(b"%PDF-1.4");
         assert_eq!(from_bytes(&junk), Some(Format::Pdf));
         assert_eq!(from_bytes(b"{\\rtf1\\ansi hi}"), Some(Format::Rtf));
+        assert_eq!(from_bytes(b"<!DOCTYPE html><html></html>"), Some(Format::Html));
+        assert_eq!(from_bytes(b"\xEF\xBB\xBF  <HTML><body>x</body></HTML>"), Some(Format::Html));
         assert_eq!(from_bytes(b"a,b,c\n1,2,3\n"), None);
         assert_eq!(from_bytes(b""), None);
     }
