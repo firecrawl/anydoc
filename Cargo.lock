@@ -95,6 +95,7 @@ dependencies = [
  "csv",
  "encoding_rs",
  "flate2",
+ "html5ever",
  "insta",
  "log",
  "pdf-inspector",

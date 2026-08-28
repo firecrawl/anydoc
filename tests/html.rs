@@ -1,4 +1,4 @@
-use anydoc::{Format, to_markdown_bytes};
+use anydoc::{ConvertError, Format, to_markdown_bytes};
 
 #[test]
 fn html_extensions_are_named() {
@@ -42,10 +42,55 @@ fn utf16_html_is_detected_from_content() {
 }
 
 #[test]
+fn utf16_html_detection_allows_long_leading_whitespace() {
+    let source = format!("{}<html><body>hello</body></html>", " ".repeat(300));
+
+    let mut le = vec![0xFF, 0xFE];
+    for unit in source.encode_utf16() {
+        le.extend_from_slice(&unit.to_le_bytes());
+    }
+    assert_eq!(Format::from_bytes(&le), Some(Format::Html));
+
+    let mut be = vec![0xFE, 0xFF];
+    for unit in source.encode_utf16() {
+        be.extend_from_slice(&unit.to_be_bytes());
+    }
+    assert_eq!(Format::from_bytes(&be), Some(Format::Html));
+}
+
+#[test]
 fn unrelated_charset_attribute_does_not_change_decoding() {
     let html = "<!doctype html><p data-note='charset=windows-1252'>café</p>".as_bytes();
     let markdown = to_markdown_bytes(html, None).unwrap();
     assert_eq!(markdown, "café\n");
+}
+
+#[test]
+fn meta_looking_text_in_comment_does_not_change_decoding() {
+    let html = "<!doctype html><!-- <meta charset=windows-1252> --><p>café</p>".as_bytes();
+    let markdown = to_markdown_bytes(html, None).unwrap();
+    assert_eq!(markdown, "café\n");
+}
+
+#[test]
+fn meta_looking_text_in_script_does_not_change_decoding() {
+    let html =
+        "<!doctype html><script>const fake = '<meta charset=windows-1252>';</script><p>café</p>"
+            .as_bytes();
+    let markdown = to_markdown_bytes(html, None).unwrap();
+    assert_eq!(markdown, "café\n");
+}
+
+#[test]
+fn html_node_limit_covers_nodes_outside_body_before_dom_materialization() {
+    let mut html = String::from("<!doctype html><html><head>");
+    for _ in 0..2_000_001 {
+        html.push_str("<!---->");
+    }
+    html.push_str("</head><body>ok</body></html>");
+
+    let error = to_markdown_bytes(html.as_bytes(), Some(Format::Html)).unwrap_err();
+    assert!(matches!(error, ConvertError::ResourceLimit { limit: "max_xml_nodes", .. }));
 }
 
 #[test]

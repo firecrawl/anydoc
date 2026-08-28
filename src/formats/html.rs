@@ -8,7 +8,14 @@ use crate::package::xml::{Attr, Element, Node};
 use crate::shared::html::{HtmlCtx, Stylesheet};
 use crate::shared::uri::is_absolute_uri;
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, WINDOWS_1252};
+use html5ever::LocalName;
+use html5ever::tendril::StrTendril;
+use html5ever::tokenizer::states::{Rawtext, Rcdata, ScriptData};
+use html5ever::tokenizer::{
+    BufferQueue, EndTag, StartTag, TagToken, Token, TokenSink, TokenSinkResult, Tokenizer,
+};
 use scraper::{ElementRef, Html, Node as HtmlNode};
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// Parse a standalone HTML document into anydoc's document model.
@@ -29,6 +36,8 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     }
 
     let text = decode_html(bytes);
+    preflight_html_complexity(&text)?;
+
     let parsed = Html::parse_document(&text);
     let root = parsed.root_element();
 
@@ -70,163 +79,180 @@ fn decode_html(bytes: &[u8]) -> String {
 
 fn sniff_meta_charset(bytes: &[u8]) -> Option<&'static Encoding> {
     const SNIFF_BYTES: usize = 1024;
-    let mut prefix = bytes[..bytes.len().min(SNIFF_BYTES)].to_vec();
-    prefix.make_ascii_lowercase();
+    let prefix = String::from_utf8_lossy(&bytes[..bytes.len().min(SNIFF_BYTES)]);
+    let parsed = Html::parse_document(prefix.as_ref());
+    let root = parsed.root_element();
 
-    let mut offset = 0usize;
-    while let Some(found) = find_bytes(&prefix[offset..], b"<meta") {
-        let start = offset + found;
-        let attrs_start = start + b"<meta".len();
-        if prefix
-            .get(attrs_start)
-            .is_some_and(|b| !b.is_ascii_whitespace() && !matches!(b, b'/' | b'>'))
-        {
-            offset = start + 1;
-            continue;
-        }
-
-        let Some(end_rel) = find_tag_end(&prefix[attrs_start..]) else {
-            break;
-        };
-        let end = attrs_start + end_rel;
-        let attrs = &prefix[attrs_start..end];
-
-        if let Some(label) = html_attr(attrs, b"charset")
-            && let Some(encoding) = Encoding::for_label(label)
+    for meta in root.descendent_elements().filter(|element| element.value().name() == "meta") {
+        if let Some(label) = meta.value().attr("charset")
+            && let Some(encoding) = Encoding::for_label(label.trim().as_bytes())
         {
             return Some(encoding);
         }
 
-        let is_content_type = html_attr(attrs, b"http-equiv")
-            .is_some_and(|value| value.eq_ignore_ascii_case(b"content-type"));
+        let is_content_type = meta
+            .value()
+            .attr("http-equiv")
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("content-type"));
         if is_content_type
-            && let Some(content) = html_attr(attrs, b"content")
+            && let Some(content) = meta.value().attr("content")
             && let Some(label) = content_type_charset(content)
-            && let Some(encoding) = Encoding::for_label(label)
+            && let Some(encoding) = Encoding::for_label(label.as_bytes())
         {
             return Some(encoding);
         }
-
-        offset = end.saturating_add(1);
     }
     None
 }
 
-fn find_tag_end(bytes: &[u8]) -> Option<usize> {
-    let mut quote = None;
-    for (index, &byte) in bytes.iter().enumerate() {
-        match (quote, byte) {
-            (Some(q), b) if b == q => quote = None,
-            (Some(_), _) => {}
-            (None, b'\'' | b'"') => quote = Some(byte),
-            (None, b'>') => return Some(index),
-            (None, _) => {}
-        }
-    }
-    None
-}
-
-fn html_attr<'a>(attrs: &'a [u8], wanted: &[u8]) -> Option<&'a [u8]> {
-    let mut pos = 0usize;
-    while pos < attrs.len() {
-        while attrs.get(pos).is_some_and(|b| b.is_ascii_whitespace() || *b == b'/') {
-            pos += 1;
-        }
-        if pos >= attrs.len() {
-            break;
-        }
-
-        let name_start = pos;
-        while attrs
-            .get(pos)
-            .is_some_and(|b| !b.is_ascii_whitespace() && !matches!(b, b'=' | b'/' | b'>'))
-        {
-            pos += 1;
-        }
-        if pos == name_start {
-            pos += 1;
+fn content_type_charset(content: &str) -> Option<&str> {
+    for parameter in content.split(';') {
+        let Some((name, value)) = parameter.split_once('=') else {
             continue;
-        }
-        let name = &attrs[name_start..pos];
-
-        while attrs.get(pos).is_some_and(u8::is_ascii_whitespace) {
-            pos += 1;
-        }
-
-        let mut value = &attrs[pos..pos];
-        if attrs.get(pos) == Some(&b'=') {
-            pos += 1;
-            while attrs.get(pos).is_some_and(u8::is_ascii_whitespace) {
-                pos += 1;
+        };
+        if name.trim().eq_ignore_ascii_case("charset") {
+            let label = value.trim().trim_matches(|c| c == '\'' || c == '"').trim();
+            if !label.is_empty() {
+                return Some(label);
             }
-
-            if let Some(&quote @ (b'\'' | b'"')) = attrs.get(pos) {
-                pos += 1;
-                let value_start = pos;
-                while attrs.get(pos).is_some_and(|b| *b != quote) {
-                    pos += 1;
-                }
-                value = &attrs[value_start..pos];
-                if attrs.get(pos) == Some(&quote) {
-                    pos += 1;
-                }
-            } else {
-                let value_start = pos;
-                while attrs
-                    .get(pos)
-                    .is_some_and(|b| !b.is_ascii_whitespace() && !matches!(b, b'/' | b'>'))
-                {
-                    pos += 1;
-                }
-                value = &attrs[value_start..pos];
-            }
-        }
-
-        if name.eq_ignore_ascii_case(wanted) {
-            return Some(value);
         }
     }
     None
 }
 
-fn content_type_charset(content: &[u8]) -> Option<&[u8]> {
-    let found = find_bytes(content, b"charset")?;
-    let mut pos = found + b"charset".len();
-    while content.get(pos).is_some_and(u8::is_ascii_whitespace) {
-        pos += 1;
-    }
-    if content.get(pos) != Some(&b'=') {
-        return None;
-    }
-    pos += 1;
-    while content.get(pos).is_some_and(u8::is_ascii_whitespace) {
-        pos += 1;
-    }
-
-    let quote = match content.get(pos) {
-        Some(b'\'') | Some(b'"') => {
-            let quote = content[pos];
-            pos += 1;
-            Some(quote)
-        }
-        _ => None,
-    };
-    let start = pos;
-    while let Some(&byte) = content.get(pos) {
-        let stop = quote.map_or_else(
-            || byte.is_ascii_whitespace() || matches!(byte, b';' | b'\'' | b'"'),
-            |q| byte == q,
-        );
-        if stop {
-            break;
-        }
-        pos += 1;
-    }
-    (pos > start).then_some(&content[start..pos])
+#[derive(Default)]
+struct HtmlComplexitySink {
+    node_count: Cell<usize>,
+    open_elements: RefCell<Vec<LocalName>>,
+    node_limit_exceeded: Cell<bool>,
+    depth_limit_exceeded: Cell<bool>,
 }
 
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|window| window == needle)
+impl HtmlComplexitySink {
+    fn bump_node(&self) {
+        let count = self.node_count.get().saturating_add(1);
+        self.node_count.set(count);
+        if count > limits::MAX_XML_NODES {
+            self.node_limit_exceeded.set(true);
+        }
+    }
+
+    fn push_element(&self, name: &LocalName) {
+        let mut open = self.open_elements.borrow_mut();
+        open.push(name.clone());
+        if open.len() > limits::MAX_XML_DEPTH {
+            self.depth_limit_exceeded.set(true);
+        }
+    }
+
+    fn close_element(&self, name: &LocalName) {
+        let mut open = self.open_elements.borrow_mut();
+        if let Some(position) = open.iter().rposition(|candidate| candidate == name) {
+            open.truncate(position);
+        }
+    }
+}
+
+impl TokenSink for HtmlComplexitySink {
+    type Handle = ();
+
+    fn process_token(&self, token: Token, _line_number: u64) -> TokenSinkResult<Self::Handle> {
+        match token {
+            TagToken(tag) => match tag.kind {
+                StartTag => {
+                    self.bump_node();
+                    let name = tag.name.as_ref();
+                    if !tag.self_closing && !is_void_html_element(name) {
+                        self.push_element(&tag.name);
+                    }
+                    match name {
+                        "title" | "textarea" => TokenSinkResult::RawData(Rcdata),
+                        "style" | "xmp" | "iframe" | "noembed" | "noframes" => {
+                            TokenSinkResult::RawData(Rawtext)
+                        }
+                        "script" => TokenSinkResult::RawData(ScriptData),
+                        "plaintext" => TokenSinkResult::Plaintext,
+                        _ => TokenSinkResult::Continue,
+                    }
+                }
+                EndTag => {
+                    self.close_element(&tag.name);
+                    TokenSinkResult::Continue
+                }
+            },
+            Token::CharacterTokens(text) => {
+                if !text.is_empty() {
+                    self.bump_node();
+                }
+                TokenSinkResult::Continue
+            }
+            Token::CommentToken(_) | Token::DoctypeToken(_) | Token::NullCharacterToken => {
+                self.bump_node();
+                TokenSinkResult::Continue
+            }
+            Token::EOFToken | Token::ParseError(_) => TokenSinkResult::Continue,
+        }
+    }
+}
+
+fn is_void_html_element(name: &str) -> bool {
+    matches!(
+        name,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+fn preflight_html_complexity(text: &str) -> Result<(), ConvertError> {
+    const CHUNK_BYTES: usize = 64 * 1024;
+    let tokenizer = Tokenizer::new(HtmlComplexitySink::default(), Default::default());
+    let input = BufferQueue::default();
+    let mut offset = 0usize;
+
+    while offset < text.len() {
+        let mut end = offset.saturating_add(CHUNK_BYTES).min(text.len());
+        while end > offset && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        input.push_back(StrTendril::from(&text[offset..end]));
+        let _ = tokenizer.feed(&input);
+        check_preflight_limits(&tokenizer.sink)?;
+        offset = end;
+    }
+
+    tokenizer.end();
+    check_preflight_limits(&tokenizer.sink)
+}
+
+fn check_preflight_limits(sink: &HtmlComplexitySink) -> Result<(), ConvertError> {
+    if sink.node_limit_exceeded.get() {
+        return Err(ConvertError::ResourceLimit {
+            limit: "max_xml_nodes",
+            detail: format!("HTML token stream has more than {} nodes", limits::MAX_XML_NODES),
+        });
+    }
+    if sink.depth_limit_exceeded.get() {
+        return Err(ConvertError::ResourceLimit {
+            limit: "max_xml_depth",
+            detail: format!(
+                "HTML source nesting depth exceeds {} before DOM construction",
+                limits::MAX_XML_DEPTH
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn adapt_element(
@@ -349,5 +375,10 @@ mod tests {
     #[test]
     fn charset_sniff_ignores_non_meta_text_and_attributes() {
         assert_eq!(sniff_meta_charset(b"<p data-note='charset=windows-1252'>utf-8</p>"), None);
+        assert_eq!(sniff_meta_charset(b"<!-- <meta charset=windows-1252> --><p>utf-8</p>"), None);
+        assert_eq!(
+            sniff_meta_charset(b"<script>const x='<meta charset=windows-1252>';</script>"),
+            None
+        );
     }
 }

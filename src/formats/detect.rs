@@ -64,18 +64,21 @@ fn looks_like_html(bytes: &[u8]) -> bool {
 }
 
 fn looks_like_utf16_html(bytes: &[u8], little_endian: bool) -> bool {
-    let units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .take(256)
-        .map(|pair| {
-            if little_endian {
-                u16::from_le_bytes([pair[0], pair[1]])
-            } else {
-                u16::from_be_bytes([pair[0], pair[1]])
-            }
-        })
-        .collect();
-    let decoded = String::from_utf16_lossy(&units);
+    let mut units = bytes.chunks_exact(2).map(|pair| {
+        if little_endian {
+            u16::from_le_bytes([pair[0], pair[1]])
+        } else {
+            u16::from_be_bytes([pair[0], pair[1]])
+        }
+    });
+    let mut prefix = Vec::with_capacity(64);
+    if let Some(first) =
+        units.find(|unit| !matches!(*unit, 0x0009 | 0x000A | 0x000C | 0x000D | 0x0020))
+    {
+        prefix.push(first);
+        prefix.extend(units.take(63));
+    }
+    let decoded = String::from_utf16_lossy(&prefix);
     looks_like_ascii_html(decoded.as_bytes())
 }
 
