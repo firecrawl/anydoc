@@ -160,9 +160,9 @@ Only documents that need OCR leave the machine, and the whole document goes, sin
 
 | Format           | Extensions                                                 |
 | ---------------- | ---------------------------------------------------------- |
-| Word             | `.doc`, `.docx`, `.docm`                                   |
+| Word             | `.doc`, `.docx`, `.docm`, `.wps`                           |
 | PowerPoint       | `.ppt`, `.pps`, `.pot`, `.pptx`, `.pptm`, `.ppsx`, `.ppsm` |
-| Excel            | `.xls`, `.xlsx`, `.xlsm`, `.xlsb`                          |
+| Excel            | `.xls`, `.xlsx`, `.xlsm`, `.xlsb`, `.et`                   |
 | OpenDocument     | `.odt`, `.ods`, `.odp`                                     |
 | Rich Text Format | `.rtf`                                                     |
 | EPUB             | `.epub`                                                    |
