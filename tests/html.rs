@@ -288,3 +288,15 @@ fn html_inside_svg_foreign_object_still_counts_self_closing_non_void_depth() {
         to_markdown_bytes(html.as_bytes(), Some(Format::Html)).unwrap_err(),
     );
 }
+
+#[test]
+fn nested_list_wrappers_preserve_structural_children() {
+    let html = br#"<!doctype html>
+        <ol><ol>
+          <li><h2>Nested heading</h2></li>
+          <table><tr><td>A</td></tr></table>
+        </ol></ol>"#;
+    let markdown = to_markdown_bytes(html, Some(Format::Html)).unwrap();
+    assert!(markdown.contains("Nested heading"), "{markdown:?}");
+    assert!(markdown.contains("| A |"), "{markdown:?}");
+}
