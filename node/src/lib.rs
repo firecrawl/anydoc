@@ -18,8 +18,9 @@ pub enum Format {
     docx,
     odt,
     /// Converted with pdf-inspector, which emits Markdown directly:
-    /// `toDocument` is unsupported for PDFs. Scanned or image-only PDFs
-    /// (needing OCR) error as unsupported.
+    /// `toDocument` is unsupported for PDFs. Scanned or image-only pages
+    /// need OCR, which anydoc does not do: the document rejects with
+    /// `needsOcr` naming them.
     pdf,
     ppt,
     pptx,
@@ -142,12 +143,19 @@ pub fn to_document(bytes: Uint8Array, format: Option<Format>) -> AsyncTask<Docum
 /// crosses: `compute` runs on the libuv pool, where there is no `Env` to build
 /// a JS error with, and `reject` runs on the JS thread, where there is.
 #[derive(Default)]
-struct Failure(Option<&'static str>);
+struct Failure {
+    code: Option<&'static str>,
+    /// `needsOcr`: the 1-indexed pages that need OCR, and the page count.
+    ocr: Option<(Vec<u32>, u32)>,
+}
 
 impl Failure {
     /// Keep the kind, and hand napi the message to reject with.
     fn capture(&mut self, error: anydoc::ConvertError) -> Error {
-        self.0 = Some(error.code());
+        self.code = Some(error.code());
+        if let anydoc::ConvertError::NeedsOcr { pages, page_count } = &error {
+            self.ocr = Some((pages.clone(), *page_count));
+        }
         Error::from_reason(error.to_string())
     }
 
@@ -156,11 +164,23 @@ impl Failure {
     /// a plain string rather than the `Status` enum it defaults to. Anything
     /// that did not come from `capture` is napi's own failure: pass it on.
     fn reject(&self, env: Env, error: Error) -> Error {
-        let Some(code) = self.0 else {
+        let Some(code) = self.code else {
             return error;
         };
         let coded = Error::new(code.to_owned(), error.reason.clone());
-        Error::from(JsError::from(coded).into_unknown(env))
+        let thrown = JsError::from(coded).into_unknown(env);
+        let Some((pages, page_count)) = &self.ocr else {
+            return Error::from(thrown);
+        };
+        let detailed = thrown.coerce_to_object().and_then(|mut object| {
+            object.set("pages", pages.clone())?;
+            object.set("pageCount", *page_count)?;
+            Ok(object.to_unknown())
+        });
+        match detailed {
+            Ok(unknown) => Error::from(unknown),
+            Err(error) => error,
+        }
     }
 }
 

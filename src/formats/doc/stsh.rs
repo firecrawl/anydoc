@@ -4,7 +4,7 @@
 
 use crate::formats::doc::sprm::{PapDelta, apply_pap_sprms, apply_style_chpx};
 use crate::model::Style;
-use crate::shared::binary::{get_u16, get_u32};
+use crate::shared::binary::{get_u16, get_u32, utf16le_units};
 use crate::shared::blockstyle::{self, BlockStyle};
 use std::collections::HashMap;
 
@@ -105,14 +105,14 @@ fn parse_std(record: &[u8], cb_std_base: usize) -> Option<Std> {
     let name_len = get_u16(record, name_off)? as usize;
     // Unicode name: length prefix + UTF-16 chars + terminator.
     let name_bytes = name_len.checked_mul(2)?;
-    let name_units: Vec<u16> = record
-        .get(name_off..)
-        .and_then(|rest| rest.get(2..))
-        .and_then(|rest| rest.get(..name_bytes))
-        .unwrap_or_default()
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
-        .collect();
+    let name_units: Vec<u16> = utf16le_units(
+        record
+            .get(name_off..)
+            .and_then(|rest| rest.get(2..))
+            .and_then(|rest| rest.get(..name_bytes))
+            .unwrap_or_default(),
+    )
+    .collect();
     let name = String::from_utf16_lossy(&name_units);
     let mut upx_pos = name_off.checked_add(4)?.checked_add(name_bytes)?;
 

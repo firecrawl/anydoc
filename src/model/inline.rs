@@ -32,6 +32,10 @@ pub enum Inline {
     NoteRef(String),
     /// A line break inside a block, not a new block.
     LineBreak,
+    /// An inline formula, as LaTeX math without delimiters.
+    Math(String),
+    /// A checkbox control with its state.
+    Checkbox(bool),
 }
 
 impl Inline {
@@ -41,9 +45,14 @@ impl Inline {
     }
 }
 
+/// The Markdown task-list token for a checkbox state.
+pub fn checkbox_text(checked: bool) -> &'static str {
+    if checked { "[x]" } else { "[ ]" }
+}
+
 /// Flatten inlines to their text, dropping styling and links but keeping link
-/// text and image alt text. Line breaks become newlines; anchors and note
-/// references contribute nothing.
+/// text, image alt text, and formula source. Line breaks become newlines;
+/// anchors and note references contribute nothing.
 pub fn inlines_to_plain_text(inlines: &[Inline]) -> String {
     let mut out = String::new();
     collect_plain_text(inlines, &mut out);
@@ -56,6 +65,8 @@ fn collect_plain_text(inlines: &[Inline], out: &mut String) {
             Inline::Text { text, .. } => out.push_str(text),
             Inline::Link { content, .. } => collect_plain_text(content, out),
             Inline::Image { alt, .. } => out.push_str(alt),
+            Inline::Math(tex) => out.push_str(tex),
+            Inline::Checkbox(checked) => out.push_str(checkbox_text(*checked)),
             Inline::Anchor(_) | Inline::NoteRef(_) => {}
             Inline::LineBreak => out.push('\n'),
         }
@@ -69,7 +80,8 @@ pub fn inlines_are_empty(inlines: &[Inline]) -> bool {
     inlines.iter().all(|i| match i {
         Inline::Text { text, .. } => text.trim().is_empty(),
         Inline::Link { content, target } => target.is_empty() && inlines_are_empty(content),
-        Inline::Image { .. } | Inline::NoteRef(_) => false,
+        Inline::Image { .. } | Inline::NoteRef(_) | Inline::Checkbox(_) => false,
+        Inline::Math(tex) => tex.trim().is_empty(),
         Inline::Anchor(_) | Inline::LineBreak => true,
     })
 }

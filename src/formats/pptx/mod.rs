@@ -20,6 +20,7 @@ use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::classify_rel_target;
 use crate::shared::header::resolve_header_rows;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
+use crate::shared::math::{math_lines, omath_para_to_tex};
 use crate::shared::text::clean_text;
 use cascade::{Bullet, LevelStyle, Placeholder, TextProps, TitleClass};
 use std::cell::{Cell as StdCell, RefCell};
@@ -35,7 +36,7 @@ const SLIDE_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/r
 
 /// Namespaces whose markup this frontend understands; `mc:Choice` branches
 /// requiring anything else fall back to `mc:Fallback`.
-const SUPPORTED_NS: &[&str] = &[ns::P, ns::A, ns::R, ns::MC];
+const SUPPORTED_NS: &[&str] = &[ns::P, ns::A, ns::R, ns::MC, ns::A14];
 
 struct LayoutInfo {
     placeholders: Vec<Placeholder>,
@@ -500,7 +501,10 @@ fn parse_text_body(
             }),
             Bullet::None | Bullet::Inherit => {
                 flush_list(blocks, &mut list_run);
-                blocks.push(Block::Paragraph(inlines));
+                match math_lines(&inlines) {
+                    Some(lines) => blocks.extend(lines.into_iter().map(Block::Math)),
+                    None => blocks.push(Block::Paragraph(inlines)),
+                }
             }
         }
     }
@@ -511,6 +515,16 @@ fn parse_text_body(
 fn parse_para_inlines(p: &Element, ctx: &SlideCtx, base: Style) -> Vec<Inline> {
     let mut out: Vec<Inline> = Vec::new();
     for child in p.child_elems() {
+        if child.is(ns::A14, "m") {
+            let para = child.find(ns::M, "oMathPara").unwrap_or(child);
+            for (i, tex) in omath_para_to_tex(para).into_iter().enumerate() {
+                if i > 0 {
+                    out.push(Inline::LineBreak);
+                }
+                out.push(Inline::Math(tex));
+            }
+            continue;
+        }
         if child.ns.as_deref().is_none_or(|n| n != ns::A) {
             continue;
         }

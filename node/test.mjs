@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,7 +16,7 @@ import {
   toDocument,
   toMarkdown,
   toMarkdownBytes,
-} from './index.js'
+} from './anydoc.js'
 
 const fixture = (name) => fileURLToPath(new URL(`../tests/fixtures/${name}`, import.meta.url))
 
@@ -24,6 +25,7 @@ const RICH = fixture('docx/handmade-rich.docx')
 const CSV = fixture('csv/sheet.csv')
 const ENCRYPTED = fixture('malformed/encrypted--errors.odt')
 const HTML = Buffer.from('<!doctype html><html><body><h1>HTML input</h1></body></html>')
+const MIXED = fixture('pdf/handmade-mixed.pdf')
 
 test('toMarkdown detects the format from the file content', async () => {
   const markdown = await toMarkdown(OUTLINE)
@@ -87,6 +89,71 @@ test('conversion errors reject with a coded Error', async () => {
   await rejects(toMarkdownBytes(await readFile(ENCRYPTED), 'odt'), 'encrypted', /encrypted/)
   await rejects(toDocument(await readFile(ENCRYPTED), 'odt'), 'encrypted', /encrypted/)
   await rejects(toMarkdown(fixture('docx/no-such-file.docx')), 'io', /io error/)
+  await rejects(toMarkdown(MIXED), 'needsOcr', /page 2 of 2 needs OCR/)
+})
+
+test('a pdf with scanned pages rejects naming them instead of dropping them', async () => {
+  await assert.rejects(toMarkdown(MIXED), (error) => {
+    assert.deepEqual([error.pages, error.pageCount], [[2], 2])
+    return true
+  })
+})
+
+test('the package exports everything the native binding does', async () => {
+  const [wrapper, native] = await Promise.all([import('./anydoc.js'), import('./index.js')])
+  assert.deepEqual(Object.keys(wrapper).sort(), Object.keys(native).sort())
+})
+
+// A stand-in for api.firecrawl.dev that answers every request with `reply`
+// and records each hit as [path, whether a PDF came with it]. Runs `run`
+// keyless, whatever the environment.
+async function withHostedStub(reply, run) {
+  const hits = []
+  const server = createServer((request, response) => {
+    const chunks = []
+    request.on('data', (chunk) => chunks.push(chunk))
+    request.on('end', () => {
+      hits.push([request.url, Buffer.concat(chunks).includes('%PDF-')])
+      response.writeHead(reply.status, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(reply.body))
+    })
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const url = `http://127.0.0.1:${server.address().port}`
+  const saved = { FIRECRAWL_API_URL: process.env.FIRECRAWL_API_URL, FIRECRAWL_API_KEY: process.env.FIRECRAWL_API_KEY }
+  process.env.FIRECRAWL_API_URL = url
+  delete process.env.FIRECRAWL_API_KEY
+  try {
+    await run(hits, url)
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+    server.close()
+  }
+}
+
+const HOSTED = { status: 200, body: { success: true, data: { markdown: '# Read by the hosted parser\n' } } }
+
+test("ocr: 'hosted' sends a pdf with scanned pages to Firecrawl Parse, and nothing else", async () => {
+  await withHostedStub(HOSTED, async (hits) => {
+    assert.equal(await toMarkdown(MIXED, { ocr: 'hosted' }), HOSTED.body.data.markdown)
+    assert.deepEqual(hits, [['/v2/parse', true]])
+    assert.match(await toMarkdown(OUTLINE, { ocr: 'hosted' }), /^# /m)
+    assert.deepEqual(hits, [['/v2/parse', true]])
+  })
+})
+
+test('the keyless limit says to set an api key', async () => {
+  const limited = { status: 429, body: { success: false, error: 'Rate limit exceeded' } }
+  await withHostedStub(limited, async () => {
+    await assert.rejects(toMarkdown(MIXED, { ocr: 'hosted' }), (error) => {
+      assert.equal(error.code, 'hosted')
+      assert.match(error.message, /set FIRECRAWL_API_KEY/)
+      return true
+    })
+  })
 })
 
 const CLI = fileURLToPath(new URL('./cli.js', import.meta.url))
@@ -128,8 +195,22 @@ test('cli exits 1 when the document cannot be converted', async () => {
   assert.match(stderr, /^anydoc: /)
 })
 
+test('cli exits 3 when pages need OCR', async () => {
+  const { code, stderr } = await runCli([MIXED])
+  assert.equal(code, 3)
+  assert.match(stderr, /^anydoc: page 2 of 2 needs OCR/)
+})
+
+test('cli --ocr hosted converts a pdf with scanned pages through Firecrawl Parse', async () => {
+  await withHostedStub(HOSTED, async (hits, url) => {
+    const { code, stdout } = await runCli([MIXED, '--ocr', 'hosted', '--api-url', url])
+    assert.equal(code, undefined)
+    assert.equal(stdout, HOSTED.body.data.markdown)
+  })
+})
+
 test('cli exits 2 on usage errors', async () => {
-  for (const args of [[], ['--frmat', 'csv', CSV], ['--format', 'nope', CSV], [OUTLINE, RICH]]) {
+  for (const args of [[], ['--frmat', 'csv', CSV], ['--format', 'nope', CSV], [OUTLINE, RICH], ['--ocr', 'cloud', MIXED]]) {
     const { code, stderr } = await runCli(args)
     assert.equal(code, 2)
     assert.match(stderr, /^anydoc: /)

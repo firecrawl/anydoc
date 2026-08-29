@@ -115,9 +115,6 @@ impl List {
 pub struct ListItem {
     /// The item's content.
     pub blocks: Vec<Block>,
-    /// Checkbox state for a task list item; `None` when the item carries no
-    /// checkbox.
-    pub checked: Option<bool>,
     /// Literal marker text that overrides the level marker when the source
     /// number text cannot be reproduced from `marker` + position alone
     /// (composite number text such as `1-a)`).

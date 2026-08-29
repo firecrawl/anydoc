@@ -12,6 +12,7 @@ use crate::package::xml::{Element, Node, ns};
 use crate::shared::assets::{AssetSink, media_type_for};
 use crate::shared::blockstyle::StyledRun;
 use crate::shared::delta::{StyleDelta, rebase_emphasis};
+use crate::shared::math::mathml_to_tex;
 use crate::shared::text::{clean_text, collapse_ws};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -216,7 +217,7 @@ fn parse_list(
         }
         first_item = false;
         let label = item_label(ctx, style_name, depth, &chain);
-        current.items.push(ListItem { blocks: item_blocks, checked: None, marker_label: label });
+        current.items.push(ListItem { blocks: item_blocks, marker_label: label });
         next = current.start.saturating_add(current.items.len() as u64);
     }
     flush(&mut current, &mut out, next);
@@ -422,6 +423,12 @@ pub(super) fn walk_frame(
         boxes.extend(parse_container(text_box, ctx)?);
         return Ok(());
     }
+    if let Some(object) = frame.find(ns::DRAW, "object")
+        && let Some(tex) = formula_tex(ctx, object)?
+    {
+        out.push(Inline::Math(tex));
+        return Ok(());
+    }
     let alt = frame
         .first_descendant(ns::SVG_COMPAT, "title")
         .map(|t| t.text())
@@ -440,6 +447,34 @@ pub(super) fn walk_frame(
         out.push(Inline::Image { alt, source: ImageSource::Unavailable });
     }
     Ok(())
+}
+
+/// The LaTeX of a `draw:object` holding a formula: MathML inline in the
+/// object, or in the `content.xml` of the object directory it links to.
+/// `None` for any other embedded object.
+pub(super) fn formula_tex(ctx: &Ctx, object: &Element) -> Result<Option<String>, ConvertError> {
+    if let Some(math) = object.find(ns::MATHML, "math") {
+        return Ok(Some(mathml_to_tex(math)).filter(|t| !t.is_empty()));
+    }
+    let href = object.attr(ns::XLINK, "href").unwrap_or("");
+    if href.is_empty() || crate::shared::uri::is_absolute_uri(href) {
+        return Ok(None);
+    }
+    let target = match crate::package::path::resolve("content.xml", &format!("{href}/content.xml"))
+    {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!("skipping unresolvable object reference {href:?}: {e}");
+            return Ok(None);
+        }
+    };
+    let Some(tree) = ctx.pkg.borrow_mut().optional_xml_part(&target.path)? else {
+        return Ok(None);
+    };
+    let Some(math) = tree.first_descendant(ns::MATHML, "math") else {
+        return Ok(None);
+    };
+    Ok(Some(mathml_to_tex(math)).filter(|t| !t.is_empty()))
 }
 
 /// Failures degrade (log + `None`) per the unified policy; resource-limit

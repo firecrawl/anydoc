@@ -12,7 +12,7 @@ create_exception!(
     anydoc,
     ConvertError,
     PyException,
-    "Meaningful conversion was impossible. Catch this to handle every kind of \
+    "A complete conversion was impossible. Catch this to handle every kind of \
      failure, or one of the subclasses below to single one out. An unreadable \
      file raises `OSError` instead."
 );
@@ -21,8 +21,16 @@ create_exception!(
     anydoc,
     UnsupportedError,
     ConvertError,
-    "The format is unknown, or cannot be converted at all: a scanned or \
-     image-only PDF needs OCR, which anydoc does not do."
+    "The format is unknown, or cannot be converted at all."
+);
+
+create_exception!(
+    anydoc,
+    NeedsOcrError,
+    ConvertError,
+    "Pages of a PDF are scanned or image-only and need OCR, which anydoc does \
+     not do. `pages` lists them (1-indexed) and `page_count` is the length of \
+     the document."
 );
 
 create_exception!(
@@ -105,6 +113,7 @@ fn convert_error(py: Python<'_>, error: anydoc::ConvertError) -> PyErr {
     // A variant added later raises the base class until it is named here.
     let raised = match &error {
         anydoc::ConvertError::Unsupported(_) => UnsupportedError::new_err(message),
+        anydoc::ConvertError::NeedsOcr { .. } => NeedsOcrError::new_err(message),
         anydoc::ConvertError::Malformed { .. } => MalformedError::new_err(message),
         anydoc::ConvertError::Encrypted => EncryptedError::new_err(message),
         anydoc::ConvertError::ResourceLimit { .. } => ResourceLimitError::new_err(message),
@@ -112,6 +121,10 @@ fn convert_error(py: Python<'_>, error: anydoc::ConvertError) -> PyErr {
         _ => ConvertError::new_err(message),
     };
     let detail = match &error {
+        anydoc::ConvertError::NeedsOcr { pages, page_count } => raised
+            .value(py)
+            .setattr("pages", pages.clone())
+            .and_then(|()| raised.value(py).setattr("page_count", *page_count)),
         anydoc::ConvertError::Malformed { part, .. } => {
             raised.value(py).setattr("part", part.as_deref())
         }
@@ -210,6 +223,7 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("EncryptedError", m.py().get_type::<EncryptedError>())?;
     m.add("MalformedError", m.py().get_type::<MalformedError>())?;
     m.add("MissingPartError", m.py().get_type::<MissingPartError>())?;
+    m.add("NeedsOcrError", m.py().get_type::<NeedsOcrError>())?;
     m.add("ResourceLimitError", m.py().get_type::<ResourceLimitError>())?;
     m.add("UnsupportedError", m.py().get_type::<UnsupportedError>())?;
     Ok(())

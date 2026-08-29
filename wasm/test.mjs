@@ -24,6 +24,7 @@ const CSV = await readFile(fixture('csv/sheet.csv'))
 const PDF = await readFile(fixture('pdf/text.pdf'))
 const ENCRYPTED = await readFile(fixture('malformed/encrypted--errors.odt'))
 const HTML = new TextEncoder().encode('<!doctype html><html><body><h1>HTML input</h1></body></html>')
+const MIXED = await readFile(fixture('pdf/handmade-mixed.pdf'))
 
 test('toMarkdownBytes converts in memory', () => {
   const markdown = toMarkdownBytes(RICH, 'docx')
@@ -86,4 +87,12 @@ test('conversion errors throw a coded Error', () => {
   throws(() => toMarkdownBytes(CSV), 'unsupported', /unrecognized file content/)
   throws(() => toMarkdownBytes(ENCRYPTED, 'odt'), 'encrypted', /encrypted/)
   throws(() => toDocument(ENCRYPTED, 'odt'), 'encrypted', /encrypted/)
+  throws(() => toMarkdownBytes(MIXED), 'needsOcr', /page 2 of 2 needs OCR/)
+})
+
+test('a pdf with scanned pages throws naming them instead of dropping them', () => {
+  assert.throws(() => toMarkdownBytes(MIXED), (error) => {
+    assert.deepEqual([error.pages, error.pageCount], [[2], 2])
+    return true
+  })
 })
