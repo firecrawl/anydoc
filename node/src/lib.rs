@@ -26,6 +26,7 @@ pub enum Format {
     pptx,
     rtf,
     epub,
+    html,
     xlsx,
     ods,
     odp,
@@ -43,6 +44,7 @@ impl From<Format> for anydoc::Format {
             Format::pptx => anydoc::Format::Pptx,
             Format::rtf => anydoc::Format::Rtf,
             Format::epub => anydoc::Format::Epub,
+            Format::html => anydoc::Format::Html,
             Format::xlsx => anydoc::Format::Excel,
             Format::ods => anydoc::Format::Ods,
             Format::odp => anydoc::Format::Odp,
@@ -62,6 +64,7 @@ impl From<anydoc::Format> for Format {
             anydoc::Format::Pptx => Format::pptx,
             anydoc::Format::Rtf => Format::rtf,
             anydoc::Format::Epub => Format::epub,
+            anydoc::Format::Html => Format::html,
             anydoc::Format::Excel => Format::xlsx,
             anydoc::Format::Ods => Format::ods,
             anydoc::Format::Odp => Format::odp,
@@ -72,8 +75,9 @@ impl From<anydoc::Format> for Format {
 
 /// Detect the format from the content itself: the signature and identity each
 /// container specification designates (PDF header, RTF open group, OLE stream
-/// names, ZIP package mimetype/content types). Plain-text formats (CSV) carry
-/// no signature and return `null`; so does anything unrecognized.
+/// names, ZIP package mimetype/content types, or an HTML doctype/root element).
+/// Plain-text formats (CSV) carry no signature and return `null`; so does
+/// anything unrecognized.
 #[napi]
 pub fn format_from_bytes(bytes: Uint8Array) -> Option<Format> {
     anydoc::Format::from_bytes(&bytes).map(Format::from)

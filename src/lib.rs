@@ -46,6 +46,8 @@ pub enum Format {
     Rtf,
     /// EPUB 2 and 3 (`.epub`).
     Epub,
+    /// Standalone HTML documents (`.html`, `.htm`).
+    Html,
     /// Excel workbooks: `.xlsx`, `.xlsm`, binary `.xlsb`, and legacy
     /// OLE-based `.xls`.
     Excel,
@@ -61,9 +63,9 @@ pub enum Format {
 impl Format {
     /// Detect the format from the content itself: the signature and identity
     /// each container specification designates (PDF header, RTF open group,
-    /// OLE stream names, ZIP package mimetype/content types). Plain-text
-    /// formats (CSV) carry no signature and return `None`; so does anything
-    /// unrecognized.
+    /// OLE stream names, ZIP package mimetype/content types, or an HTML
+    /// doctype/root element). Plain-text formats (CSV) carry no signature and
+    /// return `None`; so does anything unrecognized.
     pub fn from_bytes(bytes: &[u8]) -> Option<Format> {
         formats::detect::from_bytes(bytes)
     }
@@ -80,6 +82,7 @@ impl Format {
             "ppt" | "pps" | "pot" => Format::Ppt,
             "rtf" => Format::Rtf,
             "epub" => Format::Epub,
+            "html" | "htm" => Format::Html,
             "xlsx" | "xlsm" | "xlsb" | "xls" => Format::Excel,
             "ods" => Format::Ods,
             "odp" => Format::Odp,

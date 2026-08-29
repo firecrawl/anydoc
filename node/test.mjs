@@ -24,6 +24,7 @@ const OUTLINE = fixture('docx/handmade-outline.docx')
 const RICH = fixture('docx/handmade-rich.docx')
 const CSV = fixture('csv/sheet.csv')
 const ENCRYPTED = fixture('malformed/encrypted--errors.odt')
+const HTML = Buffer.from('<!doctype html><html><body><h1>HTML input</h1></body></html>')
 const MIXED = fixture('pdf/handmade-mixed.pdf')
 
 test('toMarkdown detects the format from the file content', async () => {
@@ -42,6 +43,7 @@ test('toMarkdownBytes detects the format when none is named', async () => {
   // CSV carries no signature, so it has to be named.
   await assert.rejects(toMarkdownBytes(await readFile(CSV)), /unrecognized file content/)
   assert.match(await toMarkdownBytes(await readFile(CSV), 'csv'), /\| --- \|/)
+  assert.match(await toMarkdownBytes(HTML), /^# HTML input/m)
 })
 
 test('toDocument exposes the document model', async () => {
@@ -63,10 +65,12 @@ test('toDocument carries embedded assets as buffers', async () => {
 
 test('format detection reads content, extension, and path', async () => {
   assert.equal(formatFromBytes(await readFile(RICH)), 'docx')
+  assert.equal(formatFromBytes(HTML), 'html')
   // CSV carries no signature: only the extension names it.
   assert.equal(formatFromBytes(await readFile(CSV)), null)
   assert.equal(formatFromExtension('.pptm'), 'pptx')
   assert.equal(formatFromExtension('xls'), 'xlsx')
+  assert.equal(formatFromExtension('htm'), 'html')
   assert.equal(formatFromPath('/tmp/report.odt'), 'odt')
   assert.equal(formatFromPath('/tmp/report.unknown'), null)
 })

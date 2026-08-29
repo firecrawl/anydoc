@@ -67,7 +67,7 @@ create_exception!(
 /// Format names, as the extension that identifies each format. Container
 /// variants that share a parser (`.docm`, `.xlsm`, `.ppsx`, ...) map onto
 /// these via `format_from_bytes` or `format_from_extension`.
-const FORMATS: [(&str, anydoc::Format); 12] = [
+const FORMATS: [(&str, anydoc::Format); 13] = [
     ("doc", anydoc::Format::Doc),
     ("docx", anydoc::Format::Docx),
     ("odt", anydoc::Format::Odt),
@@ -76,6 +76,7 @@ const FORMATS: [(&str, anydoc::Format); 12] = [
     ("pptx", anydoc::Format::Pptx),
     ("rtf", anydoc::Format::Rtf),
     ("epub", anydoc::Format::Epub),
+    ("html", anydoc::Format::Html),
     ("xlsx", anydoc::Format::Excel),
     ("ods", anydoc::Format::Ods),
     ("odp", anydoc::Format::Odp),
@@ -140,8 +141,9 @@ fn convert_error(py: Python<'_>, error: anydoc::ConvertError) -> PyErr {
 
 /// Detect the format from the content itself: the signature and identity each
 /// container specification designates (PDF header, RTF open group, OLE stream
-/// names, ZIP package mimetype/content types). Plain-text formats (CSV) carry
-/// no signature and return `None`; so does anything unrecognized.
+/// names, ZIP package mimetype/content types, or an HTML doctype/root element).
+/// Plain-text formats (CSV) carry no signature and return `None`; so does
+/// anything unrecognized.
 #[pyfunction]
 fn format_from_bytes(data: Vec<u8>) -> Option<&'static str> {
     anydoc::Format::from_bytes(&data).map(format_name)
