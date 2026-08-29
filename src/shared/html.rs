@@ -572,6 +572,10 @@ impl Builder<'_> {
                     });
                     continue;
                 }
+                let child_blocks = self.sub_element_blocks(child, delta)?;
+                if child_blocks.is_empty() {
+                    continue;
+                }
                 if !list_items.is_empty() {
                     out.push(Block::List(List {
                         marker: MarkerKind::Bullet,
@@ -579,7 +583,7 @@ impl Builder<'_> {
                         items: std::mem::take(&mut list_items),
                     }));
                 }
-                out.extend(self.sub_element_blocks(child, delta)?);
+                out.extend(child_blocks);
             }
             if !list_items.is_empty() {
                 out.push(Block::List(List {
@@ -626,10 +630,14 @@ impl Builder<'_> {
 
         for child in children {
             if child.local != "li" {
+                let child_blocks = self.sub_element_blocks(child, delta)?;
+                if child_blocks.is_empty() {
+                    continue;
+                }
                 if let Some(list) = current.take() {
                     out.push(Block::List(list));
                 }
-                out.extend(self.sub_element_blocks(child, delta)?);
+                out.extend(child_blocks);
                 continue;
             }
 
