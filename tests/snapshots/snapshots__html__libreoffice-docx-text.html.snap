@@ -1,0 +1,83 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+1. # Fixture Document
+
+Plain paragraph with **bold**, *italic*, and ~~struck~~ runs.
+
+**Style-bold paragraph with a** NotBold-styled span **inside.**
+
+1. ## Lists
+
+1. First numbered
+
+2. Second numbered
+
+   - a. Alpha sub one
+
+   - b. Alpha sub two
+
+        - i. Roman sub sub
+
+3. Third numbered
+
+Interrupting paragraph between lists.
+
+4. Fourth, continuing the count
+
+- IV. Roman starting at four
+
+- I. Roman five
+
+- Bullet one
+
+- Bullet two
+
+  - Nested bullet
+
+2. ## Table
+
+|  |  |  |  |
+| --- | --- | --- | --- |
+| Wide head |  | End |  |
+| Tall | B2 |  | C2 |
+|  | B3 |  | C3 |
+
+3. ## Notes and special text
+
+Music clef 𝄞 appears before this footnote<a id="sdfootnote1anc"></a>[1](#sdfootnote1sym) reference.
+
+An endnote follows here<a id="sdendnote1anc"></a>[i](#sdendnote1sym).
+
+Persian with ZWNJ: می‌خواهم. Family emoji: 👨‍👩‍👧.
+
+Markdown specials: \*stars* \_under_ \[bracket] \`tick` #hash 1. dotted | pipe.
+
+4. ## Links and anchors
+
+External link to [example](https://example.com/page).
+
+Relative link to [a sibling file](../../tests/fixture-src/sibling.odt).
+
+<a id="plainmark"></a>This plain paragraph carries a bookmark.
+
+Jump to [the bookmarked paragraph](#plainmark).
+
+5. ## Objects
+
+Inline image: done.
+
+Text box: after the box.
+
+Inside the text box.
+
+Shape1
+
+6. ## Quote and code
+
+Value below one millionth: 0.0000004 should survive.
+
+<a id="sdfootnote1sym"></a>[1](#sdfootnote1anc)Footnote after an astral character.
+
+<a id="sdendnote1sym"></a>[i](#sdendnote1anc)Endnote body text.
