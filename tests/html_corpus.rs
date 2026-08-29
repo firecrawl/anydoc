@@ -1,9 +1,10 @@
-mod common;
-
 use anydoc::{Format, to_markdown, to_markdown_bytes};
-use common::fixture_root;
 use std::fs;
 use std::path::PathBuf;
+
+fn fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures")
+}
 
 fn html_fixture(name: &str) -> PathBuf {
     fixture_root().join("html").join(name)

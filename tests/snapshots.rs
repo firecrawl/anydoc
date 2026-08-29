@@ -9,22 +9,9 @@
 
 mod common;
 
-use common::fixture_root;
+use common::{fixture_root, walk};
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
-
-/// Recursively collect every file under `dir`, sorted for determinism.
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            walk(&path, out);
-        } else {
-            out.push(path);
-        }
-    }
-}
+use std::path::Path;
 
 /// Convert one file, capturing panics so a bad parser records a baseline
 /// instead of aborting the whole harness.
