@@ -26,6 +26,12 @@ fn html_prefix_wins_over_embedded_pdf_marker() {
 }
 
 #[test]
+fn pdf_header_before_html_marker_remains_pdf() {
+    let bytes = b"  %PDF-1.7\n<html><body>not an HTML root</body></html>";
+    assert_eq!(Format::from_bytes(bytes), Some(Format::Pdf));
+}
+
+#[test]
 fn utf16_html_is_detected_from_content() {
     let source = "<html><body>hello</body></html>";
 
@@ -243,6 +249,19 @@ fn successive_headings_are_implicitly_closed_before_preflight_depth_counting() {
 
     let markdown = to_markdown_bytes(html.as_bytes(), Some(Format::Html)).unwrap();
     assert!(markdown.contains("# heading 299"));
+}
+
+#[test]
+fn alternating_headings_are_implicitly_closed_before_preflight_depth_counting() {
+    const HEADINGS: [&str; 6] = ["h1", "h2", "h3", "h4", "h5", "h6"];
+    let mut html = String::from("<!doctype html>");
+    for i in 0..300 {
+        let heading = HEADINGS[i % HEADINGS.len()];
+        html.push_str(&format!("<{heading}>heading {i}"));
+    }
+
+    let markdown = to_markdown_bytes(html.as_bytes(), Some(Format::Html)).unwrap();
+    assert!(markdown.contains("heading 299"));
 }
 
 #[test]
