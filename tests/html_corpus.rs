@@ -79,7 +79,11 @@ fn libreoffice_docx_numbering_preserves_list_content_and_emphasis() {
             "Interruption paragraph.",
             "One-four continues the count",
             "Ten-start via override",
-            "Bold here, and style-false keeps it bold",
+            "pStyle-bound level one",
+            "pStyle-bound level two",
+            "pStyle-bound level one again",
+            "Bold here,",
+            "style-false keeps it bold",
             "direct on makes this italic",
         ],
     );
