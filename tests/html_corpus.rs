@@ -30,10 +30,7 @@ fn controlled_document_preserves_rich_text_links_and_unicode() {
 fn controlled_nested_lists_preserve_numbering_and_structure() {
     let bytes = fs::read(html_fixture("controlled-lists.html")).unwrap();
     let markdown = to_markdown_bytes(&bytes, Some(Format::Html)).unwrap();
-    assert_eq!(
-        markdown,
-        "## Lists\n\n3. Third\n\n4. Fourth\n\n   - Nested A\n   - Nested B\n"
-    );
+    assert_eq!(markdown, "## Lists\n\n3. Third\n\n4. Fourth\n\n   - Nested A\n   - Nested B\n");
 }
 
 #[test]
@@ -68,8 +65,7 @@ fn libreoffice_docx_text_preserves_core_document_semantics() {
 
 #[test]
 fn libreoffice_docx_numbering_preserves_list_content_and_emphasis() {
-    let source =
-        to_markdown(fixture_root().join("docx").join("handmade-numbering.docx")).unwrap();
+    let source = to_markdown(fixture_root().join("docx").join("handmade-numbering.docx")).unwrap();
     let html = to_markdown(html_fixture("libreoffice-docx-numbering.html")).unwrap();
 
     assert_both_contain(

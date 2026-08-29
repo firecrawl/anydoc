@@ -559,8 +559,7 @@ impl Builder<'_> {
     ) -> Result<Vec<Block>, ConvertError> {
         let ordered = elem.local == "ol";
         let children: Vec<&Element> = elem.child_elems().collect();
-        let items: Vec<&Element> =
-            children.iter().copied().filter(|e| e.local == "li").collect();
+        let items: Vec<&Element> = children.iter().copied().filter(|e| e.local == "li").collect();
 
         if !ordered {
             let mut out = Vec::new();
