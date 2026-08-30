@@ -167,6 +167,7 @@ Only documents that need OCR leave the machine, and the whole document goes, sin
 | Rich Text Format | `.rtf`                                                     |
 | EPUB             | `.epub`                                                    |
 | HTML             | `.html`, `.htm`                                             |
+| MHTML            | `.mhtml`, `.mht`                                           |
 | CSV              | `.csv`                                                     |
 | PDF              | `.pdf`                                                     |
 

@@ -48,6 +48,9 @@ pub enum Format {
     Epub,
     /// Standalone HTML5 (`.html`, `.htm`). JavaScript is not executed.
     Html,
+    /// MIME HTML aggregate (`.mhtml`, `.mht`). Resources are resolved only
+    /// from MIME parts embedded in the input; no network requests are made.
+    Mhtml,
     /// Excel workbooks: `.xlsx`, `.xlsm`, binary `.xlsb`, and legacy
     /// OLE-based `.xls`.
     Excel,
@@ -63,11 +66,15 @@ pub enum Format {
 impl Format {
     /// Detect the format from the content itself: the signature and identity
     /// each container specification designates (PDF header, RTF open group,
-    /// OLE stream names, ZIP package mimetype/content types). Plain-text
-    /// formats (CSV) carry no signature and return `None`; so does anything
-    /// unrecognized.
+    /// MIME `multipart/related` HTML aggregate, OLE stream names, ZIP package
+    /// mimetype/content types). Plain-text formats (CSV) carry no signature
+    /// and return `None`; so does anything unrecognized.
     pub fn from_bytes(bytes: &[u8]) -> Option<Format> {
-        formats::detect::from_bytes(bytes)
+        if formats::mhtml::looks_like_mhtml(bytes) {
+            Some(Format::Mhtml)
+        } else {
+            formats::detect::from_bytes(bytes)
+        }
     }
 
     /// The format a bare extension names (no leading dot), matched
@@ -83,6 +90,7 @@ impl Format {
             "rtf" => Format::Rtf,
             "epub" => Format::Epub,
             "html" | "htm" => Format::Html,
+            "mhtml" | "mht" => Format::Mhtml,
             "xlsx" | "xlsm" | "xlsb" | "xls" => Format::Excel,
             "ods" => Format::Ods,
             "odp" => Format::Odp,

@@ -29,6 +29,7 @@ pub enum Format {
     Rtf = "rtf",
     Epub = "epub",
     Html = "html",
+    Mhtml = "mhtml",
     Xlsx = "xlsx",
     Ods = "ods",
     Odp = "odp",
@@ -47,6 +48,7 @@ impl From<Format> for anydoc::Format {
             Format::Rtf => anydoc::Format::Rtf,
             Format::Epub => anydoc::Format::Epub,
             Format::Html => anydoc::Format::Html,
+            Format::Mhtml => anydoc::Format::Mhtml,
             Format::Xlsx => anydoc::Format::Excel,
             Format::Ods => anydoc::Format::Ods,
             Format::Odp => anydoc::Format::Odp,
@@ -68,6 +70,7 @@ impl From<anydoc::Format> for Format {
             anydoc::Format::Rtf => Format::Rtf,
             anydoc::Format::Epub => Format::Epub,
             anydoc::Format::Html => Format::Html,
+            anydoc::Format::Mhtml => Format::Mhtml,
             anydoc::Format::Excel => Format::Xlsx,
             anydoc::Format::Ods => Format::Ods,
             anydoc::Format::Odp => Format::Odp,
@@ -77,9 +80,10 @@ impl From<anydoc::Format> for Format {
 }
 
 /// Detect the format from the content itself: the signature and identity each
-/// container specification designates (PDF header, RTF open group, OLE stream
-/// names, ZIP package mimetype/content types). Plain-text formats (CSV) carry
-/// no signature and return `undefined`; so does anything unrecognized.
+/// container specification designates (PDF header, RTF open group, MIME HTML
+/// aggregate, OLE stream names, ZIP package mimetype/content types).
+/// Plain-text formats (CSV) carry no signature and return `undefined`; so
+/// does anything unrecognized.
 #[wasm_bindgen(js_name = formatFromBytes)]
 pub fn format_from_bytes(bytes: &[u8]) -> Option<Format> {
     anydoc::Format::from_bytes(bytes).map(Format::from)

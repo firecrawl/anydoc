@@ -2,7 +2,7 @@
 //! semantic HTML -> document-model frontend used by EPUB.
 
 use crate::error::ConvertError;
-use crate::model::{AnchorId, Document, ImageSource, LinkTarget};
+use crate::model::{AnchorId, Asset, Document, ImageSource, LinkTarget};
 use crate::package::limits;
 use crate::package::xml::{Attr, Element, Node};
 use crate::shared::html::{HtmlCtx, Stylesheet};
@@ -36,14 +36,29 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     }
 
     let text = decode_html(bytes);
-    preflight_html_complexity(&text)?;
+    parse_text_with_context(&text, None, &StandaloneCtx, Vec::new())
+}
 
-    let parsed = Html::parse_document(&text);
+pub(crate) fn parse_text_with_context(
+    text: &str,
+    ordered_stylesheets: Option<&[String]>,
+    ctx: &dyn HtmlCtx,
+    assets: Vec<Asset>,
+) -> Result<Document, ConvertError> {
+    preflight_html_complexity(text)?;
+
+    let parsed = Html::parse_document(text);
     let root = parsed.root_element();
 
     let mut css = Stylesheet::default();
-    for style in root.descendent_elements().filter(|e| e.value().name() == "style") {
-        css.add(&style.text().collect::<String>());
+    if let Some(stylesheets) = ordered_stylesheets {
+        for stylesheet in stylesheets {
+            css.add(stylesheet);
+        }
+    } else {
+        for style in root.descendent_elements().filter(|e| e.value().name() == "style") {
+            css.add(&style.text().collect::<String>());
+        }
     }
 
     let body = root
@@ -53,12 +68,16 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
 
     let mut node_count = 0usize;
     let body = adapt_element(body, 1, &mut node_count)?;
-    let blocks = crate::shared::html::to_blocks(&body, &css, &StandaloneCtx)?;
+    let blocks = crate::shared::html::to_blocks(&body, &css, ctx)?;
 
-    Ok(Document { blocks, ..Document::default() })
+    Ok(Document { assets, blocks, ..Document::default() })
 }
 
-fn decode_html(bytes: &[u8]) -> String {
+pub(crate) fn decode_html(bytes: &[u8]) -> String {
+    decode_html_with_charset(bytes, None)
+}
+
+pub(crate) fn decode_html_with_charset(bytes: &[u8], declared_charset: Option<&str>) -> String {
     if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         return String::from_utf8_lossy(rest).into_owned();
     }
@@ -67,6 +86,11 @@ fn decode_html(bytes: &[u8]) -> String {
     }
     if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
         return UTF_16BE.decode(rest).0.into_owned();
+    }
+    if let Some(encoding) =
+        declared_charset.and_then(|label| Encoding::for_label(label.trim().as_bytes()))
+    {
+        return encoding.decode(bytes).0.into_owned();
     }
     if let Some(encoding) = sniff_meta_charset(bytes) {
         return encoding.decode(bytes).0.into_owned();
@@ -336,7 +360,7 @@ fn is_void_html_element(name: &str) -> bool {
     )
 }
 
-fn preflight_html_complexity(text: &str) -> Result<(), ConvertError> {
+pub(crate) fn preflight_html_complexity(text: &str) -> Result<(), ConvertError> {
     const CHUNK_BYTES: usize = 64 * 1024;
     let tokenizer = Tokenizer::new(HtmlComplexitySink::default(), Default::default());
     let input = BufferQueue::default();
