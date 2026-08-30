@@ -46,10 +46,15 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         css.add(&style.text().collect::<String>());
     }
 
-    let body = root
-        .descendent_elements()
-        .find(|e| e.value().name() == "body")
-        .ok_or_else(|| ConvertError::malformed("HTML parser produced no body element"))?;
+    let body = match root.descendent_elements().find(|e| e.value().name() == "body") {
+        Some(body) => body,
+        None if root.descendent_elements().any(|e| e.value().name() == "frameset") => {
+            return Ok(Document::default());
+        }
+        None => {
+            return Err(ConvertError::malformed("HTML parser produced no body element"));
+        }
+    };
 
     let mut node_count = 0usize;
     let body = adapt_element(body, 1, &mut node_count)?;
@@ -466,8 +471,7 @@ impl HtmlCtx for StandaloneCtx {
         if src.is_empty() {
             return Ok(None);
         }
-        Ok((is_absolute_uri(src) || src.starts_with("//"))
-            .then(|| ImageSource::External(src.to_owned())))
+        Ok(Some(ImageSource::External(src.to_owned())))
     }
 
     fn anchor_id(&self, raw: &str) -> AnchorId {
