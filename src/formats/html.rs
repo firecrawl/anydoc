@@ -212,6 +212,12 @@ impl TokenSink for HtmlComplexitySink {
 }
 
 fn close_implied_before_start(open: &mut Vec<LocalName>, name: &str) {
+    if name == "a"
+        && let Some(position) = open.iter().rposition(|candidate| candidate.as_ref() == "a")
+    {
+        open.remove(position);
+    }
+
     if is_heading_element(name)
         && open.last().is_some_and(|candidate| is_heading_element(candidate.as_ref()))
     {

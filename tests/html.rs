@@ -300,3 +300,27 @@ fn nested_list_wrappers_preserve_structural_children() {
     assert!(markdown.contains("Nested heading"), "{markdown:?}");
     assert!(markdown.contains("| A |"), "{markdown:?}");
 }
+
+#[test]
+fn repeated_unclosed_anchors_do_not_trigger_depth_limit() {
+    let mut html = String::from("<!doctype html>");
+    for index in 0..300 {
+        html.push_str(&format!("<a href=\"#{index}\">link"));
+    }
+    let result = to_markdown_bytes(html.as_bytes(), Some(Format::Html));
+    assert!(
+        !matches!(result, Err(ConvertError::ResourceLimit { limit: "max_xml_depth", .. })),
+        "HTML5 repairs repeated anchors; preflight must not reject them as excessive depth"
+    );
+}
+
+#[test]
+fn intervening_blocks_between_unclosed_anchors_still_hit_preflight_depth_limit() {
+    let mut html = String::from("<!doctype html>");
+    for index in 0..300 {
+        html.push_str(&format!("<a href=\"#{index}\"><div>"));
+    }
+
+    let error = to_markdown_bytes(html.as_bytes(), Some(Format::Html)).unwrap_err();
+    assert_preflight_depth_limit(error);
+}
