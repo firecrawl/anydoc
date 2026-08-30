@@ -6,6 +6,7 @@ mod doc;
 mod docx;
 mod epub;
 mod html;
+pub(crate) mod mhtml;
 mod odf;
 pub mod pdf;
 mod ppt;
@@ -26,6 +27,7 @@ pub fn parse(bytes: &[u8], format: Format) -> Result<Document, ConvertError> {
         Format::Pptx => pptx::parse(bytes),
         Format::Epub => epub::parse(bytes),
         Format::Html => html::parse(bytes),
+        Format::Mhtml => mhtml::parse(bytes),
         Format::Rtf => rtf::parse(bytes),
         // RTF files wearing a .doc extension are common in the wild.
         Format::Doc if bytes.starts_with(b"{\\rtf") => rtf::parse(bytes),

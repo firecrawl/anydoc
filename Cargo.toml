@@ -28,6 +28,7 @@ flate2 = "1"
 encoding_rs = "0.8.35"
 html5ever = "0.39.0"
 log = "0.4"
+mail-parser = { version = "0.11.8", features = ["full_encoding"] }
 pdf-inspector = "1.14.2"
 quick-xml = "0.41.0"
 scraper = { version = "0.27.0", default-features = false }
