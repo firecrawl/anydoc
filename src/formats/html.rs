@@ -48,6 +48,15 @@ pub(crate) fn parse_text_with_context(
     preflight_html_complexity(text)?;
 
     let parsed = Html::parse_document(text);
+    document_from_parsed_html(&parsed, ordered_stylesheets, ctx, assets)
+}
+
+pub(crate) fn document_from_parsed_html(
+    parsed: &Html,
+    ordered_stylesheets: Option<&[String]>,
+    ctx: &dyn HtmlCtx,
+    assets: Vec<Asset>,
+) -> Result<Document, ConvertError> {
     let root = parsed.root_element();
 
     let mut css = Stylesheet::default();
@@ -61,10 +70,15 @@ pub(crate) fn parse_text_with_context(
         }
     }
 
-    let body = root
-        .descendent_elements()
-        .find(|e| e.value().name() == "body")
-        .ok_or_else(|| ConvertError::malformed("HTML parser produced no body element"))?;
+    let body = match root.descendent_elements().find(|e| e.value().name() == "body") {
+        Some(body) => body,
+        None if root.descendent_elements().any(|e| e.value().name() == "frameset") => {
+            return Ok(Document::default());
+        }
+        None => {
+            return Err(ConvertError::malformed("HTML parser produced no body element"));
+        }
+    };
 
     let mut node_count = 0usize;
     let body = adapt_element(body, 1, &mut node_count)?;
@@ -490,8 +504,7 @@ impl HtmlCtx for StandaloneCtx {
         if src.is_empty() {
             return Ok(None);
         }
-        Ok((is_absolute_uri(src) || src.starts_with("//"))
-            .then(|| ImageSource::External(src.to_owned())))
+        Ok(Some(ImageSource::External(src.to_owned())))
     }
 
     fn anchor_id(&self, raw: &str) -> AnchorId {

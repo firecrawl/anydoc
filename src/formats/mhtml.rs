@@ -70,6 +70,8 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         });
     }
 
+    preflight_base64_decoder_allocations(bytes)?;
+
     let message = MessageParser::new()
         .with_mime_headers()
         .parse(bytes)
@@ -98,16 +100,6 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     .ok_or_else(|| ConvertError::malformed("MHTML contains no HTML root part"))?;
 
     let html_bytes = transfer_decoded_part_bytes(&message, html_part, "HTML root")?;
-    if html_bytes.len() as u64 > limits::MAX_ENTRY_BYTES {
-        return Err(ConvertError::ResourceLimit {
-            limit: "max_entry_bytes",
-            detail: format!(
-                "MHTML HTML root is {} bytes; maximum is {}",
-                html_bytes.len(),
-                limits::MAX_ENTRY_BYTES
-            ),
-        });
-    }
 
     let declared_charset =
         html_part.content_type().and_then(|content_type| content_type.attribute("charset"));
@@ -127,7 +119,160 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let (assets, image_assets) = collect_image_assets(&message.parts, resource_base.as_deref())?;
     let ctx = MhtmlCtx { image_assets, resource_base };
 
-    super::html::parse_text_with_context(&html, Some(&stylesheets), &ctx, assets)
+    super::html::document_from_parsed_html(&parsed_html, Some(&stylesheets), &ctx, assets)
+}
+
+fn preflight_base64_decoder_allocations(bytes: &[u8]) -> Result<(), ConvertError> {
+    preflight_base64_decoder_allocations_with_limit(bytes, limits::MAX_ENTRY_BYTES)
+}
+
+fn preflight_base64_decoder_allocations_with_limit(
+    bytes: &[u8],
+    max_entry_bytes: u64,
+) -> Result<(), ConvertError> {
+    let Some((_, body_start)) = mime_header_body_start(bytes, 0, bytes.len()) else {
+        return Ok(());
+    };
+    let headers = &bytes[..body_start];
+
+    if headers_use_base64(headers) {
+        enforce_base64_parser_reserve(bytes.len().saturating_sub(body_start), max_entry_bytes)?;
+    }
+
+    let Some(boundary) = mime_boundary_from_headers(headers) else {
+        return Ok(());
+    };
+    preflight_multipart_base64(bytes, body_start, bytes.len(), &boundary, max_entry_bytes, 1)
+}
+
+fn preflight_multipart_base64(
+    bytes: &[u8],
+    mut offset: usize,
+    end: usize,
+    boundary: &[u8],
+    max_entry_bytes: u64,
+    depth: usize,
+) -> Result<(), ConvertError> {
+    let mut marker = Vec::with_capacity(boundary.len() + 2);
+    marker.extend_from_slice(b"--");
+    marker.extend_from_slice(boundary);
+
+    while offset < end {
+        let Some(marker_offset) = find_bytes(&bytes[offset..end], &marker) else {
+            break;
+        };
+        let marker_start = offset + marker_offset;
+        let marker_end = marker_start + marker.len();
+        if bytes.get(marker_end..marker_end + 2) == Some(b"--") {
+            break;
+        }
+
+        let headers_start = skip_boundary_line(bytes, marker_end, end);
+        let Some((_, body_start)) = mime_header_body_start(bytes, headers_start, end) else {
+            break;
+        };
+        let headers = &bytes[headers_start..body_start];
+
+        if headers_use_base64(headers) {
+            // mail-parser 0.11.x reserves from MessageStream::remaining() before it scans
+            // for the active MIME boundary, so the safe upper bound is deliberately the
+            // entire remaining message rather than only this part's encoded body.
+            enforce_base64_parser_reserve(bytes.len().saturating_sub(body_start), max_entry_bytes)?;
+        }
+
+        let next_parent =
+            find_bytes(&bytes[body_start..end], &marker).map_or(end, |next| body_start + next);
+        if let Some(nested_boundary) = mime_boundary_from_headers(headers) {
+            let nested_depth = depth.saturating_add(1);
+            if nested_depth > limits::MAX_MIME_DEPTH {
+                return Err(ConvertError::ResourceLimit {
+                    limit: "max_mime_depth",
+                    detail: format!(
+                        "MHTML MIME nesting depth {nested_depth} exceeds maximum of {}",
+                        limits::MAX_MIME_DEPTH
+                    ),
+                });
+            }
+            preflight_multipart_base64(
+                bytes,
+                body_start,
+                next_parent,
+                &nested_boundary,
+                max_entry_bytes,
+                nested_depth,
+            )?;
+        }
+        offset = next_parent;
+    }
+
+    Ok(())
+}
+
+fn enforce_base64_parser_reserve(
+    remaining: usize,
+    max_entry_bytes: u64,
+) -> Result<(), ConvertError> {
+    let reserve = (remaining as u64 / 4).saturating_mul(3);
+    if reserve > max_entry_bytes {
+        return Err(ConvertError::ResourceLimit {
+            limit: "max_entry_bytes",
+            detail: format!(
+                "MHTML base64 decoder may reserve {reserve} bytes before locating the MIME boundary; maximum is {max_entry_bytes}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn mime_header_body_start(bytes: &[u8], start: usize, end: usize) -> Option<(usize, usize)> {
+    let slice = bytes.get(start..end)?;
+    let crlf = slice.windows(4).position(|window| window == b"\r\n\r\n");
+    let lf = slice.windows(2).position(|window| window == b"\n\n");
+    match (crlf, lf) {
+        (Some(a), Some(b)) if a <= b => Some((start + a, start + a + 4)),
+        (Some(_a), Some(b)) => Some((start + b, start + b + 2)),
+        (Some(a), None) => Some((start + a, start + a + 4)),
+        (None, Some(b)) => Some((start + b, start + b + 2)),
+        (None, None) => None,
+    }
+}
+
+fn mime_boundary_from_headers(headers: &[u8]) -> Option<Vec<u8>> {
+    MessageParser::new()
+        .with_mime_headers()
+        .parse_headers(headers)?
+        .content_type()?
+        .attribute("boundary")
+        .map(|boundary| boundary.as_bytes().to_vec())
+}
+
+fn headers_use_base64(headers: &[u8]) -> bool {
+    unfold_headers(headers).lines().any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("content-transfer-encoding")
+                && value.trim().eq_ignore_ascii_case("base64")
+        })
+    })
+}
+
+fn skip_boundary_line(bytes: &[u8], mut offset: usize, end: usize) -> usize {
+    while offset < end {
+        match bytes[offset] {
+            b'\r' | b' ' | b'\t' => offset += 1,
+            b'\n' => {
+                offset += 1;
+                break;
+            }
+            _ => break,
+        }
+    }
+    offset
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    (!needle.is_empty() && needle.len() <= haystack.len())
+        .then(|| haystack.windows(needle.len()).position(|window| window == needle))
+        .flatten()
 }
 
 fn transfer_decoded_part_bytes(
@@ -140,15 +285,54 @@ fn transfer_decoded_part_bytes(
         .get(part.offset_body as usize..part.offset_end as usize)
         .ok_or_else(|| ConvertError::malformed(format!("MHTML {label} byte range is invalid")))?;
 
-    match part.encoding {
-        Encoding::None => Ok(raw.to_vec()),
-        Encoding::QuotedPrintable => quoted_printable_decode(raw).ok_or_else(|| {
-            ConvertError::malformed(format!("MHTML {label} quoted-printable body is invalid"))
-        }),
-        Encoding::Base64 => base64_decode(raw).ok_or_else(|| {
-            ConvertError::malformed(format!("MHTML {label} base64 body is invalid"))
-        }),
+    let decoded = match part.encoding {
+        Encoding::None => {
+            enforce_part_size(raw.len(), label, "body")?;
+            raw.to_vec()
+        }
+        Encoding::QuotedPrintable => {
+            enforce_part_size(raw.len(), label, "quoted-printable encoded body")?;
+            quoted_printable_decode(raw).ok_or_else(|| {
+                ConvertError::malformed(format!("MHTML {label} quoted-printable body is invalid"))
+            })?
+        }
+        Encoding::Base64 => {
+            let upper_bound = base64_decoded_upper_bound(raw);
+            if upper_bound > limits::MAX_ENTRY_BYTES {
+                return Err(ConvertError::ResourceLimit {
+                    limit: "max_entry_bytes",
+                    detail: format!(
+                        "MHTML {label} base64 body can decode to at most {upper_bound} bytes; maximum is {}",
+                        limits::MAX_ENTRY_BYTES
+                    ),
+                });
+            }
+            base64_decode(raw).ok_or_else(|| {
+                ConvertError::malformed(format!("MHTML {label} base64 body is invalid"))
+            })?
+        }
+    };
+
+    enforce_part_size(decoded.len(), label, "decoded body")?;
+    Ok(decoded)
+}
+
+fn enforce_part_size(size: usize, label: &str, kind: &str) -> Result<(), ConvertError> {
+    if size as u64 > limits::MAX_ENTRY_BYTES {
+        return Err(ConvertError::ResourceLimit {
+            limit: "max_entry_bytes",
+            detail: format!(
+                "MHTML {label} {kind} is {size} bytes; maximum is {}",
+                limits::MAX_ENTRY_BYTES
+            ),
+        });
     }
+    Ok(())
+}
+
+fn base64_decoded_upper_bound(raw: &[u8]) -> u64 {
+    let symbols = raw.iter().filter(|byte| !byte.is_ascii_whitespace()).count() as u64;
+    symbols.saturating_add(3).saturating_div(4).saturating_mul(3)
 }
 
 fn html_resource_base(parsed: &Html, root_location: Option<&str>) -> Option<String> {
@@ -435,5 +619,40 @@ impl HtmlCtx for MhtmlCtx {
 
     fn anchor_id(&self, raw: &str) -> AnchorId {
         raw.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_decoder_preflight_rejects_large_reserve_before_mime_parse() {
+        let input = b"MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/html\r\nContent-Transfer-Encoding: base64\r\n\r\nQQ==\r\n--b\r\nContent-Type: text/plain\r\n\r\n0123456789abcdef\r\n--b--\r\n";
+        assert!(matches!(
+            preflight_base64_decoder_allocations_with_limit(input, 8),
+            Err(ConvertError::ResourceLimit { limit: "max_entry_bytes", .. })
+        ));
+    }
+
+    #[test]
+    fn base64_decoder_preflight_allows_small_remaining_input() {
+        let input = b"Content-Transfer-Encoding: base64\r\n\r\nQQ==\r\n";
+        assert!(preflight_base64_decoder_allocations_with_limit(input, 64).is_ok());
+    }
+
+    #[test]
+    fn base64_decoder_preflight_matches_embedded_boundary_semantics() {
+        let input = b"MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"b\"\r\n\r\npreamblexx--b\r\nContent-Type: text/html\r\nContent-Transfer-Encoding: base64\r\n\r\nQQ==\r\n0123456789abcdef\r\n--b--\r\n";
+        assert!(matches!(
+            preflight_base64_decoder_allocations_with_limit(input, 8),
+            Err(ConvertError::ResourceLimit { limit: "max_entry_bytes", .. })
+        ));
+    }
+
+    #[test]
+    fn base64_decoder_preflight_ignores_non_boundary_dashes_in_body_text() {
+        let input = b"MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"real\"\r\n\r\n--real\r\nContent-Type: text/plain\r\n\r\nbody --not-real Content-Transfer-Encoding: base64\r\n\r\n0123456789abcdef\r\n--real--\r\n";
+        assert!(preflight_base64_decoder_allocations_with_limit(input, 8).is_ok());
     }
 }
