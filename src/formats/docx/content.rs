@@ -66,7 +66,7 @@ impl<'a, 'b> Ctx<'a, 'b> {
     /// part. Failures degrade (log + `None`) per the unified policy;
     /// resource-limit errors always propagate.
     fn rel_part(&self, rel_id: &str) -> Result<Option<RelTarget>, ConvertError> {
-        rel_target_bytes(self.pkg, &self.rels, &self.base_part, rel_id)
+        rel_target_bytes(&mut self.pkg.borrow_mut(), &self.rels, &self.base_part, rel_id)
     }
 
     fn add_asset(
@@ -618,13 +618,17 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
         if let Some(rel_id) = image_rel {
             // External-mode targets (`r:link`) become external image
             // sources; embedded targets are retained as assets.
-            let source = crate::shared::assets::rel_image_source(
-                self.ctx.pkg,
-                &self.ctx.rels,
-                &self.ctx.base_part,
-                self.ctx.assets,
-                rel_id,
-            )?;
+            let source = {
+                let mut pkg = self.ctx.pkg.borrow_mut();
+                let mut assets = self.ctx.assets.borrow_mut();
+                crate::shared::assets::rel_image_source(
+                    &mut pkg,
+                    &self.ctx.rels,
+                    &self.ctx.base_part,
+                    &mut assets,
+                    rel_id,
+                )?
+            };
             match source {
                 Some(source) => self.push(Inline::Image { alt: descr, source }),
                 None => {

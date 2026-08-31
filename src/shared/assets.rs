@@ -5,7 +5,6 @@ use crate::model::{Asset, AssetId, ImageSource};
 use crate::package::Package;
 use crate::package::limits;
 use crate::package::relationships::{Relationships, TargetMode, rel_target_bytes};
-use std::cell::RefCell;
 
 #[derive(Default)]
 pub struct AssetSink {
@@ -52,10 +51,10 @@ impl AssetSink {
 /// package and are retained as assets. Failures degrade to `None` per the
 /// unified policy; fatal errors propagate.
 pub fn rel_image_source(
-    pkg: &RefCell<Package>,
+    pkg: &mut Package,
     rels: &Relationships,
     base_part: &str,
-    assets: &RefCell<AssetSink>,
+    assets: &mut AssetSink,
     rel_id: &str,
 ) -> Result<Option<ImageSource>, ConvertError> {
     let Some(rel) = rels.get(rel_id) else {
@@ -67,7 +66,7 @@ pub fn rel_image_source(
     match rel_target_bytes(pkg, rels, base_part, rel_id)? {
         Some((part, bytes)) => {
             let media = media_type_for(&part);
-            let id = assets.borrow_mut().add(media, part, &bytes)?;
+            let id = assets.add(media, part, &bytes)?;
             Ok(Some(ImageSource::Asset(id)))
         }
         None => Ok(None),
