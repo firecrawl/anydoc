@@ -5,6 +5,30 @@ use serde::Serialize;
 
 use anydoc::model;
 
+/// Markdown from a conversion, and what the conversion left out.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Conversion {
+    /// The Markdown. Content only: conversion never writes notes about
+    /// itself into the output.
+    pub markdown: String,
+    /// 1-indexed PDF pages left unconverted because they need OCR. Only
+    /// `ocr: 'skip'` can leave any.
+    pub pages_needing_ocr: Vec<u32>,
+    /// Pages in the document, or 0 for the formats that do not paginate.
+    pub page_count: u32,
+}
+
+impl From<anydoc::Conversion> for Conversion {
+    fn from(converted: anydoc::Conversion) -> Self {
+        Conversion {
+            markdown: converted.markdown,
+            pages_needing_ocr: converted.pages_needing_ocr,
+            page_count: converted.page_count,
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct Document {
     pub blocks: Vec<Block>,

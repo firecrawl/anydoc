@@ -7,13 +7,14 @@ import urllib.request
 import uuid
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Literal
+from typing import Literal, overload
 
 from anydoc._anydoc import (
     Asset,
     Block,
     Cell,
     CellSlot,
+    Conversion,
     ConvertError,
     Document,
     EncryptedError,
@@ -34,6 +35,8 @@ from anydoc._anydoc import (
     format_from_extension,
     format_from_path,
     to_document,
+    to_markdown_bytes_with,
+    to_markdown_with,
 )
 from anydoc._anydoc import to_markdown as _to_markdown
 from anydoc._anydoc import to_markdown_bytes as _to_markdown_bytes
@@ -45,15 +48,37 @@ Format = Literal[
 variants that share a parser (`.docm`, `.xlsm`, `.ppsx`, ...) map onto these
 via `format_from_bytes` or `format_from_extension`."""
 
-Ocr = Literal["reject", "hosted"]
+Ocr = Literal["reject", "hosted", "skip"]
 """What happens to a PDF whose pages need OCR. `reject` (the default) raises
 `NeedsOcrError` naming the pages. `hosted` sends the whole document to
 Firecrawl Parse instead, keyless unless a key is given. Documents anydoc
-converts itself never leave the machine."""
+converts itself never leave the machine. `skip` converts the pages that carry
+text locally and returns a `Conversion` naming the pages it left out; a
+document where no page yielded text still raises `NeedsOcrError`."""
 
 
 class HostedError(ConvertError):
     """`ocr="hosted"` could not get the document through Firecrawl Parse."""
+
+
+@overload
+def to_markdown(
+    path: "str | os.PathLike[str]",
+    *,
+    ocr: 'Literal["skip"]',
+    api_key: "str | None" = None,
+    api_url: "str | None" = None,
+) -> Conversion: ...
+
+
+@overload
+def to_markdown(
+    path: "str | os.PathLike[str]",
+    *,
+    ocr: 'Literal["reject", "hosted"]' = "reject",
+    api_key: "str | None" = None,
+    api_url: "str | None" = None,
+) -> str: ...
 
 
 def to_markdown(
@@ -62,14 +87,19 @@ def to_markdown(
     ocr: Ocr = "reject",
     api_key: "str | None" = None,
     api_url: "str | None" = None,
-) -> str:
+) -> "str | Conversion":
     """Convert a document file to Markdown. The format is detected from the
     file content; the extension is the fallback for signature-less formats
     (CSV) and unrecognizable containers.
 
+    `ocr="skip"` returns a `Conversion` rather than a string, naming the pages
+    it left out on `pages_needing_ocr`.
+
     For `ocr="hosted"`, `api_key` falls back to `FIRECRAWL_API_KEY`, then
     keyless; `api_url` to `FIRECRAWL_API_URL`, then
     `https://api.firecrawl.dev`."""
+    if ocr == "skip":
+        return to_markdown_with(path, "skip")
     try:
         return _to_markdown(path)
     except NeedsOcrError:
@@ -79,6 +109,28 @@ def to_markdown(
     return _parse_hosted(path.read_bytes(), path.name, api_key, api_url)
 
 
+@overload
+def to_markdown_bytes(
+    data: "bytes | bytearray",
+    format: "Format | None" = None,
+    *,
+    ocr: 'Literal["skip"]',
+    api_key: "str | None" = None,
+    api_url: "str | None" = None,
+) -> Conversion: ...
+
+
+@overload
+def to_markdown_bytes(
+    data: "bytes | bytearray",
+    format: "Format | None" = None,
+    *,
+    ocr: 'Literal["reject", "hosted"]' = "reject",
+    api_key: "str | None" = None,
+    api_url: "str | None" = None,
+) -> str: ...
+
+
 def to_markdown_bytes(
     data: "bytes | bytearray",
     format: "Format | None" = None,
@@ -86,11 +138,13 @@ def to_markdown_bytes(
     ocr: Ocr = "reject",
     api_key: "str | None" = None,
     api_url: "str | None" = None,
-) -> str:
+) -> "str | Conversion":
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
     name explicitly. `ocr`, `api_key` and `api_url` are as for
     `to_markdown`."""
+    if ocr == "skip":
+        return to_markdown_bytes_with(data, format, "skip")
     try:
         return _to_markdown_bytes(data, format)
     except NeedsOcrError:
@@ -185,6 +239,7 @@ __all__ = [
     "Block",
     "Cell",
     "CellSlot",
+    "Conversion",
     "ConvertError",
     "Document",
     "EncryptedError",
@@ -210,4 +265,6 @@ __all__ = [
     "to_document",
     "to_markdown",
     "to_markdown_bytes",
+    "to_markdown_bytes_with",
+    "to_markdown_with",
 ]

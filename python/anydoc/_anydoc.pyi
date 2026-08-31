@@ -6,6 +6,7 @@ from typing import Literal, final
 Format = Literal[
     "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "xlsx", "ods", "odp", "csv"
 ]
+Ocr = Literal["reject", "skip"]
 
 class ConvertError(Exception):
     """A complete conversion was impossible. Catch this to handle every kind
@@ -70,6 +71,31 @@ def to_markdown_bytes(data: bytes | bytearray, format: Format | None = None) -> 
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
     name explicitly."""
+
+def to_markdown_with(path: str | os.PathLike[str], ocr: Ocr | None = None) -> Conversion:
+    """`to_markdown` reporting what it left out. `ocr="skip"` converts a PDF
+    whose other pages need OCR instead of raising; without it this is
+    `to_markdown` with the Markdown on `markdown`."""
+
+def to_markdown_bytes_with(
+    data: bytes | bytearray, format: Format | None = None, ocr: Ocr | None = None
+) -> Conversion:
+    """`to_markdown_bytes` reporting what it left out; `ocr` as for
+    `to_markdown_with`."""
+
+@final
+class Conversion:
+    """Markdown from a conversion, and what the conversion left out."""
+
+    markdown: str
+    """The Markdown. Content only: conversion never writes notes about itself
+    into the output."""
+    pages_needing_ocr: list[int]
+    """1-indexed PDF pages left unconverted because they need OCR. Only
+    `ocr="skip"` can leave any. Empty for a document that converted whole, and
+    for every non-PDF format."""
+    page_count: int
+    """Pages in the document, or 0 for the formats that do not paginate."""
 
 def to_document(data: bytes | bytearray, format: Format | None = None) -> Document:
     """Parse an in-memory document into the document model, which also
