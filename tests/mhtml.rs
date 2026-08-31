@@ -647,3 +647,31 @@ Content-Location: https://example.test/site.css#saved
     );
     assert_eq!(to_markdown_bytes(&mhtml, Some(Format::Mhtml)).unwrap(), "**keep me**\n");
 }
+
+#[test]
+fn frameset_root_preserves_collected_assets() {
+    let mhtml = mhtml_fixture(
+        r#"MIME-Version: 1.0
+Snapshot-Content-Location: https://example.test/page
+Content-Type: multipart/related; boundary="b"
+
+--b
+Content-Type: text/html; charset=utf-8
+
+<!doctype html>
+<frameset>
+<frame src="https://example.test/frame.html">
+</frameset>
+--b
+Content-Type: image/png
+Content-Location: https://example.test/logo.png
+
+PNGDATA
+--b--
+"#,
+    );
+    let document = to_document(&mhtml, Some(Format::Mhtml)).unwrap();
+    assert!(document.blocks.is_empty());
+    assert_eq!(document.assets.len(), 1);
+    assert_eq!(document.assets[0].media_type, "image/png");
+}

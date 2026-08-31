@@ -73,7 +73,10 @@ pub(crate) fn document_from_parsed_html(
     let body = match root.descendent_elements().find(|e| e.value().name() == "body") {
         Some(body) => body,
         None if root.descendent_elements().any(|e| e.value().name() == "frameset") => {
-            return Ok(Document::default());
+            // A frameset document has no renderable body. Retain the already
+            // collected (and size-checked) embedded assets instead of
+            // discarding them along with the empty body.
+            return Ok(Document { assets, ..Document::default() });
         }
         None => {
             return Err(ConvertError::malformed("HTML parser produced no body element"));
