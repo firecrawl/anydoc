@@ -1381,6 +1381,44 @@ def tables_docx():
     ])
 
 
+
+# ---------------------------------------------------------------------------
+# Nested tables: a single-cell outer table wrapping a real table (the Word
+# form shape) must unwrap so the inner grid survives; a nested table inside a
+# multi-cell grid stays flattened in its cell.
+
+def nested_docx():
+    def p(text):
+        return f'<w:p><w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>'
+
+    def tc(*content):
+        return '<w:tc><w:tcPr/>' + ''.join(content) + '</w:tc>'
+
+    inner = ('<w:tbl>'
+             '<w:tr>' + tc(p("Metric")) + tc(p("Value")) + '</w:tr>'
+             '<w:tr>' + tc(p("Height")) + tc(p("120")) + '</w:tr>'
+             '<w:tr>' + tc(p("Weight")) + tc(p("34")) + '</w:tr>'
+             '</w:tbl>')
+    wrapper = ('<w:tbl><w:tr>'
+               + tc(p("Section A"), inner, p("End of section"))
+               + '</w:tr></w:tbl>')
+    small = ('<w:tbl><w:tr>' + tc(p("a")) + tc(p("b")) + '</w:tr></w:tbl>')
+    two_cell = ('<w:tbl><w:tr>' + tc(small) + tc(p("right")) + '</w:tr></w:tbl>')
+    document = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                f'<w:document {W}><w:body>'
+                + p("Before") + wrapper + p("Between") + two_cell + p("After")
+                + '</w:body></w:document>')
+    styles = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              f'<w:styles {W}>'
+              '<w:docDefaults><w:rPrDefault><w:rPr/></w:rPrDefault></w:docDefaults></w:styles>')
+    ct = CONTENT_TYPES_BASE.format(extra="")
+    write_zip(OUT / "docx" / "handmade-nested.docx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/document.xml", document),
+        ("word/styles.xml", styles),
+    ])
+
 # ---------------------------------------------------------------------------
 # S12: a valid document referencing one part many times must convert with a
 # single retained asset; the part is cached and the asset deduplicated. (The
@@ -2276,6 +2314,7 @@ def main():
     multimaster_ppt()
     sparsenotes_ppt()
     tables_docx()
+    nested_docx()
     outline_docx()
     blockstyle_docx()
     blockstyle_odt()
