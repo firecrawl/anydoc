@@ -98,6 +98,23 @@ export declare const enum CellSlotKind {
   covered = 'covered'
 }
 
+/** Markdown from a conversion, and what the conversion left out. */
+export interface Conversion {
+  /**
+   * The Markdown. Content only: conversion never writes notes about
+   * itself into the output.
+   */
+  markdown: string
+  /**
+   * 1-indexed PDF pages left unconverted because they need OCR. Only
+   * `ocr: 'skip'` can leave any. Empty for a document that converted
+   * whole, and for every non-PDF format.
+   */
+  pagesNeedingOcr: Array<number>
+  /** Pages in the document, or 0 for the formats that do not paginate. */
+  pageCount: number
+}
+
 export interface Document {
   blocks: Array<Block>
   /**
@@ -257,6 +274,18 @@ export declare const enum NoteKind {
   endnote = 'endnote'
 }
 
+/** What conversion does with PDF pages that need OCR. */
+export declare const enum Ocr {
+  /** Reject with `needsOcr` naming the pages (the default). */
+  reject = 'reject',
+  /**
+   * Convert the pages that carry text and name the rest on
+   * `pagesNeedingOcr`. A document where no page yielded text still
+   * rejects with `needsOcr`.
+   */
+  skip = 'skip'
+}
+
 /** Fully resolved character style. */
 export interface Style {
   bold: boolean
@@ -313,3 +342,16 @@ export declare function toMarkdown(path: string): Promise<string>
  * Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
  */
 export declare function toMarkdownBytes(bytes: Uint8Array, format?: Format | undefined | null): Promise<string>
+
+/**
+ * `toMarkdownBytes` reporting what it left out; `ocr` as for
+ * `toMarkdownWith`.
+ */
+export declare function toMarkdownBytesWith(bytes: Uint8Array, format?: Format | undefined | null, ocr?: Ocr | undefined | null): Promise<Conversion>
+
+/**
+ * `toMarkdown` reporting what it left out. `ocr: 'skip'` converts a PDF
+ * whose other pages need OCR instead of rejecting; without it this is
+ * `toMarkdown` with the Markdown on `markdown`.
+ */
+export declare function toMarkdownWith(path: string, ocr?: Ocr | undefined | null): Promise<Conversion>

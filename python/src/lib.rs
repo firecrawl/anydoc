@@ -92,6 +92,16 @@ fn parse_format(name: &str) -> PyResult<anydoc::Format> {
     })
 }
 
+const OCR_MODES: [(&str, anydoc::Ocr); 2] =
+    [("reject", anydoc::Ocr::Reject), ("skip", anydoc::Ocr::Skip)];
+
+fn parse_ocr(name: &str) -> PyResult<anydoc::Ocr> {
+    OCR_MODES.iter().find(|(n, _)| *n == name).map(|(_, ocr)| *ocr).ok_or_else(|| {
+        let names: Vec<&str> = OCR_MODES.iter().map(|(n, _)| *n).collect();
+        PyValueError::new_err(format!("unknown ocr {name:?}; expected one of {}", names.join(", ")))
+    })
+}
+
 fn format_name(format: anydoc::Format) -> &'static str {
     FORMATS
         .iter()
@@ -177,6 +187,61 @@ fn to_markdown_bytes(py: Python<'_>, data: Vec<u8>, format: Option<&str>) -> PyR
     py.detach(|| anydoc::to_markdown_bytes(&data, format)).map_err(|e| convert_error(py, e))
 }
 
+/// Markdown from a conversion, and what the conversion left out.
+#[pyclass(frozen, get_all, module = "anydoc")]
+pub struct Conversion {
+    /// The Markdown. Content only: conversion never writes notes about
+    /// itself into the output.
+    markdown: String,
+    /// 1-indexed PDF pages left unconverted because they need OCR. Only
+    /// `ocr="skip"` can leave any. Empty for a document that converted
+    /// whole, and for every non-PDF format. list[int]
+    pages_needing_ocr: Vec<u32>,
+    /// Pages in the document, or 0 for the formats that do not paginate.
+    page_count: u32,
+}
+
+impl From<anydoc::Conversion> for Conversion {
+    fn from(converted: anydoc::Conversion) -> Self {
+        Conversion {
+            markdown: converted.markdown,
+            pages_needing_ocr: converted.pages_needing_ocr,
+            page_count: converted.page_count,
+        }
+    }
+}
+
+/// `to_markdown` reporting what it left out. `ocr="skip"` converts a PDF
+/// whose other pages need OCR instead of raising; without it this is
+/// `to_markdown` with the Markdown on `markdown`.
+#[pyfunction]
+#[pyo3(signature = (path, ocr=None))]
+fn to_markdown_with(py: Python<'_>, path: PathBuf, ocr: Option<&str>) -> PyResult<Conversion> {
+    let options =
+        anydoc::Options::default().ocr(ocr.map(parse_ocr).transpose()?.unwrap_or_default());
+    py.detach(|| anydoc::to_markdown_with(&path, options))
+        .map(Into::into)
+        .map_err(|e| convert_error(py, e))
+}
+
+/// `to_markdown_bytes` reporting what it left out; `ocr` as for
+/// `to_markdown_with`.
+#[pyfunction]
+#[pyo3(signature = (data, format=None, ocr=None))]
+fn to_markdown_bytes_with(
+    py: Python<'_>,
+    data: Vec<u8>,
+    format: Option<&str>,
+    ocr: Option<&str>,
+) -> PyResult<Conversion> {
+    let format = format.map(parse_format).transpose()?;
+    let options =
+        anydoc::Options::default().ocr(ocr.map(parse_ocr).transpose()?.unwrap_or_default());
+    py.detach(|| anydoc::to_markdown_bytes_with(&data, format, options))
+        .map(Into::into)
+        .map_err(|e| convert_error(py, e))
+}
+
 /// Parse an in-memory document into the document model, which also carries
 /// the embedded assets. Without a format, it is detected from the content.
 ///
@@ -203,11 +268,14 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(format_from_path, m)?)?;
     m.add_function(wrap_pyfunction!(to_markdown, m)?)?;
     m.add_function(wrap_pyfunction!(to_markdown_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(to_markdown_with, m)?)?;
+    m.add_function(wrap_pyfunction!(to_markdown_bytes_with, m)?)?;
     m.add_function(wrap_pyfunction!(to_document, m)?)?;
     m.add_class::<document::Asset>()?;
     m.add_class::<document::Block>()?;
     m.add_class::<document::Cell>()?;
     m.add_class::<document::CellSlot>()?;
+    m.add_class::<Conversion>()?;
     m.add_class::<document::Document>()?;
     m.add_class::<document::ImageSource>()?;
     m.add_class::<document::Inline>()?;

@@ -73,6 +73,28 @@ impl From<anydoc::Format> for Format {
     }
 }
 
+/// What conversion does with PDF pages that need OCR.
+#[wasm_bindgen]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Ocr {
+    /// Throw `needsOcr` naming the pages (the default).
+    Reject = "reject",
+    /// Convert the pages that carry text and name the rest on
+    /// `pagesNeedingOcr`. A document where no page yielded text still throws
+    /// `needsOcr`.
+    Skip = "skip",
+}
+
+impl From<Ocr> for anydoc::Ocr {
+    fn from(ocr: Ocr) -> Self {
+        match ocr {
+            Ocr::Reject => anydoc::Ocr::Reject,
+            Ocr::Skip => anydoc::Ocr::Skip,
+            Ocr::__Invalid => unreachable!("wasm-bindgen rejects invalid enum strings"),
+        }
+    }
+}
+
 /// Detect the format from the content itself: the signature and identity each
 /// container specification designates (PDF header, RTF open group, OLE stream
 /// names, ZIP package mimetype/content types). Plain-text formats (CSV) carry
@@ -102,6 +124,26 @@ pub fn format_from_path(path: &str) -> Option<Format> {
 #[wasm_bindgen(js_name = toMarkdownBytes)]
 pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String, JsValue> {
     anydoc::to_markdown_bytes(bytes, format.map(anydoc::Format::from)).map_err(convert_error)
+}
+
+/// `toMarkdownBytes` reporting what it left out. `ocr: 'skip'` converts a PDF
+/// whose other pages need OCR instead of throwing, naming them on
+/// `pagesNeedingOcr`; without it this is `toMarkdownBytes` with the Markdown
+/// on `markdown`.
+///
+/// Throws an `Error` carrying a `ConvertErrorCode` on `code`.
+#[wasm_bindgen(js_name = toMarkdownBytesWith, unchecked_return_type = "Conversion")]
+pub fn to_markdown_bytes_with(
+    bytes: &[u8],
+    format: Option<Format>,
+    ocr: Option<Ocr>,
+) -> Result<JsValue, JsValue> {
+    let options = anydoc::Options::default().ocr(ocr.map(anydoc::Ocr::from).unwrap_or_default());
+    let converted =
+        anydoc::to_markdown_bytes_with(bytes, format.map(anydoc::Format::from), options)
+            .map_err(convert_error)?;
+    serde_wasm_bindgen::to_value(&Conversion::from(converted))
+        .map_err(|error| js_sys::Error::new(&error.to_string()).into())
 }
 
 /// Parse an in-memory document into the document model, which also carries

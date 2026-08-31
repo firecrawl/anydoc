@@ -41,6 +41,23 @@ export interface NeedsOcrError extends Error {
   pageCount: number
 }
 
+/** Markdown from a conversion, and what the conversion left out. */
+export interface Conversion {
+  /**
+   * The Markdown. Content only: conversion never writes notes about itself
+   * into the output.
+   */
+  markdown: string
+  /**
+   * 1-indexed PDF pages left unconverted because they need OCR. Only
+   * `ocr: 'skip'` can leave any. Empty for a document that converted whole,
+   * and for every non-PDF format.
+   */
+  pagesNeedingOcr: number[]
+  /** Pages in the document, or 0 for the formats that do not paginate. */
+  pageCount: number
+}
+
 export interface Document {
   blocks: Array<Block>
   /**

@@ -25,6 +25,8 @@ const RICH = fixture('docx/handmade-rich.docx')
 const CSV = fixture('csv/sheet.csv')
 const ENCRYPTED = fixture('malformed/encrypted--errors.odt')
 const MIXED = fixture('pdf/handmade-mixed.pdf')
+const PARTLY_SCANNED = fixture('pdf/handmade-partly-scanned.pdf')
+const SCANNED = fixture('pdf/handmade-scanned.pdf')
 
 test('toMarkdown detects the format from the file content', async () => {
   const markdown = await toMarkdown(OUTLINE)
@@ -91,6 +93,33 @@ test('conversion errors reject with a coded Error', async () => {
 test('a pdf with scanned pages rejects naming them instead of dropping them', async () => {
   await assert.rejects(toMarkdown(MIXED), (error) => {
     assert.deepEqual([error.pages, error.pageCount], [[2], 2])
+    return true
+  })
+})
+
+test("ocr: 'skip' converts the pages that carry text and names the rest", async () => {
+  const { markdown, pagesNeedingOcr, pageCount } = await toMarkdown(PARTLY_SCANNED, { ocr: 'skip' })
+  assert.deepEqual([pagesNeedingOcr, pageCount], [[2, 5], 5])
+  for (const page of ['one', 'three', 'four']) {
+    assert.match(markdown, new RegExp(`Readable page ${page}`))
+  }
+  // The pages left out are reported, never written into the Markdown.
+  assert.doesNotMatch(markdown, /OCR|not converted/i)
+})
+
+test("ocr: 'skip' takes bytes too, and reports nothing for a document that converted whole", async () => {
+  const bytes = await readFile(PARTLY_SCANNED)
+  const { pagesNeedingOcr } = await toMarkdownBytes(bytes, 'pdf', { ocr: 'skip' })
+  assert.deepEqual(pagesNeedingOcr, [2, 5])
+  const whole = await toMarkdownBytes(await readFile(OUTLINE), 'docx', { ocr: 'skip' })
+  assert.deepEqual(whole.pagesNeedingOcr, [])
+  assert.match(whole.markdown, /^# /m)
+})
+
+test("ocr: 'skip' still rejects a pdf where no page carries text", async () => {
+  await assert.rejects(toMarkdown(SCANNED, { ocr: 'skip' }), (error) => {
+    assert.equal(error.code, 'needsOcr')
+    assert.deepEqual([error.pages, error.pageCount], [[1, 2], 2])
     return true
   })
 })
@@ -195,6 +224,25 @@ test('cli exits 3 when pages need OCR', async () => {
   const { code, stderr } = await runCli([MIXED])
   assert.equal(code, 3)
   assert.match(stderr, /^anydoc: page 2 of 2 needs OCR/)
+})
+
+test('cli --ocr skip keeps stdout markdown and reports the pages on stderr', async () => {
+  const { code, stdout, stderr } = await runCli([PARTLY_SCANNED, '--ocr', 'skip'])
+  assert.equal(code, undefined)
+  assert.match(stdout, /Readable page three/)
+  assert.doesNotMatch(stdout, /OCR/i)
+  assert.equal(stderr, 'anydoc: converted 3 of 5 pages; pages 2, 5 need OCR\n')
+
+  // One page reads as one page, the way the needsOcr message spells it.
+  const single = await runCli([MIXED, '--ocr', 'skip'])
+  assert.equal(single.code, undefined)
+  assert.equal(single.stderr, 'anydoc: converted 1 of 2 pages; page 2 needs OCR\n')
+})
+
+test('cli --ocr skip still exits 3 when no page carries text', async () => {
+  const { code, stderr } = await runCli([SCANNED, '--ocr', 'skip'])
+  assert.equal(code, 3)
+  assert.match(stderr, /^anydoc: all 2 pages need OCR/)
 })
 
 test('cli --ocr hosted converts a pdf with scanned pages through Firecrawl Parse', async () => {

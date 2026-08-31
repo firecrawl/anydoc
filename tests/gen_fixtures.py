@@ -2232,10 +2232,27 @@ TEXT_PAGE = b"BT /F1 24 Tf 72 700 Td (Text on the first page) Tj ET"
 IMAGE_PAGE = b"q 468 0 0 648 72 72 cm /Im1 Do Q"
 
 
+def text_page(text):
+    return b"BT /F1 24 Tf 72 700 Td (" + text.encode() + b") Tj ET"
+
+
 def ocr_pdfs():
-    """A scan (image-only pages) and a mixed document (a text page then a scanned one)."""
+    """A scan (image-only pages) and mixed documents (text pages and scanned ones).
+
+    handmade-partly-scanned.pdf puts text pages *after* a scanned one, with
+    per-page text, so a partial conversion has to be attributed page by page:
+    one text page followed by one image page cannot show that the pages past
+    the image survived.
+    """
     (OUT / "pdf" / "handmade-scanned.pdf").write_bytes(handmade_pdf([IMAGE_PAGE, IMAGE_PAGE]))
     (OUT / "pdf" / "handmade-mixed.pdf").write_bytes(handmade_pdf([TEXT_PAGE, IMAGE_PAGE]))
+    (OUT / "pdf" / "handmade-partly-scanned.pdf").write_bytes(handmade_pdf([
+        text_page("Readable page one"),
+        IMAGE_PAGE,
+        text_page("Readable page three"),
+        text_page("Readable page four"),
+        IMAGE_PAGE,
+    ]))
 
 
 def main():
