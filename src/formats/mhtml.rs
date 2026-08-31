@@ -238,12 +238,15 @@ fn mime_header_body_start(bytes: &[u8], start: usize, end: usize) -> Option<(usi
 }
 
 fn mime_boundary_from_headers(headers: &[u8]) -> Option<Vec<u8>> {
-    MessageParser::new()
-        .with_mime_headers()
-        .parse_headers(headers)?
-        .content_type()?
-        .attribute("boundary")
-        .map(|boundary| boundary.as_bytes().to_vec())
+    let message = MessageParser::new().with_mime_headers().parse_headers(headers)?;
+    let content_type = message.content_type()?;
+    // mail-parser only nests multipart media types. A `boundary` parameter on
+    // any other media type does not create nested MIME parts, so the preflight
+    // must not treat boundary-looking body text there as nested MIME.
+    if !content_type.ctype().eq_ignore_ascii_case("multipart") {
+        return None;
+    }
+    content_type.attribute("boundary").map(|boundary| boundary.as_bytes().to_vec())
 }
 
 fn headers_use_base64(headers: &[u8]) -> bool {
