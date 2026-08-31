@@ -1,7 +1,7 @@
 //! MHTML/MHT MIME container frontend.
 
 use crate::error::ConvertError;
-use crate::model::{AnchorId, Asset, AssetId, Document, ImageSource, LinkTarget};
+use crate::model::{Asset, AssetId, Document, ImageSource};
 use crate::package::limits;
 use crate::shared::html::HtmlCtx;
 use crate::shared::uri::is_absolute_uri;
@@ -587,22 +587,6 @@ struct MhtmlCtx {
 }
 
 impl HtmlCtx for MhtmlCtx {
-    fn link_target(&self, href: &str) -> Option<LinkTarget> {
-        let href = href.trim();
-        if href.is_empty() {
-            return None;
-        }
-        if let Some(fragment) = href.strip_prefix('#') {
-            let fragment = crate::package::path::decode_fragment(fragment);
-            return Some(LinkTarget::Anchor(fragment));
-        }
-        Some(if is_absolute_uri(href) {
-            LinkTarget::External(href.to_owned())
-        } else {
-            LinkTarget::Relative(href.to_owned())
-        })
-    }
-
     fn image_source(&self, src: &str) -> Result<Option<ImageSource>, ConvertError> {
         let src = src.trim();
         if src.is_empty() {
@@ -618,10 +602,6 @@ impl HtmlCtx for MhtmlCtx {
         }
         Ok((is_absolute_uri(&reference) || reference.starts_with("//"))
             .then_some(ImageSource::External(reference)))
-    }
-
-    fn anchor_id(&self, raw: &str) -> AnchorId {
-        raw.to_owned()
     }
 }
 

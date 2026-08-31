@@ -2,11 +2,10 @@
 //! semantic HTML -> document-model frontend used by EPUB.
 
 use crate::error::ConvertError;
-use crate::model::{AnchorId, Asset, Document, ImageSource, LinkTarget};
+use crate::model::{Asset, Document, ImageSource};
 use crate::package::limits;
 use crate::package::xml::{Attr, Element, Node};
 use crate::shared::html::{HtmlCtx, Stylesheet};
-use crate::shared::uri::is_absolute_uri;
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, WINDOWS_1252};
 use html5ever::LocalName;
 use html5ever::tendril::StrTendril;
@@ -486,32 +485,12 @@ fn bump_node_count(node_count: &mut usize) -> Result<(), ConvertError> {
 struct StandaloneCtx;
 
 impl HtmlCtx for StandaloneCtx {
-    fn link_target(&self, href: &str) -> Option<LinkTarget> {
-        let href = href.trim();
-        if href.is_empty() {
-            return None;
-        }
-        if let Some(fragment) = href.strip_prefix('#') {
-            let fragment = crate::package::path::decode_fragment(fragment);
-            return Some(LinkTarget::Anchor(fragment));
-        }
-        Some(if is_absolute_uri(href) {
-            LinkTarget::External(href.to_owned())
-        } else {
-            LinkTarget::Relative(href.to_owned())
-        })
-    }
-
     fn image_source(&self, src: &str) -> Result<Option<ImageSource>, ConvertError> {
         let src = src.trim();
         if src.is_empty() {
             return Ok(None);
         }
         Ok(Some(ImageSource::External(src.to_owned())))
-    }
-
-    fn anchor_id(&self, raw: &str) -> AnchorId {
-        raw.to_owned()
     }
 }
 

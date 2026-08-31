@@ -16,15 +16,38 @@ use crate::shared::delta::{StyleDelta, rebase_emphasis};
 use crate::shared::header::resolve_header_rows;
 use crate::shared::math::{mathml_is_display, mathml_to_tex};
 use crate::shared::text::{clean_text, collapse_ws};
+use crate::shared::uri::is_absolute_uri;
 use std::collections::HashMap;
 
 /// Frontend hooks: how hrefs, image sources, and anchor ids resolve in the
 /// containing document (EPUB scopes them per chapter).
 pub trait HtmlCtx {
-    fn link_target(&self, href: &str) -> Option<LinkTarget>;
+    /// Default link resolution: fragment references become anchors, absolute
+    /// references stay external, everything else is kept relative. Frontends
+    /// that scope links per containing document (e.g. EPUB chapters) override
+    /// this.
+    fn link_target(&self, href: &str) -> Option<LinkTarget> {
+        let href = href.trim();
+        if href.is_empty() {
+            return None;
+        }
+        if let Some(fragment) = href.strip_prefix('#') {
+            let fragment = crate::package::path::decode_fragment(fragment);
+            return Some(LinkTarget::Anchor(fragment));
+        }
+        Some(if is_absolute_uri(href) {
+            LinkTarget::External(href.to_owned())
+        } else {
+            LinkTarget::Relative(href.to_owned())
+        })
+    }
+
     /// A failed load degrades to `Ok(None)`; resource-limit errors propagate.
     fn image_source(&self, src: &str) -> Result<Option<ImageSource>, ConvertError>;
-    fn anchor_id(&self, raw: &str) -> AnchorId;
+
+    fn anchor_id(&self, raw: &str) -> AnchorId {
+        raw.to_owned()
+    }
 }
 
 pub fn to_blocks(
