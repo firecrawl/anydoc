@@ -24,8 +24,9 @@ use std::path::Path;
 /// (docm, xlsm, ...) map onto these via [`Format::from_bytes`] or
 /// [`Format::from_extension`].
 ///
-/// New formats are added over time; the enum is `#[non_exhaustive]` so
-/// downstream exhaustive matches keep compiling when variants appear.
+/// New formats are added over time; the enum is `#[non_exhaustive]`, so
+/// downstream callers must match it with a wildcard arm, and matches that
+/// carry one keep compiling when variants appear.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Format {
