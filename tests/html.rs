@@ -344,3 +344,33 @@ fn relative_image_is_preserved_without_fetching() {
         other => panic!("expected paragraph, got {other:?}"),
     }
 }
+
+#[test]
+fn paragraph_div_pairs_do_not_accumulate_paragraph_depth() {
+    // html5ever implicitly closes each <p> when the <div> arrives, so the
+    // real DOM nests 200 divs - well under max_xml_depth.
+    let mut html = String::from("<!doctype html><body>");
+    for _ in 0..200 {
+        html.push_str("<p>text<div>");
+    }
+    html.push_str("</body>");
+    assert!(to_markdown_bytes(html.as_bytes(), Some(Format::Html)).is_ok());
+}
+
+#[test]
+fn deeply_nested_paragraph_div_pairs_are_rejected_before_dom() {
+    let mut html = String::from("<!doctype html><body>");
+    for _ in 0..300 {
+        html.push_str("<p>text<div>");
+    }
+    html.push_str("</body>");
+    let error = to_markdown_bytes(html.as_bytes(), Some(Format::Html)).unwrap_err();
+    assert!(matches!(error, ConvertError::ResourceLimit { limit: "max_xml_depth", .. }));
+}
+
+#[test]
+fn bare_hash_link_is_preserved_as_relative_url() {
+    let html = br##"<!doctype html><p><a href="#">top</a></p>"##;
+    let markdown = to_markdown_bytes(html, Some(Format::Html)).unwrap();
+    assert_eq!(markdown, "[top](#)\n");
+}
