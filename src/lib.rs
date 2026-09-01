@@ -23,7 +23,11 @@ use std::path::Path;
 /// Input format. Selects the parser; container variants that share a parser
 /// (docm, xlsm, ...) map onto these via [`Format::from_bytes`] or
 /// [`Format::from_extension`].
+///
+/// New formats are added over time; the enum is `#[non_exhaustive]` so
+/// downstream exhaustive matches keep compiling when variants appear.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Format {
     /// Binary Word 97-2003 (`.doc`).
     Doc,
