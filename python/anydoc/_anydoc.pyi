@@ -4,7 +4,7 @@ import os
 from typing import Literal, final
 
 Format = Literal[
-    "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "xlsx", "ods", "odp", "csv"
+    "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "html", "xlsx", "ods", "odp", "csv"
 ]
 
 class ConvertError(Exception):

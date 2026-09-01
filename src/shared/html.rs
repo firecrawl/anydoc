@@ -297,6 +297,25 @@ impl Builder<'_> {
         Ok(b.finish())
     }
 
+    /// Render one element in a fresh block context, preserving the element's
+    /// own block semantics. This is used for malformed-but-repairable list
+    /// markup where structural elements appear directly under `ul`/`ol`.
+    fn sub_element_blocks(
+        &mut self,
+        elem: &Element,
+        delta: StyleDelta,
+    ) -> Result<Vec<Block>, ConvertError> {
+        let mut b = Builder {
+            blocks: Vec::new(),
+            inlines: Vec::new(),
+            css: self.css,
+            ctx: self.ctx,
+            start_boundary: true,
+        };
+        b.walk_elem(elem, delta)?;
+        Ok(b.finish())
+    }
+
     /// Element-level props: matching stylesheet rules and the inline `style`
     /// attribute merged in one cascade order — normal rules, inline style,
     /// `!important` rules, `!important` inline style.
@@ -539,19 +558,43 @@ impl Builder<'_> {
         delta: StyleDelta,
     ) -> Result<Vec<Block>, ConvertError> {
         let ordered = elem.local == "ol";
-        let items: Vec<&Element> = elem.child_elems().filter(|e| e.local == "li").collect();
-        if items.is_empty() {
-            return Ok(Vec::new());
-        }
+        let children: Vec<&Element> = elem.child_elems().collect();
+        let items: Vec<&Element> = children.iter().copied().filter(|e| e.local == "li").collect();
+
         if !ordered {
-            let mut list_items = Vec::with_capacity(items.len());
-            for li in &items {
-                list_items
-                    .push(ListItem { blocks: self.sub_blocks(li, delta)?, marker_label: None });
+            let mut out = Vec::new();
+            let mut list_items = Vec::new();
+            for child in children {
+                if child.local == "li" {
+                    list_items.push(ListItem {
+                        blocks: self.sub_blocks(child, delta)?,
+                        marker_label: None,
+                    });
+                    continue;
+                }
+                let child_blocks = self.sub_element_blocks(child, delta)?;
+                if child_blocks.is_empty() {
+                    continue;
+                }
+                if !list_items.is_empty() {
+                    out.push(Block::List(List {
+                        marker: MarkerKind::Bullet,
+                        start: 1,
+                        items: std::mem::take(&mut list_items),
+                    }));
+                }
+                out.extend(child_blocks);
             }
-            let list = List { marker: MarkerKind::Bullet, start: 1, items: list_items };
-            return Ok(vec![Block::List(list)]);
+            if !list_items.is_empty() {
+                out.push(Block::List(List {
+                    marker: MarkerKind::Bullet,
+                    start: 1,
+                    items: list_items,
+                }));
+            }
+            return Ok(out);
         }
+
         let marker = match elem.attr_any("type") {
             Some("a") => MarkerKind::LowerAlpha,
             Some("A") => MarkerKind::UpperAlpha,
@@ -575,24 +618,44 @@ impl Builder<'_> {
             // step must not overflow.
             next = if reversed { next.saturating_sub(1) } else { next.saturating_add(1) };
         }
-        // Zero/negative numbers are valid ordered-list values but cannot be
-        // a `start` for the renderer's start+index numbering; such lists
-        // carry every number as an explicit literal marker instead.
-        if numbers.iter().any(|&n| n < 1) {
-            let mut list_items = Vec::with_capacity(items.len());
-            for (li, &n) in items.iter().zip(&numbers) {
-                list_items.push(ListItem {
-                    blocks: self.sub_blocks(li, delta)?,
-                    marker_label: Some(format!("{n}.")),
-                });
-            }
-            return Ok(vec![Block::List(List { marker, start: 1, items: list_items })]);
-        }
+
+        // Zero/negative numbers are valid but cannot be represented by the
+        // renderer's positive `start` field, so those items carry explicit
+        // literal marker labels. Structural siblings still stay in order.
+        let explicit_markers = numbers.iter().any(|&n| n < 1);
         let mut out: Vec<Block> = Vec::new();
         let mut current: Option<List> = None;
         let mut last_number = 0i64;
-        for (li, &number) in items.iter().zip(&numbers) {
-            let item = ListItem { blocks: self.sub_blocks(li, delta)?, marker_label: None };
+        let mut item_index = 0usize;
+
+        for child in children {
+            if child.local != "li" {
+                let child_blocks = self.sub_element_blocks(child, delta)?;
+                if child_blocks.is_empty() {
+                    continue;
+                }
+                if let Some(list) = current.take() {
+                    out.push(Block::List(list));
+                }
+                out.extend(child_blocks);
+                continue;
+            }
+
+            let number = numbers[item_index];
+            item_index += 1;
+            let item = ListItem {
+                blocks: self.sub_blocks(child, delta)?,
+                marker_label: explicit_markers.then(|| format!("{number}.")),
+            };
+
+            if explicit_markers {
+                if current.is_none() {
+                    current = Some(List { marker, start: 1, items: Vec::new() });
+                }
+                current.as_mut().unwrap().items.push(item);
+                continue;
+            }
+
             let contiguous = current.is_some() && last_number.checked_add(1) == Some(number);
             if !contiguous {
                 if let Some(list) = current.take() {
