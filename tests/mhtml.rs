@@ -685,7 +685,7 @@ Content-Type: multipart/related; boundary="b"
 --b
 Content-Type: text/html; charset=utf-8
 
-<!doctype html><base href="subdir/"><p><img src="logo.png"></p>
+<!doctype html><base href="subdir/"><p><img src="./logo.png"></p>
 --b
 Content-Type: image/png
 Content-Location: logo.png
@@ -694,6 +694,10 @@ PNGDATA
 --b--
 "#,
     );
+    // The dot segment only collapses through the base join plus path
+    // normalization: without base resolution the reference "./logo.png"
+    // can never match the part key, so the asset must resolve through the
+    // relative <base href>.
     let document = to_document(&mhtml, Some(Format::Mhtml)).unwrap();
     assert_eq!(document.assets.len(), 1);
     match &document.blocks[0] {
