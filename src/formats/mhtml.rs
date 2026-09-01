@@ -116,7 +116,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         &resource_index,
         resource_base.as_deref(),
     )?;
-    let (assets, image_assets) = collect_image_assets(&message.parts, resource_base.as_deref())?;
+    let (assets, image_assets) = collect_image_assets(&message, resource_base.as_deref())?;
     let ctx = MhtmlCtx { image_assets, resource_base };
 
     super::html::document_from_parsed_html(&parsed_html, Some(&stylesheets), &ctx, assets)
@@ -173,15 +173,30 @@ fn preflight_multipart_base64(
         };
         let headers = &bytes[headers_start..body_start];
 
+        let next_parent =
+            find_bytes(&bytes[body_start..end], &marker).map_or(end, |next| body_start + next);
+
         if headers_use_base64(headers) {
             // mail-parser 0.11.x reserves from MessageStream::remaining() before it scans
             // for the active MIME boundary, so the safe upper bound is deliberately the
             // entire remaining message rather than only this part's encoded body.
             enforce_base64_parser_reserve(bytes.len().saturating_sub(body_start), max_entry_bytes)?;
+        } else if headers_use_quoted_printable(headers) {
+            // mail-parser eagerly decodes part bodies while parsing. Quoted-printable
+            // never expands its input, so the encoded region size bounds the decoded
+            // allocation; reject oversized parts before the parser materializes a
+            // body the limits would reject afterwards.
+            let encoded_len = next_parent.saturating_sub(body_start);
+            if encoded_len as u64 > max_entry_bytes {
+                return Err(ConvertError::ResourceLimit {
+                    limit: "max_entry_bytes",
+                    detail: format!(
+                        "MHTML quoted-printable part can decode to at most {encoded_len} bytes; maximum is {max_entry_bytes}"
+                    ),
+                });
+            }
         }
 
-        let next_parent =
-            find_bytes(&bytes[body_start..end], &marker).map_or(end, |next| body_start + next);
         if let Some(nested_boundary) = mime_boundary_from_headers(headers) {
             let nested_depth = depth.saturating_add(1);
             if nested_depth > limits::MAX_MIME_DEPTH {
@@ -254,6 +269,15 @@ fn headers_use_base64(headers: &[u8]) -> bool {
         line.split_once(':').is_some_and(|(name, value)| {
             name.eq_ignore_ascii_case("content-transfer-encoding")
                 && value.trim().eq_ignore_ascii_case("base64")
+        })
+    })
+}
+
+fn headers_use_quoted_printable(headers: &[u8]) -> bool {
+    unfold_headers(headers).lines().any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("content-transfer-encoding")
+                && value.trim().eq_ignore_ascii_case("quoted-printable")
         })
     })
 }
@@ -416,14 +440,14 @@ fn collect_stylesheets_in_order(
 }
 
 fn collect_image_assets(
-    parts: &[mail_parser::MessagePart<'_>],
+    message: &Message<'_>,
     resource_base: Option<&str>,
 ) -> Result<(Vec<Asset>, HashMap<String, AssetId>), ConvertError> {
     let mut assets = Vec::new();
     let mut image_assets = HashMap::new();
     let mut total_bytes = 0u64;
 
-    for (part_index, part) in parts.iter().enumerate() {
+    for (part_index, part) in message.parts.iter().enumerate() {
         let Some(content_type) = part.content_type() else {
             continue;
         };
@@ -431,17 +455,10 @@ fn collect_image_assets(
             continue;
         }
 
-        let bytes = part.contents();
-        if bytes.len() as u64 > limits::MAX_ENTRY_BYTES {
-            return Err(ConvertError::ResourceLimit {
-                limit: "max_entry_bytes",
-                detail: format!(
-                    "MHTML image part is {} bytes; maximum is {}",
-                    bytes.len(),
-                    limits::MAX_ENTRY_BYTES
-                ),
-            });
-        }
+        // Decode through the same guarded path as the HTML root so the size
+        // limits are enforced before the decoded bytes are used, independent
+        // of mail-parser's eager decoding behavior.
+        let bytes = transfer_decoded_part_bytes(message, part, "image part")?;
         total_bytes = total_bytes.saturating_add(bytes.len() as u64);
         if total_bytes > limits::MAX_ASSET_TOTAL_BYTES as u64 {
             return Err(ConvertError::ResourceLimit {
@@ -527,7 +544,22 @@ fn resolve_resource_reference(base: Option<&str>, value: &str) -> String {
             .unwrap_or(value);
     }
     let Some((scheme, rest)) = base.split_once("://") else {
-        return value;
+        // The base carries no scheme (no absolute Content-Location and a
+        // relative <base href>). Join base and reference as archive paths
+        // so embedded resources still resolve against the base, mirroring
+        // the resolution applied when the resource index is built.
+        let (base_path, _) = split_path_suffix(base);
+        let (reference_path, suffix) = split_path_suffix(&value);
+        if reference_path.is_empty() {
+            return format!("{base_path}{suffix}");
+        }
+        let joined = if reference_path.starts_with('/') {
+            reference_path.to_owned()
+        } else {
+            let directory_end = base_path.rfind('/').map_or(0, |index| index + 1);
+            format!("{}{}", &base_path[..directory_end], reference_path)
+        };
+        return format!("{}{}", normalize_url_path(&joined), suffix);
     };
     let authority_end = rest.find('/').unwrap_or(rest.len());
     let authority = &rest[..authority_end];
@@ -638,4 +670,19 @@ mod tests {
         let input = b"MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"real\"\r\n\r\n--real\r\nContent-Type: text/plain\r\n\r\nbody --not-real Content-Transfer-Encoding: base64\r\n\r\n0123456789abcdef\r\n--real--\r\n";
         assert!(preflight_base64_decoder_allocations_with_limit(input, 8).is_ok());
     }
+}
+
+#[test]
+fn quoted_printable_part_is_bounded_before_mime_parse() {
+    let input = b"MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/html\r\n\r\n<p>ok</p>\r\n--b\r\nContent-Type: image/png\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n0123456789abcdef\r\n--b--\r\n";
+    assert!(matches!(
+        preflight_base64_decoder_allocations_with_limit(input, 8),
+        Err(ConvertError::ResourceLimit { limit: "max_entry_bytes", .. })
+    ));
+}
+
+#[test]
+fn quoted_printable_part_within_limit_passes_preflight() {
+    let input = b"MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/html\r\n\r\n<p>ok</p>\r\n--b\r\nContent-Type: image/png\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n0123456789abcdef\r\n--b--\r\n";
+    assert!(preflight_base64_decoder_allocations_with_limit(input, 64).is_ok());
 }

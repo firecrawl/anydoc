@@ -675,3 +675,31 @@ PNGDATA
     assert_eq!(document.assets.len(), 1);
     assert_eq!(document.assets[0].media_type, "image/png");
 }
+
+#[test]
+fn relative_base_href_resolves_relative_embedded_resources() {
+    let mhtml = mhtml_fixture(
+        r#"MIME-Version: 1.0
+Content-Type: multipart/related; boundary="b"
+
+--b
+Content-Type: text/html; charset=utf-8
+
+<!doctype html><base href="subdir/"><p><img src="logo.png"></p>
+--b
+Content-Type: image/png
+Content-Location: logo.png
+
+PNGDATA
+--b--
+"#,
+    );
+    let document = to_document(&mhtml, Some(Format::Mhtml)).unwrap();
+    assert_eq!(document.assets.len(), 1);
+    match &document.blocks[0] {
+        Block::Paragraph(inlines) => {
+            assert!(matches!(&inlines[0], Inline::Image { source: ImageSource::Asset(_), .. }))
+        }
+        other => panic!("expected paragraph, got {other:?}"),
+    }
+}
