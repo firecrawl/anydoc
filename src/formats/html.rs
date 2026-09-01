@@ -296,7 +296,9 @@ fn is_heading_element(name: &str) -> bool {
     matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6")
 }
 
-/// Block-level start tags that make HTML5 implicitly close an open <p>.
+/// Block-level start tags that make HTML5 implicitly close an open <p>
+/// (html5ever's in-body close_p_element_in_button_scope arms; table closes
+/// <p> only outside quirks mode, and the preflight assumes standards mode).
 fn is_paragraph_closing_element(name: &str) -> bool {
     matches!(
         name,
@@ -304,8 +306,10 @@ fn is_paragraph_closing_element(name: &str) -> bool {
             | "article"
             | "aside"
             | "blockquote"
+            | "center"
             | "details"
             | "dialog"
+            | "dir"
             | "div"
             | "dl"
             | "fieldset"
@@ -322,12 +326,15 @@ fn is_paragraph_closing_element(name: &str) -> bool {
             | "header"
             | "hgroup"
             | "hr"
+            | "listing"
             | "main"
             | "menu"
             | "nav"
             | "ol"
             | "p"
+            | "plaintext"
             | "pre"
+            | "search"
             | "section"
             | "summary"
             | "table"
