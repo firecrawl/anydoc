@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+## Lists
+
+3. Third
+
+4. Fourth
+
+   - Nested A
+   - Nested B
