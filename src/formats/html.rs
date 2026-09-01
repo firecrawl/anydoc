@@ -258,6 +258,17 @@ fn close_implied_before_start(open: &mut Vec<LocalName>, name: &str) {
         open.remove(position);
     }
 
+    // HTML5 implicitly closes an open <p> when a block-level start tag
+    // arrives. Model the case where the <p> is the innermost open element;
+    // deeper arrangements stay over-counted, keeping the preflight
+    // fail-closed. (hr also closes <p> in HTML5 but is void, so it never
+    // reaches this hook; the leftover <p> only over-counts.)
+    if is_paragraph_closing_element(name)
+        && open.last().is_some_and(|candidate| candidate.as_ref() == "p")
+    {
+        open.pop();
+    }
+
     if is_heading_element(name)
         && open.last().is_some_and(|candidate| is_heading_element(candidate.as_ref()))
     {
@@ -283,6 +294,45 @@ fn close_implied_before_start(open: &mut Vec<LocalName>, name: &str) {
 
 fn is_heading_element(name: &str) -> bool {
     matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6")
+}
+
+/// Block-level start tags that make HTML5 implicitly close an open <p>.
+fn is_paragraph_closing_element(name: &str) -> bool {
+    matches!(
+        name,
+        "address"
+            | "article"
+            | "aside"
+            | "blockquote"
+            | "details"
+            | "dialog"
+            | "div"
+            | "dl"
+            | "fieldset"
+            | "figcaption"
+            | "figure"
+            | "footer"
+            | "form"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "header"
+            | "hgroup"
+            | "hr"
+            | "main"
+            | "menu"
+            | "nav"
+            | "ol"
+            | "p"
+            | "pre"
+            | "section"
+            | "summary"
+            | "table"
+            | "ul"
+    )
 }
 
 fn html5_self_closing_is_honored(open: &[LocalName], name: &str) -> bool {

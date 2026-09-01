@@ -32,6 +32,12 @@ pub trait HtmlCtx {
             return None;
         }
         if let Some(fragment) = href.strip_prefix('#') {
+            if fragment.is_empty() {
+                // A bare "#" points at the document itself. Keep it as a
+                // relative URL so the link survives rendering instead of
+                // becoming an unresolvable empty anchor.
+                return Some(LinkTarget::Relative(href.to_owned()));
+            }
             let fragment = crate::package::path::decode_fragment(fragment);
             return Some(LinkTarget::Anchor(fragment));
         }
