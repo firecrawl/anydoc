@@ -3,7 +3,7 @@
 
 const { readFile, writeFile } = require('node:fs/promises')
 
-const FORMATS = 'doc, docx, odt, pdf, ppt, pptx, rtf, epub, xlsx, ods, odp, csv'
+const FORMATS = 'doc, docx, odt, pdf, ppt, pptx, rtf, epub, xlsx, ods, odp, csv, msg'
 
 const HELP = `anydoc: convert documents to GitHub-Flavored Markdown
 

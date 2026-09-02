@@ -56,6 +56,8 @@ pub enum Format {
     /// Delimiter-separated text (`.csv`). Carries no signature, so it has to
     /// be named rather than detected.
     Csv,
+    /// Outlook message (`.msg`): MAPI properties in an OLE compound file.
+    Msg,
 }
 
 impl Format {
@@ -84,6 +86,7 @@ impl Format {
             "ods" => Format::Ods,
             "odp" => Format::Odp,
             "csv" => Format::Csv,
+            "msg" => Format::Msg,
             _ => return None,
         })
     }

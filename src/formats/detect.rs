@@ -47,7 +47,9 @@ pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Format> {
     None
 }
 
-/// Classify an OLE compound file by its mandated content stream. Encrypted
+/// Classify an OLE compound file by its mandated content stream, or, for
+/// an Outlook message, by the MAPI property store that stands in for one.
+/// Encrypted
 /// OOXML packages (`EncryptedPackage`) stay `None`: the inner format is
 /// unknowable, and the frontend reports `Encrypted` precisely.
 fn detect_ole(bytes: &[u8]) -> Option<Format> {
@@ -63,6 +65,14 @@ fn detect_ole(bytes: &[u8]) -> Option<Format> {
             found = Some(Format::Ppt);
         } else if name.eq_ignore_ascii_case("Workbook") || name.eq_ignore_ascii_case("Book") {
             found = Some(Format::Excel);
+        } else if name.eq_ignore_ascii_case("__properties_version1.0")
+            || name.to_ascii_uppercase().starts_with("__SUBSTG1.0_")
+        {
+            // An Outlook message names no single content stream: it is the
+            // property store itself. `__properties_version1.0` is mandated,
+            // and the per-property substorage streams identify it just as
+            // well ([MS-OXMSG]).
+            found = Some(Format::Msg);
         }
         if found.is_some() {
             break;
@@ -254,6 +264,10 @@ mod tests {
         assert_eq!(from_bytes(&ole_of(&["BOOK"])), Some(Format::Excel));
         // Encrypted OOXML: inner format unknowable, extension decides.
         assert_eq!(from_bytes(&ole_of(&["EncryptedPackage", "EncryptionInfo"])), None);
+        // An Outlook message names no content stream; the MAPI property
+        // store is its identity, and either half of it is enough.
+        assert_eq!(from_bytes(&ole_of(&["__properties_version1.0"])), Some(Format::Msg));
+        assert_eq!(from_bytes(&ole_of(&["__substg1.0_0037001F"])), Some(Format::Msg));
     }
 
     #[test]
