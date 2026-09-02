@@ -1099,4 +1099,32 @@ mod tests {
         let table = first_table(&doc);
         assert_eq!(texts(table), vec![vec!["a", "", "", "", "", "b"]], "just the content block");
     }
+
+    #[test]
+    fn a_blank_merged_row_outside_the_content_block_is_dropped() {
+        // A merge anchored on a whitespace-only cell, sitting clear of the
+        // content: nothing in it renders, so it no longer widens the sheet.
+        // The merge itself carried the only reason to keep that row.
+        let wb = one_sheet(
+            r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t> </t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>x</t></is></c><c r="B2" t="inlineStr"><is><t>y</t></is></c><c r="C2" t="inlineStr"><is><t>z</t></is></c></row></sheetData><mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells>"#,
+        );
+        let doc = parse(&wb.build()).unwrap();
+        assert_eq!(texts(first_table(&doc)), vec![vec!["x", "y", "z"]]);
+    }
+
+    #[test]
+    fn a_merged_banner_with_real_text_is_untouched() {
+        // The same shape carrying content keeps its full span: only cells
+        // that render as nothing stop counting.
+        let wb = one_sheet(
+            r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Q3 Report</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>x</t></is></c><c r="B2" t="inlineStr"><is><t>y</t></is></c><c r="C2" t="inlineStr"><is><t>z</t></is></c></row></sheetData><mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells>"#,
+        );
+        let doc = parse(&wb.build()).unwrap();
+        let table = first_table(&doc);
+        let CellSlot::Origin(cell) = &table.grid[0][0] else {
+            panic!("expected the banner merge origin at (0,0)");
+        };
+        assert_eq!(cell.col_span, 3, "the banner keeps its span");
+        assert_eq!(texts(table)[1], vec!["x", "y", "z"]);
+    }
 }
