@@ -42,6 +42,18 @@ mod tag {
 const PT_UNICODE: u16 = 0x001F;
 /// PT_STRING8: bytes in the message code page.
 const PT_STRING8: u16 = 0x001E;
+/// PT_LONG: a 32-bit value, stored in the property store rather than a
+/// stream of its own.
+const PT_LONG: u16 = 0x0003;
+
+/// The property store, which carries every fixed-width value.
+const PROPERTIES_STREAM: &str = "__properties_version1.0";
+/// Bytes of `__properties_version1.0` header before the entries begin, for a
+/// top-level message ([MS-OXMSG] 2.4.1.1): eight reserved, the next
+/// recipient and attachment ids, their two counts, then eight more reserved.
+const PROPERTIES_HEADER: usize = 32;
+/// Each fixed-width entry: tag, flags, then eight bytes of value.
+const PROPERTY_ENTRY: usize = 16;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let mut ole = cfb::CompoundFile::open(Cursor::new(bytes))
@@ -56,16 +68,24 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         }
     }
 
-    let codepage = read_property(&mut ole, &streams, tag::MESSAGE_CODEPAGE, None)
-        .or_else(|| read_property(&mut ole, &streams, tag::INTERNET_CPID, None))
-        .and_then(|s| s.trim().parse::<u16>().ok());
+    // The code page is a PT_LONG, so it is not a stream of its own: fixed
+    // width values live packed in the property store, and reading them is
+    // the only way to decode a `PT_STRING8` as anything but a guess.
+    let properties = match read_ole_stream(&mut ole, PROPERTIES_STREAM) {
+        Ok(bytes) => bytes,
+        Err(e) if e.is_fatal() => return Err(e),
+        Err(_) => Vec::new(),
+    };
+    let codepage = fixed_u32(&properties, tag::MESSAGE_CODEPAGE)
+        .or_else(|| fixed_u32(&properties, tag::INTERNET_CPID))
+        .and_then(|cp| u16::try_from(cp).ok());
 
-    let subject = read_property(&mut ole, &streams, tag::SUBJECT, codepage);
-    let body = read_property(&mut ole, &streams, tag::BODY, codepage);
-    let sender_name = read_property(&mut ole, &streams, tag::SENDER_NAME, codepage);
-    let sender_email = read_property(&mut ole, &streams, tag::SENDER_EMAIL, codepage);
-    let to = read_property(&mut ole, &streams, tag::DISPLAY_TO, codepage);
-    let cc = read_property(&mut ole, &streams, tag::DISPLAY_CC, codepage);
+    let subject = read_property(&mut ole, &streams, tag::SUBJECT, codepage)?;
+    let body = read_property(&mut ole, &streams, tag::BODY, codepage)?;
+    let sender_name = read_property(&mut ole, &streams, tag::SENDER_NAME, codepage)?;
+    let sender_email = read_property(&mut ole, &streams, tag::SENDER_EMAIL, codepage)?;
+    let to = read_property(&mut ole, &streams, tag::DISPLAY_TO, codepage)?;
+    let cc = read_property(&mut ole, &streams, tag::DISPLAY_CC, codepage)?;
 
     // An OLE file carrying no message property at all is some other compound
     // document, not a message with nothing in it.
@@ -74,8 +94,8 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     }
 
     let mut doc = Document::default();
-    if let Some(subject) = subject.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        doc.blocks.push(Block::heading(1, vec![Inline::plain(clean_text(subject))]));
+    if let Some(subject) = pick(&subject) {
+        doc.blocks.push(Block::heading(1, vec![Inline::plain(subject)]));
     }
 
     // The envelope reads as labelled lines rather than a table: these are
@@ -92,7 +112,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             text: format!("{label}: "),
             style: Style { bold: true, ..Style::PLAIN },
         });
-        envelope.push(Inline::plain(clean_text(&value)));
+        envelope.push(Inline::plain(value));
     }
     if !envelope.is_empty() {
         doc.blocks.push(Block::Paragraph(envelope));
@@ -109,10 +129,16 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     Ok(doc)
 }
 
-/// A property value with content, trimmed. Absent and blank are the same
-/// thing in an envelope field.
+/// A property value with content, cleaned and trimmed. Absent and blank are
+/// the same thing in a header field, and a producer writing an explicitly
+/// empty property means the second: a string stream holding only its NUL
+/// terminator must not become an empty heading or a labelled blank line.
+/// Cleaning has to happen before that test, since the characters it drops
+/// are exactly the ones that make such a value look non-empty.
 fn pick(value: &Option<String>) -> Option<String> {
-    value.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string)
+    let cleaned = clean_text(value.as_deref()?);
+    let trimmed = cleaned.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 /// The sender as one field. Name and address together when both are known
@@ -165,7 +191,7 @@ fn read_property(
     streams: &[String],
     tag: u16,
     codepage: Option<u16>,
-) -> Option<String> {
+) -> Result<Option<String>, ConvertError> {
     for ty in [PT_UNICODE, PT_STRING8] {
         let wanted = format!("__substg1.0_{tag:04X}{ty:04X}");
         // Producers vary the hex case, so compare names the way CFB does.
@@ -176,6 +202,10 @@ fn read_property(
         };
         let bytes = match read_ole_stream(ole, &name) {
             Ok(b) => b,
+            // A safety limit is not an unreadable property: it says the file
+            // is past what this conversion will materialize, and continuing
+            // would report partial content as if it were the message.
+            Err(e) if e.is_fatal() => return Err(e),
             Err(e) => {
                 log::warn!("skipping unreadable property stream {name}: {e}");
                 continue;
@@ -184,10 +214,25 @@ fn read_property(
         if bytes.is_empty() {
             continue;
         }
-        return Some(match ty {
+        return Ok(Some(match ty {
             PT_UNICODE => decode_utf16le(&bytes),
             _ => decode_ansi(&bytes, codepage),
-        });
+        }));
+    }
+    Ok(None)
+}
+
+/// A fixed-width `PT_LONG` from the property store. Entries are a flat array
+/// after the header, each naming its own tag, so the store is scanned rather
+/// than indexed.
+fn fixed_u32(properties: &[u8], tag: u16) -> Option<u32> {
+    let entries = properties.get(PROPERTIES_HEADER..)?;
+    for entry in entries.chunks_exact(PROPERTY_ENTRY) {
+        // The tag packs the property id above its type.
+        let packed = u32::from_le_bytes(entry[0..4].try_into().ok()?);
+        if (packed >> 16) as u16 == tag && (packed & 0xFFFF) as u16 == PT_LONG {
+            return Some(u32::from_le_bytes(entry[8..12].try_into().ok()?));
+        }
     }
     None
 }
@@ -215,6 +260,7 @@ mod tests {
     #[derive(Default)]
     struct Msg {
         props: Vec<(u16, u16, Vec<u8>)>,
+        fixed: Vec<(u16, u32)>,
     }
 
     impl Msg {
@@ -229,9 +275,30 @@ mod tests {
             self
         }
 
+        /// A `PT_LONG`, which belongs in the property store rather than a
+        /// stream of its own - which is where a real producer puts it.
+        fn long(mut self, tag: u16, value: u32) -> Self {
+            self.fixed.push((tag, value));
+            self
+        }
+
+        /// `__properties_version1.0` as [MS-OXMSG] lays it out: the
+        /// top-level header, then one 16-byte entry per fixed-width value.
+        fn properties(&self) -> Vec<u8> {
+            let mut out = vec![0u8; PROPERTIES_HEADER];
+            for (tag, value) in &self.fixed {
+                let packed = (u32::from(*tag) << 16) | u32::from(PT_LONG);
+                out.extend_from_slice(&packed.to_le_bytes());
+                out.extend_from_slice(&0u32.to_le_bytes());
+                out.extend_from_slice(&value.to_le_bytes());
+                out.extend_from_slice(&0u32.to_le_bytes());
+            }
+            out
+        }
+
         fn build(&self) -> Vec<u8> {
             let mut ole = cfb::CompoundFile::create(Cursor::new(Vec::new())).unwrap();
-            ole.create_stream("__properties_version1.0").unwrap().write_all(&[0; 32]).unwrap();
+            ole.create_stream(PROPERTIES_STREAM).unwrap().write_all(&self.properties()).unwrap();
             for (tag, ty, bytes) in &self.props {
                 let name = format!("__substg1.0_{tag:04X}{ty:04X}");
                 ole.create_stream(&name).unwrap().write_all(bytes).unwrap();
@@ -338,7 +405,16 @@ mod tests {
         // PT_STRING8 carries bytes in the code page the message names, so
         // the same byte is a different character under a different one.
         let msg = Msg::default()
-            .unicode(tag::MESSAGE_CODEPAGE, "1251")
+            .long(tag::MESSAGE_CODEPAGE, 1251)
+            .ansi(tag::SUBJECT, &[0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2])
+            .unicode(tag::BODY, "hi");
+        let doc = parse(&msg.build()).unwrap();
+        assert_eq!(blocks_text(&doc)[0], "h1: Привет");
+
+        // `PR_INTERNET_CPID` names the same thing, and producers set one or
+        // the other.
+        let msg = Msg::default()
+            .long(tag::INTERNET_CPID, 1251)
             .ansi(tag::SUBJECT, &[0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2])
             .unicode(tag::BODY, "hi");
         let doc = parse(&msg.build()).unwrap();
@@ -360,6 +436,51 @@ mod tests {
         let msg = msg.unicode(tag::SUBJECT, "café ☕");
         let doc = parse(&msg.build()).unwrap();
         assert_eq!(blocks_text(&doc)[0], "h1: café ☕");
+    }
+
+    #[test]
+    fn an_explicitly_empty_property_reads_as_absent() {
+        // A producer writing an empty string writes its NUL terminator, so
+        // the stream is not empty. Treating that as content produces an
+        // empty heading and a labelled blank line.
+        let msg = Msg::default()
+            .unicode(tag::SUBJECT, "\u{0}")
+            .unicode(tag::DISPLAY_TO, "\u{0}")
+            .unicode(tag::SENDER_NAME, "Ada")
+            .unicode(tag::BODY, "hi");
+        let doc = parse(&msg.build()).unwrap();
+        assert_eq!(blocks_text(&doc), vec!["p: From: Ada", "p: hi"]);
+    }
+
+    #[test]
+    fn the_code_page_is_read_from_the_property_store_not_a_stream() {
+        // `PR_MESSAGE_CODEPAGE` is a PT_LONG, so no producer writes it as a
+        // string stream. Looking for one leaves every ANSI property decoded
+        // as Windows-1252 whatever the message says.
+        let mut msg = Msg::default().ansi(tag::SUBJECT, &[0xC0, 0xE1]).unicode(tag::BODY, "hi");
+        msg.props.push((
+            tag::MESSAGE_CODEPAGE,
+            PT_UNICODE,
+            "1251".encode_utf16().flat_map(|u| u.to_le_bytes()).collect(),
+        ));
+        let doc = parse(&msg.build()).unwrap();
+        assert_eq!(blocks_text(&doc)[0], "h1: Àá", "a string stream is not where it lives");
+
+        let msg = Msg::default()
+            .long(tag::MESSAGE_CODEPAGE, 1251)
+            .ansi(tag::SUBJECT, &[0xC0, 0xE1])
+            .unicode(tag::BODY, "hi");
+        let doc = parse(&msg.build()).unwrap();
+        assert_eq!(blocks_text(&doc)[0], "h1: Аб", "the store is");
+    }
+
+    #[test]
+    fn a_truncated_property_store_is_not_a_panic() {
+        // Every length here comes from the file, so a store cut mid-entry
+        // has to fall out as a missing code page rather than an index.
+        for len in 0..PROPERTIES_HEADER + PROPERTY_ENTRY {
+            assert_eq!(fixed_u32(&vec![0u8; len], tag::MESSAGE_CODEPAGE), None, "{len} bytes");
+        }
     }
 
     #[test]

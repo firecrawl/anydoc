@@ -47,11 +47,10 @@ pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Format> {
     None
 }
 
-/// Classify an OLE compound file by its mandated content stream, or, for
-/// an Outlook message, by the MAPI property store that stands in for one.
-/// Encrypted
-/// OOXML packages (`EncryptedPackage`) stay `None`: the inner format is
-/// unknowable, and the frontend reports `Encrypted` precisely.
+/// Classify an OLE compound file by its mandated content stream, or, for an
+/// Outlook message, by the MAPI property store that stands in for one.
+/// Encrypted OOXML packages (`EncryptedPackage`) stay `None`: the inner
+/// format is unknowable, and the frontend reports `Encrypted` precisely.
 fn detect_ole(bytes: &[u8]) -> Option<Format> {
     let ole = cfb::CompoundFile::open(Cursor::new(bytes)).ok()?;
     // Stream-name comparison is case-insensitive, matching CFB's own
@@ -65,13 +64,15 @@ fn detect_ole(bytes: &[u8]) -> Option<Format> {
             found = Some(Format::Ppt);
         } else if name.eq_ignore_ascii_case("Workbook") || name.eq_ignore_ascii_case("Book") {
             found = Some(Format::Excel);
-        } else if name.eq_ignore_ascii_case("__properties_version1.0")
-            || name.to_ascii_uppercase().starts_with("__SUBSTG1.0_")
+        } else if entry.is_stream()
+            && (name.eq_ignore_ascii_case("__properties_version1.0") || is_property_stream(name))
         {
             // An Outlook message names no single content stream: it is the
             // property store itself. `__properties_version1.0` is mandated,
             // and the per-property substorage streams identify it just as
-            // well ([MS-OXMSG]).
+            // well ([MS-OXMSG]). Both have to be streams, and a property
+            // name has to be one, so an unrelated storage that merely opens
+            // with the prefix does not pass for a message.
             found = Some(Format::Msg);
         }
         if found.is_some() {
@@ -79,6 +80,21 @@ fn detect_ole(bytes: &[u8]) -> Option<Format> {
         }
     }
     found
+}
+
+/// A MAPI property stream name: `__substg1.0_` then exactly the four hex
+/// digits of the property id and four of its type, and nothing after them
+/// ([MS-OXMSG] 2.1.3). Producers vary the hex case.
+fn is_property_stream(name: &str) -> bool {
+    const PREFIX: &str = "__substg1.0_";
+    let Some(suffix) = name
+        .get(..PREFIX.len())
+        .filter(|p| p.eq_ignore_ascii_case(PREFIX))
+        .and(name.get(PREFIX.len()..))
+    else {
+        return false;
+    };
+    suffix.len() == 8 && suffix.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn detect_zip(bytes: &[u8]) -> Option<Format> {
@@ -239,6 +255,31 @@ mod tests {
     }
 
     #[test]
+    fn a_name_that_merely_opens_like_a_property_stream_is_not_a_message() {
+        // The prefix alone is not the identity: a property name carries
+        // exactly the four hex digits of its id and four of its type.
+        for name in [
+            "__substg1.0_",
+            "__substg1.0_0037",
+            "__substg1.0_0037001FF",
+            "__substg1.0_0037ZZZZ",
+            "__substg1.0_0037001F.bak",
+        ] {
+            assert_eq!(from_bytes(&ole_of(&[name])), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_storage_named_like_the_property_store_is_not_a_message() {
+        // Only a stream carries a property; a storage of that name is some
+        // other compound document's business.
+        let mut ole = cfb::CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+        ole.create_storage("__properties_version1.0").unwrap();
+        ole.create_storage("__substg1.0_0037001F").unwrap();
+        assert_eq!(from_bytes(&ole.into_inner().into_inner()), None);
+    }
+
+    #[test]
     fn signatures() {
         assert_eq!(from_bytes(b"%PDF-1.7\n"), Some(Format::Pdf));
         // Leading junk before the header is accepted, bounded.
@@ -268,6 +309,8 @@ mod tests {
         // store is its identity, and either half of it is enough.
         assert_eq!(from_bytes(&ole_of(&["__properties_version1.0"])), Some(Format::Msg));
         assert_eq!(from_bytes(&ole_of(&["__substg1.0_0037001F"])), Some(Format::Msg));
+        // Producers vary the hex case.
+        assert_eq!(from_bytes(&ole_of(&["__substg1.0_0037001f"])), Some(Format::Msg));
     }
 
     #[test]
