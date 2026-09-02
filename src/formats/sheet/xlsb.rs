@@ -272,7 +272,8 @@ fn read_sheet(
                 }
                 let fmt = xfs.get(style as usize).unwrap_or(&CellFormat::General);
                 let text = cell_text(id, &mut f, fmt, shared, date1904)?;
-                if !text.is_empty() {
+                // Blank-looking cells carry no content, like the xlsx reader.
+                if !text.trim().is_empty() {
                     out.cells.insert((r, col), text);
                 }
             }

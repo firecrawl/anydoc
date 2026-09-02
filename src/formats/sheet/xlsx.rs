@@ -297,7 +297,12 @@ fn read_sheet(
                 continue;
             }
             let text = cell_text(c, shared, styles, date1904);
-            if !text.is_empty() {
+            // Blank-looking cells carry no content and must not define the
+            // sheet: producers fill whole columns with a single space down
+            // to the sheet floor, and counting those as populated stretches
+            // the extent over millions of empty positions. A cell that
+            // renders as nothing is nothing.
+            if !text.trim().is_empty() {
                 out.cells.insert((cr, cc), text);
             }
         }
@@ -1077,5 +1082,21 @@ mod tests {
         };
         let doc = parse(&wb.build()).unwrap();
         assert_eq!(texts(first_table(&doc)), vec![vec!["14", "L/R [x] Roof", "[ ]"]]);
+    }
+
+    #[test]
+    fn whitespace_fill_does_not_stretch_the_extent() {
+        // A producer filled one column with a single space down to the sheet
+        // floor. Those cells render as nothing, so they must not enlarge the
+        // sheet: charging them would put a 67-column workbook over the grid
+        // budget on content that is not there.
+        let wb = one_sheet(
+            r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c><c r="F1" t="inlineStr"><is><t>b</t></is></c></row><row r="1048576"><c r="A1048576" t="inlineStr"><is><t> </t></is></c></row></sheetData>"#,
+        );
+        // 6 columns over a million rows is past the grid budget, so before
+        // the space stopped counting this workbook did not convert at all.
+        let doc = parse(&wb.build()).unwrap();
+        let table = first_table(&doc);
+        assert_eq!(texts(table), vec![vec!["a", "", "", "", "", "b"]], "just the content block");
     }
 }
