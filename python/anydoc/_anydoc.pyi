@@ -174,6 +174,28 @@ class ListItem:
     (composite number text such as `1-a)`)."""
 
 @final
+class SpreadsheetCoordinate:
+    """A zero-based row and column in a spreadsheet worksheet."""
+
+    row: int
+    column: int
+
+@final
+class SpreadsheetRange:
+    """An inclusive source range in a spreadsheet worksheet."""
+
+    start: SpreadsheetCoordinate
+    end: SpreadsheetCoordinate
+
+@final
+class SpreadsheetSource:
+    """The worksheet and source extent of a returned spreadsheet table."""
+
+    sheet_index: int
+    sheet_name: str
+    range: SpreadsheetRange
+
+@final
 class Table:
     """Canonical table grid: every logical grid position appears exactly
     once. Content and spans live on the origin slot, and each position a span
@@ -185,6 +207,8 @@ class Table:
     kind: Literal["data", "layout"]
     """data: a real data table. layout: layout scaffolding (text boxes,
     positioning tables)."""
+    source: SpreadsheetSource | None
+    """Worksheet identity and source extent for a spreadsheet table."""
 
 @final
 class CellSlot:
@@ -201,6 +225,8 @@ class Cell:
     blocks: list[Block]
     col_span: int
     row_span: int
+    source: SpreadsheetRange | None
+    """Inclusive source range for a spreadsheet origin cell."""
 
 @final
 class Note:

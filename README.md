@@ -132,6 +132,16 @@ let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Csv)?;
 let document = anydoc::to_document(&bytes, None)?;
 ```
 
+### Spreadsheet provenance
+
+The structured model returned for `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, and `.ods`
+tables keeps worksheet identity and source coordinates. `Table::source` carries
+the zero-based worksheet index and name plus an inclusive source range; each
+spreadsheet origin `Cell::source` carries its own inclusive range. Coordinates
+are zero-based, so `C3` is `{ row: 2, column: 2 }`. Merged origins retain their
+full source rectangle even when hidden rows or columns change the normalized
+grid. Non-spreadsheet tables and CSV keep these optional fields unset.
+
 ## OCR
 
 anydoc reads text-based PDFs locally but does no OCR, so a PDF with scanned or image-only pages fails with `NeedsOcr`. Opt in and those documents go to [Firecrawl Parse](https://firecrawl.dev/parse), which OCRs them and returns the same Markdown. No signup needed; set `FIRECRAWL_API_KEY` for higher limits.

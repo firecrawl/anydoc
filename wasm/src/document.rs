@@ -352,6 +352,57 @@ pub enum TableKind {
     Layout,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpreadsheetCoordinate {
+    /// Zero-based row.
+    pub row: u32,
+    /// Zero-based column.
+    pub column: u32,
+}
+
+impl From<model::SpreadsheetCoordinate> for SpreadsheetCoordinate {
+    fn from(coordinate: model::SpreadsheetCoordinate) -> Self {
+        SpreadsheetCoordinate { row: coordinate.row, column: coordinate.column }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpreadsheetRange {
+    /// Inclusive range start.
+    pub start: SpreadsheetCoordinate,
+    /// Inclusive range end.
+    pub end: SpreadsheetCoordinate,
+}
+
+impl From<model::SpreadsheetRange> for SpreadsheetRange {
+    fn from(range: model::SpreadsheetRange) -> Self {
+        SpreadsheetRange { start: range.start.into(), end: range.end.into() }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpreadsheetSource {
+    /// Zero-based position in the source workbook's worksheet order.
+    pub sheet_index: u32,
+    /// Worksheet name as stored by the source format.
+    pub sheet_name: String,
+    /// Inclusive source extent that produced the returned table.
+    pub range: SpreadsheetRange,
+}
+
+impl From<model::SpreadsheetSource> for SpreadsheetSource {
+    fn from(source: model::SpreadsheetSource) -> Self {
+        SpreadsheetSource {
+            sheet_index: source.sheet_index,
+            sheet_name: source.sheet_name,
+            range: source.range.into(),
+        }
+    }
+}
+
 /// Canonical table grid: every logical grid position appears exactly once.
 /// Content and spans live on the origin slot, and each position a span covers
 /// holds a `covered` slot pointing back at that origin.
@@ -362,6 +413,9 @@ pub struct Table {
     /// Number of leading rows that are header rows (0 = no header).
     pub header_rows: u32,
     pub kind: TableKind,
+    /// Worksheet identity and source extent for a spreadsheet table.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<SpreadsheetSource>,
 }
 
 impl From<model::Table> for Table {
@@ -377,6 +431,7 @@ impl From<model::Table> for Table {
                 model::TableKind::Data => TableKind::Data,
                 model::TableKind::Layout => TableKind::Layout,
             },
+            source: table.source.map(SpreadsheetSource::from),
         }
     }
 }
@@ -428,11 +483,19 @@ pub struct Cell {
     pub blocks: Vec<Block>,
     pub col_span: u32,
     pub row_span: u32,
+    /// Inclusive source range for a spreadsheet origin cell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<SpreadsheetRange>,
 }
 
 impl From<model::Cell> for Cell {
     fn from(cell: model::Cell) -> Self {
-        Cell { blocks: blocks(cell.blocks), col_span: cell.col_span, row_span: cell.row_span }
+        Cell {
+            blocks: blocks(cell.blocks),
+            col_span: cell.col_span,
+            row_span: cell.row_span,
+            source: cell.source.map(SpreadsheetRange::from),
+        }
     }
 }
 

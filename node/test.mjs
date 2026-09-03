@@ -22,6 +22,7 @@ const fixture = (name) => fileURLToPath(new URL(`../tests/fixtures/${name}`, imp
 
 const OUTLINE = fixture('docx/handmade-outline.docx')
 const RICH = fixture('docx/handmade-rich.docx')
+const SPREADSHEET = fixture('xlsx/handmade-merged.xlsx')
 const CSV = fixture('csv/sheet.csv')
 const ENCRYPTED = fixture('malformed/encrypted--errors.odt')
 const MIXED = fixture('pdf/handmade-mixed.pdf')
@@ -51,6 +52,31 @@ test('toDocument exposes the document model', async () => {
   assert.equal(typeof heading.content[0].text, 'string')
   assert.equal(heading.content[0].kind, 'text')
   assert.equal(typeof heading.content[0].style.bold, 'boolean')
+})
+
+test('toDocument exposes spreadsheet source coordinates', async () => {
+  const document = await toDocument(await readFile(SPREADSHEET), 'xlsx')
+  const table = document.blocks.find((block) => block.kind === 'table')?.table
+  assert.ok(table)
+  assert.equal(table.source.sheetIndex, 0)
+  assert.equal(table.source.sheetName, 'Merged')
+  assert.deepEqual(table.source.range, {
+    start: { row: 0, column: 0 },
+    end: { row: 2, column: 2 },
+  })
+  assert.deepEqual(table.grid[0][0].cell.source, {
+    start: { row: 0, column: 0 },
+    end: { row: 0, column: 1 },
+  })
+  assert.deepEqual(table.grid[1][0].cell.source, {
+    start: { row: 1, column: 0 },
+    end: { row: 2, column: 0 },
+  })
+
+  const docx = await toDocument(await readFile(RICH), 'docx')
+  const docxTable = docx.blocks.find((block) => block.kind === 'table')?.table
+  assert.ok(docxTable)
+  assert.equal(docxTable.source, undefined)
 })
 
 test('toDocument carries embedded assets as buffers', async () => {

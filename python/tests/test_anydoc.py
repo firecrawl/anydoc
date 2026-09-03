@@ -16,6 +16,7 @@ import anydoc
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
 OUTLINE = FIXTURES / "docx" / "handmade-outline.docx"
 RICH = FIXTURES / "docx" / "handmade-rich.docx"
+SPREADSHEET = FIXTURES / "xlsx" / "handmade-merged.xlsx"
 CSV = FIXTURES / "csv" / "sheet.csv"
 ENCRYPTED = FIXTURES / "malformed" / "encrypted--errors.odt"
 ZIPBOMB = FIXTURES / "abuse" / "zipbomb--errors.docx"
@@ -85,6 +86,36 @@ class AnydocTest(unittest.TestCase):
         self.assertIsInstance(heading.content[0].text, str)
         self.assertEqual(heading.content[0].kind, "text")
         self.assertIsInstance(heading.content[0].style.bold, bool)
+
+    def test_to_document_exposes_spreadsheet_source_coordinates(self):
+        document = anydoc.to_document(SPREADSHEET.read_bytes(), "xlsx")
+        table = next((block.table for block in document.blocks if block.kind == "table"), None)
+        self.assertIsNotNone(table, "spreadsheet fixture did not produce a table")
+        self.assertEqual(table.source.sheet_index, 0)
+        self.assertEqual(table.source.sheet_name, "Merged")
+        self.assertEqual((table.source.range.start.row, table.source.range.start.column), (0, 0))
+        self.assertEqual((table.source.range.end.row, table.source.range.end.column), (2, 2))
+        self.assertEqual(
+            (table.grid[0][0].cell.source.start.row, table.grid[0][0].cell.source.start.column),
+            (0, 0),
+        )
+        self.assertEqual(
+            (table.grid[0][0].cell.source.end.row, table.grid[0][0].cell.source.end.column),
+            (0, 1),
+        )
+        self.assertEqual(
+            (table.grid[1][0].cell.source.start.row, table.grid[1][0].cell.source.start.column),
+            (1, 0),
+        )
+        self.assertEqual(
+            (table.grid[1][0].cell.source.end.row, table.grid[1][0].cell.source.end.column),
+            (2, 0),
+        )
+
+        docx = anydoc.to_document(RICH.read_bytes(), "docx")
+        docx_table = next((block.table for block in docx.blocks if block.kind == "table"), None)
+        self.assertIsNotNone(docx_table, "DOCX fixture did not produce a table")
+        self.assertIsNone(docx_table.source)
 
     def test_to_document_carries_embedded_assets_as_bytes(self):
         document = anydoc.to_document(RICH.read_bytes(), "docx")

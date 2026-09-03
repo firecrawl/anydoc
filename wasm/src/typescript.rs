@@ -187,6 +187,29 @@ export type TableKind =
   /** Layout scaffolding (text boxes, positioning tables). */
   | 'layout'
 
+export interface SpreadsheetCoordinate {
+  /** Zero-based row. */
+  row: number
+  /** Zero-based column. */
+  column: number
+}
+
+export interface SpreadsheetRange {
+  /** Inclusive range start. */
+  start: SpreadsheetCoordinate
+  /** Inclusive range end. */
+  end: SpreadsheetCoordinate
+}
+
+export interface SpreadsheetSource {
+  /** Zero-based position in the source workbook's worksheet order. */
+  sheetIndex: number
+  /** Worksheet name as stored by the source format. */
+  sheetName: string
+  /** Inclusive source extent that produced the returned table. */
+  range: SpreadsheetRange
+}
+
 /**
  * Canonical table grid: every logical grid position appears exactly once.
  * Content and spans live on the origin slot, and each position a span covers
@@ -197,6 +220,8 @@ export interface Table {
   /** Number of leading rows that are header rows (0 = no header). */
   headerRows: number
   kind: TableKind
+  /** Worksheet identity and source extent for a spreadsheet table. */
+  source?: SpreadsheetSource
 }
 
 export type CellSlotKind = 'origin' | 'covered'
@@ -215,6 +240,8 @@ export interface Cell {
   blocks: Array<Block>
   colSpan: number
   rowSpan: number
+  /** Inclusive source range for a spreadsheet origin cell. */
+  source?: SpreadsheetRange
 }
 
 export type NoteKind = 'footnote' | 'endnote'

@@ -258,6 +258,54 @@ fn list_item(py: Python<'_>, item: model::ListItem) -> PyResult<ListItem> {
     Ok(ListItem { blocks: blocks(py, item.blocks)?, marker_label: item.marker_label })
 }
 
+#[pyclass(frozen, get_all, module = "anydoc")]
+pub struct SpreadsheetCoordinate {
+    /// Zero-based row.
+    row: usize,
+    /// Zero-based column.
+    column: usize,
+}
+
+fn spreadsheet_coordinate(coordinate: model::SpreadsheetCoordinate) -> SpreadsheetCoordinate {
+    SpreadsheetCoordinate { row: coordinate.row as usize, column: coordinate.column as usize }
+}
+
+#[pyclass(frozen, get_all, module = "anydoc")]
+pub struct SpreadsheetRange {
+    /// Inclusive range start.
+    start: Py<SpreadsheetCoordinate>,
+    /// Inclusive range end.
+    end: Py<SpreadsheetCoordinate>,
+}
+
+fn spreadsheet_range(py: Python<'_>, range: model::SpreadsheetRange) -> PyResult<SpreadsheetRange> {
+    Ok(SpreadsheetRange {
+        start: Py::new(py, spreadsheet_coordinate(range.start))?,
+        end: Py::new(py, spreadsheet_coordinate(range.end))?,
+    })
+}
+
+#[pyclass(frozen, get_all, module = "anydoc")]
+pub struct SpreadsheetSource {
+    /// Zero-based position in the source workbook's worksheet order.
+    sheet_index: usize,
+    /// Worksheet name as stored by the source format.
+    sheet_name: String,
+    /// Inclusive source extent that produced the returned table.
+    range: Py<SpreadsheetRange>,
+}
+
+fn spreadsheet_source(
+    py: Python<'_>,
+    source: model::SpreadsheetSource,
+) -> PyResult<SpreadsheetSource> {
+    Ok(SpreadsheetSource {
+        sheet_index: source.sheet_index as usize,
+        sheet_name: source.sheet_name,
+        range: Py::new(py, spreadsheet_range(py, source.range)?)?,
+    })
+}
+
 /// Canonical table grid: every logical grid position appears exactly once.
 /// Content and spans live on the origin slot, and each position a span covers
 /// holds a `covered` slot pointing back at that origin.
@@ -270,6 +318,8 @@ pub struct Table {
     /// data (a real data table) or layout (layout scaffolding: text boxes,
     /// positioning tables).
     kind: &'static str,
+    /// Worksheet identity and source extent for a spreadsheet table.
+    source: Option<Py<SpreadsheetSource>>,
 }
 
 fn table(py: Python<'_>, table: model::Table) -> PyResult<Table> {
@@ -284,6 +334,10 @@ fn table(py: Python<'_>, table: model::Table) -> PyResult<Table> {
             model::TableKind::Data => "data",
             model::TableKind::Layout => "layout",
         },
+        source: table
+            .source
+            .map(|source| spreadsheet_source(py, source).and_then(|source| Py::new(py, source)))
+            .transpose()?,
     })
 }
 
@@ -322,10 +376,20 @@ pub struct Cell {
     blocks: Py<PyList>,
     col_span: u32,
     row_span: u32,
+    /// Inclusive source range for a spreadsheet origin cell.
+    source: Option<Py<SpreadsheetRange>>,
 }
 
 fn cell(py: Python<'_>, cell: model::Cell) -> PyResult<Cell> {
-    Ok(Cell { blocks: blocks(py, cell.blocks)?, col_span: cell.col_span, row_span: cell.row_span })
+    Ok(Cell {
+        blocks: blocks(py, cell.blocks)?,
+        col_span: cell.col_span,
+        row_span: cell.row_span,
+        source: cell
+            .source
+            .map(|source| spreadsheet_range(py, source).and_then(|source| Py::new(py, source)))
+            .transpose()?,
+    })
 }
 
 #[pyclass(frozen, get_all, module = "anydoc")]
