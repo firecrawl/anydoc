@@ -940,6 +940,18 @@ mod tests {
     }
 
     #[test]
+    fn hidden_rows_and_columns_are_omitted_from_markdown() {
+        // Mirrors the issue #9 openpyxl repro: visible A1, hidden row 2, hidden col B.
+        let sheet = r#"<cols><col min="2" max="2" hidden="1" width="10"/></cols><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>VISIBLE_CELL</t></is></c><c r="B1" t="inlineStr"><is><t>HIDDEN_COL_TEXT</t></is></c></row><row r="2" hidden="1"><c r="A2" t="inlineStr"><is><t>HIDDEN_ROW_TEXT</t></is></c><c r="B2" t="inlineStr"><is><t>HIDDEN_BOTH</t></is></c></row></sheetData>"#;
+        let bytes = one_sheet(sheet).build();
+        let md = crate::to_markdown_bytes(&bytes, crate::Format::Excel).unwrap();
+        assert!(md.contains("VISIBLE_CELL"), "visible cell missing from markdown:\n{md}");
+        assert!(!md.contains("HIDDEN_ROW_TEXT"), "hidden row leaked into markdown:\n{md}");
+        assert!(!md.contains("HIDDEN_COL_TEXT"), "hidden column leaked into markdown:\n{md}");
+        assert!(!md.contains("HIDDEN_BOTH"), "hidden row+col leaked into markdown:\n{md}");
+    }
+
+    #[test]
     fn hidden_rows_columns_and_sheets_are_omitted() {
         // Hidden content is invisible to someone opening the workbook, so
         // passing it on would make it look authoritative. One visible sheet
