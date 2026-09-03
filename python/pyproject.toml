@@ -21,6 +21,11 @@ classifiers = [
 # The version comes from Cargo.toml `package.version`.
 dynamic = ["version"]
 
+# `llm` powers `to_markdown(..., ocr="llm")`: LiteLLM calls the vision model,
+# pypdfium2 rasterises the pages, pydantic-settings reads `ANYDOC_OCR_*`.
+[project.optional-dependencies]
+llm = ["litellm>=1.0", "pypdfium2>=4", "pydantic-settings>=2"]
+
 [project.urls]
 Homepage = "https://github.com/firecrawl/anydoc#readme"
 Repository = "https://github.com/firecrawl/anydoc"

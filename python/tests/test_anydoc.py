@@ -1,6 +1,7 @@
 """Smoke test: the bindings load and every entry point round-trips a fixture."""
 
 import ast
+import importlib.util
 import io
 import json
 import os
@@ -10,6 +11,8 @@ import zipfile
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import anydoc
 
@@ -59,6 +62,38 @@ def hosted_stub(status, body):
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+_LLM_EXTRA = all(
+    importlib.util.find_spec(name) for name in ("litellm", "pypdfium2", "pydantic_settings")
+)
+
+
+@contextmanager
+def llm_env(**values):
+    """Set `ANYDOC_OCR_*` for the block and restore whatever was there."""
+    names = {f"ANYDOC_OCR_{key.upper()}": value for key, value in values.items()}
+    saved = {name: os.environ.get(name) for name in names}
+    # Clear every ANYDOC_OCR_* so a developer's shell cannot leak in.
+    for name in list(os.environ):
+        if name.startswith("ANYDOC_OCR_"):
+            saved.setdefault(name, os.environ[name])
+            del os.environ[name]
+    os.environ.update(names)
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def _completion_reply(markdown):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=markdown))]
+    )
 
 
 class AnydocTest(unittest.TestCase):
@@ -146,6 +181,41 @@ class AnydocTest(unittest.TestCase):
             with self.assertRaisesRegex(anydoc.HostedError, "set FIRECRAWL_API_KEY"):
                 anydoc.to_markdown_bytes(MIXED.read_bytes(), ocr="hosted")
 
+    @unittest.skipUnless(_LLM_EXTRA, "the 'llm' extra is not installed")
+    def test_ocr_llm_transcribes_every_scanned_page_and_nothing_else(self):
+        with mock.patch("litellm.completion") as completion, llm_env(model="test/model"):
+            completion.side_effect = lambda **kw: _completion_reply(
+                f"# Page {completion.call_count}"
+            )
+            markdown = anydoc.to_markdown(MIXED, ocr="llm")
+        self.assertIn("# Page 1", markdown)
+        # handmade-mixed.pdf is two pages, so both are sent.
+        self.assertEqual(completion.call_count, 2)
+        content = completion.call_args_list[0].kwargs["messages"][0]["content"]
+        self.assertEqual(content[1]["type"], "image_url")
+        self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
+
+        # A document that converts locally never reaches the model.
+        with mock.patch("litellm.completion") as completion, llm_env(model="test/model"):
+            self.assertRegex(anydoc.to_markdown(OUTLINE, ocr="llm"), r"(?m)^# ")
+            completion.assert_not_called()
+
+    @unittest.skipUnless(_LLM_EXTRA, "the 'llm' extra is not installed")
+    def test_ocr_llm_without_a_model_names_the_missing_setting(self):
+        with llm_env():
+            with self.assertRaises(anydoc.LlmOcrError) as caught:
+                anydoc.to_markdown(MIXED, ocr="llm")
+        self.assertIsInstance(caught.exception, anydoc.ConvertError)
+        self.assertIn("ANYDOC_OCR_MODEL", str(caught.exception))
+
+    @unittest.skipUnless(_LLM_EXTRA, "the 'llm' extra is not installed")
+    def test_ocr_llm_wraps_model_failures(self):
+        with mock.patch("litellm.completion", side_effect=RuntimeError("boom")), llm_env(
+            model="test/model"
+        ):
+            with self.assertRaisesRegex(anydoc.LlmOcrError, "boom"):
+                anydoc.to_markdown_bytes(MIXED.read_bytes(), ocr="llm")
+
     def test_unreadable_files_and_bad_arguments_raise_the_python_exception(self):
         with self.assertRaises(FileNotFoundError):
             anydoc.to_markdown("no-such-file.docx")
@@ -162,7 +232,10 @@ class AnydocTest(unittest.TestCase):
         exported = {name for name in dir(anydoc._anydoc) if not name.startswith("_")}
         self.assertEqual(stubbed, exported)
         # __init__.py re-exports the whole module, plus what it adds itself.
-        self.assertEqual(set(anydoc.__all__), exported | {"Format", "HostedError", "Ocr"})
+        self.assertEqual(
+            set(anydoc.__all__),
+            exported | {"Format", "HostedError", "LlmOcrError", "Ocr"},
+        )
 
 
 if __name__ == "__main__":
