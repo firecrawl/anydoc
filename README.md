@@ -130,6 +130,9 @@ let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Csv)?;
 
 // Or stop at the document model, which also carries embedded assets:
 let document = anydoc::to_document(&bytes, None)?;
+
+// PDFs can also return per-page Markdown (page boundaries + OCR flags):
+let pages = anydoc::to_markdown_pages("report.pdf")?;
 ```
 
 ## OCR
@@ -153,7 +156,7 @@ Only documents that need OCR leave the machine, and the whole document goes, sin
 - **Content-based format detection.** The format is read from the bytes themselves (PDF header, RTF open group, OLE stream names, ZIP package mimetype), so mislabeled files still convert correctly.
 - **Fast.** Pure Rust, no ML models, no external services. Median conversion time is under 5ms per document.
 - **Bindings that stay out of the way.** Node.js conversion runs on the libuv thread pool and never blocks the event loop; Python releases the GIL so other threads keep running. TypeScript types and Python stubs ship with the packages.
-- **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required. Scanned pages can opt into [hosted OCR](#scanned-pdfs-ocr).
+- **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required. Use `to_markdown` / `to_markdown_bytes` for one Markdown blob, or `to_markdown_pages` / `to_markdown_pages_bytes` when you need per-page output and OCR flags. Scanned pages can opt into [hosted OCR](#ocr).
 - **Agent ready.** Ships as an [Agent Skill](#agent-skill): one `npx skills add firecrawl/anydoc` and any agent can read office documents.
 
 ## Supported formats
@@ -269,6 +272,7 @@ document bytes
   │               └─► GFM serializer → Markdown
   │
   └─► PDF → pdf-inspector    → Markdown directly
+                               (or per-page via to_markdown_pages)
 ```
 
 Because every format funnels through the same document model and serializer, output quirks get fixed once. A table-escaping fix for docx is automatically a table-escaping fix for rtf, odt, and everything else.

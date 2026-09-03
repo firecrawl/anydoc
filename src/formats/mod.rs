@@ -30,9 +30,10 @@ pub fn parse(bytes: &[u8], format: Format) -> Result<Document, ConvertError> {
         Format::Doc => doc::parse(bytes),
         Format::Ppt => ppt::parse(bytes),
         // pdf-inspector produces Markdown directly; there is no document
-        // model for PDFs. `to_markdown_bytes` routes them to `pdf`.
+        // model for PDFs. `to_markdown_bytes` / `to_markdown_pages_bytes`
+        // route them to `pdf`.
         Format::Pdf => Err(ConvertError::Unsupported(
-            "PDF converts directly to Markdown; use to_markdown or to_markdown_bytes".to_string(),
+            "PDF converts directly to Markdown; use to_markdown, to_markdown_bytes, or to_markdown_pages".to_string(),
         )),
     }
 }
