@@ -84,3 +84,9 @@ name = "numfmt"
 path = "fuzz_targets/numfmt.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "eml"
+path = "fuzz_targets/eml.rs"
+test = false
+doc = false
