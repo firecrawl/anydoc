@@ -248,12 +248,25 @@ fn extract_text(headers: &Headers, body: &[u8], depth: usize) -> Result<String, 
 /// RFC 2046 5.1.1: a delimiter line is exactly `--boundary`, optionally
 /// closed with `--`, followed only by whitespace. A body line that merely
 /// *starts* with the boundary (`--abcExtra`) is text, not a delimiter.
-fn is_delimiter(line: &[u8], delim: &[u8]) -> bool {
-    let Some(rest) = line.strip_prefix(delim) else {
-        return false;
+fn is_delimiter(line: &[u8], delim: &[u8]) -> Option<Delimiter> {
+    let rest = line.strip_prefix(delim)?;
+    let (rest, closing) = match rest.strip_prefix(b"--") {
+        Some(r) => (r, true),
+        None => (rest, false),
     };
-    let rest = rest.strip_prefix(b"--").unwrap_or(rest);
-    rest.iter().all(|b| b == &b' ' || b == &b'\t')
+    rest.iter().all(|b| b == &b' ' || b == &b'\t').then_some(if closing {
+        Delimiter::Closing
+    } else {
+        Delimiter::Part
+    })
+}
+
+/// Which of the two delimiter forms a line is: `--boundary` opens the next
+/// part, `--boundary--` closes the multipart and makes the rest an epilogue.
+#[derive(PartialEq)]
+enum Delimiter {
+    Part,
+    Closing,
 }
 
 fn split_parts<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
@@ -265,7 +278,7 @@ fn split_parts<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
     for line in body.split_inclusive(|&b| b == b'\n') {
         let trimmed = line.strip_suffix(b"\n").unwrap_or(line);
         let trimmed = trimmed.strip_suffix(b"\r").unwrap_or(trimmed);
-        if is_delimiter(trimmed, delim.as_bytes()) {
+        if let Some(kind) = is_delimiter(trimmed, delim.as_bytes()) {
             if let Some(s) = start {
                 // RFC 2046: the CRLF before a delimiter belongs to the
                 // delimiter, not to the part it terminates.
@@ -278,8 +291,8 @@ fn split_parts<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
                 }
                 parts.push(&body[s..end]);
             }
-            // Closing delimiter is `--boundary--`.
-            if trimmed.ends_with(b"--") && trimmed.len() > delim.len() {
+            // Everything after the closing delimiter is the epilogue.
+            if kind == Delimiter::Closing {
                 return parts;
             }
             start = Some(pos + line.len());
@@ -398,16 +411,19 @@ fn decode_words(input: &str) -> String {
     let mut prev_was_word = false;
     while let Some(start) = rest.find("=?") {
         let gap = &rest[..start];
-        if !(prev_was_word && !gap.is_empty() && gap.trim().is_empty()) {
-            out.push_str(gap);
-        }
         let after = &rest[start + 2..];
         let Some(decoded) = decode_one_word(after) else {
+            // Not an encoded-word after all: the gap is ordinary text.
+            out.push_str(gap);
             out.push_str("=?");
             rest = after;
             prev_was_word = false;
             continue;
         };
+        // Only whitespace separating two *decoded* words is a separator.
+        if !(prev_was_word && !gap.is_empty() && gap.trim().is_empty()) {
+            out.push_str(gap);
+        }
         let (text, consumed) = decoded;
         out.push_str(&text);
         rest = &after[consumed..];
@@ -596,6 +612,25 @@ line one\r\n--abcExtra\r\nline two\r\n\
         let text = body_text(&parse(eml).unwrap());
         assert!(text.contains("line one"), "{text:?}");
         assert!(text.contains("line two"), "{text:?}");
+    }
+
+    #[test]
+    fn padded_closing_delimiter_ends_the_multipart() {
+        // RFC 2046 5.1.1 allows trailing whitespace on a delimiter line, so
+        // `--B--  ` closes; anything after it is epilogue, not a part.
+        let eml = b"Subject: T\r\nContent-Type: multipart/mixed; boundary=\"B\"\r\n\r\n\
+--B\r\nContent-Type: application/octet-stream\r\n\r\nbinary\r\n\
+--B--  \r\n\
+--B\r\nContent-Type: text/plain\r\n\r\nepilogue\r\n\
+--B--\r\n";
+        // Nothing convertible remains once the epilogue is correctly ignored.
+        assert!(parse(eml).is_err());
+    }
+
+    #[test]
+    fn whitespace_before_a_malformed_word_is_kept() {
+        // The gap is only a separator when the token after it really decodes.
+        assert_eq!(decode_words("=?utf-8?Q?Hello?= =?bogus"), "Hello =?bogus");
     }
 
     #[test]
