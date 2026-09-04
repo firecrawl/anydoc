@@ -210,7 +210,7 @@ Speed is one warm conversion per document on a Ryzen 9 9950X3D (Windows 11, 64 G
 
 ## Format detection
 
-The format is read from the file content, using the marker its specification designates: the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types. CSV has no such marker, so the extension or an explicit format names it instead.
+The format is read from the file content, using the marker its specification designates: the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types. CSV and EML have no such marker, so the extension or an explicit format names them instead.
 
 ```rust
 Format::from_bytes(&bytes); // Some(Format::Docx), or None when nothing matches
@@ -262,7 +262,7 @@ document bytes
   ├─► format detection      → content markers, not the extension
   │
   ├─► format parser          → one per format (doc, docx, ppt, pptx, xls,
-  │                            xlsx, odt/ods/odp, rtf, epub, csv)
+  │                            xlsx, odt/ods/odp, rtf, epub, csv, eml)
   │         │
   │         └─► Document     → shared model: blocks, inlines, tables,
   │                            footnotes, assets

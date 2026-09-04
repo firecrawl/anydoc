@@ -159,6 +159,14 @@ impl Headers {
             .map(|c| c.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
             .unwrap_or_else(|| "text/plain".into())
     }
+
+    /// RFC 2183 disposition. An attached text part is a file the sender
+    /// enclosed, not the message body, even when it is `text/plain`.
+    fn is_attachment(&self) -> bool {
+        self.get("content-disposition").is_some_and(|d| {
+            d.split(';').next().unwrap_or("").trim().eq_ignore_ascii_case("attachment")
+        })
+    }
 }
 
 const MAX_MIME_DEPTH: usize = 32;
@@ -191,6 +199,11 @@ fn extract_text(headers: &Headers, body: &[u8], depth: usize) -> Result<String, 
                 let (ph, pb) = split_headers(part);
                 let ph = Headers::parse(&ph);
                 let pct = ph.content_type();
+                // An attachment that happens to be text/plain is not the
+                // message body; RFC 2183 disposition says which is which.
+                if ph.is_attachment() {
+                    continue;
+                }
                 match pass {
                     0 if pct == "text/plain" => {
                         let s = decode_body(&ph, pb);
@@ -232,6 +245,17 @@ fn extract_text(headers: &Headers, body: &[u8], depth: usize) -> Result<String, 
 }
 
 /// Split a multipart body on `--boundary` delimiters (anchored at line start).
+/// RFC 2046 5.1.1: a delimiter line is exactly `--boundary`, optionally
+/// closed with `--`, followed only by whitespace. A body line that merely
+/// *starts* with the boundary (`--abcExtra`) is text, not a delimiter.
+fn is_delimiter(line: &[u8], delim: &[u8]) -> bool {
+    let Some(rest) = line.strip_prefix(delim) else {
+        return false;
+    };
+    let rest = rest.strip_prefix(b"--").unwrap_or(rest);
+    rest.iter().all(|b| b == &b' ' || b == &b'\t')
+}
+
 fn split_parts<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
     let delim = format!("--{boundary}");
     let mut parts = Vec::new();
@@ -241,7 +265,7 @@ fn split_parts<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
     for line in body.split_inclusive(|&b| b == b'\n') {
         let trimmed = line.strip_suffix(b"\n").unwrap_or(line);
         let trimmed = trimmed.strip_suffix(b"\r").unwrap_or(trimmed);
-        if trimmed.starts_with(delim.as_bytes()) {
+        if is_delimiter(trimmed, delim.as_bytes()) {
             if let Some(s) = start {
                 // RFC 2046: the CRLF before a delimiter belongs to the
                 // delimiter, not to the part it terminates.
@@ -369,17 +393,25 @@ fn decode_words(input: &str) -> String {
     }
     let mut out = String::new();
     let mut rest = input;
+    // RFC 2047 6.2: linear whitespace *between* two encoded-words is a
+    // separator for the encoding, not text, and is not reproduced.
+    let mut prev_was_word = false;
     while let Some(start) = rest.find("=?") {
-        out.push_str(&rest[..start]);
+        let gap = &rest[..start];
+        if !(prev_was_word && !gap.is_empty() && gap.trim().is_empty()) {
+            out.push_str(gap);
+        }
         let after = &rest[start + 2..];
         let Some(decoded) = decode_one_word(after) else {
             out.push_str("=?");
             rest = after;
+            prev_was_word = false;
             continue;
         };
         let (text, consumed) = decoded;
         out.push_str(&text);
         rest = &after[consumed..];
+        prev_was_word = true;
     }
     out.push_str(rest);
     out
@@ -537,5 +569,41 @@ Content-Type: multipart/alternative; boundary=\"BB\"\r\n\r\n\
     fn folded_headers_unfold() {
         let h = Headers::parse(b"Subject: one\r\n  two\r\nFrom: x@y.z");
         assert_eq!(h.get("subject").unwrap(), "one two");
+    }
+
+    #[test]
+    fn attachment_does_not_displace_the_body() {
+        // multipart/mixed whose attachment is itself text/plain: the nested
+        // alternative holds the message, the attachment is an enclosed file.
+        let eml = b"Subject: T\r\nContent-Type: multipart/mixed; boundary=\"outer\"\r\n\r\n\
+--outer\r\nContent-Type: multipart/alternative; boundary=\"inner\"\r\n\r\n\
+--inner\r\nContent-Type: text/plain\r\n\r\nreal body\r\n\
+--inner--\r\n\
+--outer\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=\"n.txt\"\r\n\r\n\
+attached file\r\n\
+--outer--\r\n";
+        let text = body_text(&parse(eml).unwrap());
+        assert!(text.contains("real body"), "{text:?}");
+        assert!(!text.contains("attached file"), "{text:?}");
+    }
+
+    #[test]
+    fn body_line_sharing_the_boundary_prefix_is_not_a_delimiter() {
+        let eml = b"Subject: T\r\nContent-Type: multipart/mixed; boundary=\"abc\"\r\n\r\n\
+--abc\r\nContent-Type: text/plain\r\n\r\n\
+line one\r\n--abcExtra\r\nline two\r\n\
+--abc--\r\n";
+        let text = body_text(&parse(eml).unwrap());
+        assert!(text.contains("line one"), "{text:?}");
+        assert!(text.contains("line two"), "{text:?}");
+    }
+
+    #[test]
+    fn adjacent_encoded_words_join_without_the_separator() {
+        // RFC 2047 6.2: whitespace between two encoded-words is a separator
+        // for the encoding, not part of the text.
+        assert_eq!(decode_words("=?utf-8?Q?Hello?= =?utf-8?Q?World?="), "HelloWorld");
+        // ... but whitespace between a word and ordinary text is preserved.
+        assert_eq!(decode_words("=?utf-8?Q?Hello?= there"), "Hello there");
     }
 }

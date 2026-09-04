@@ -65,7 +65,7 @@ impl Format {
     /// Detect the format from the content itself: the signature and identity
     /// each container specification designates (PDF header, RTF open group,
     /// OLE stream names, ZIP package mimetype/content types). Plain-text
-    /// formats (CSV) carry no signature and return `None`; so does anything
+    /// formats (CSV, EML) carry no signature and return `None`; so does anything
     /// unrecognized.
     pub fn from_bytes(bytes: &[u8]) -> Option<Format> {
         formats::detect::from_bytes(bytes)
@@ -101,7 +101,7 @@ impl Format {
 
 /// Convert a document file to Markdown. The format is detected from the
 /// file content ([`Format::from_bytes`]); the extension is the fallback for
-/// signature-less formats (CSV) and unrecognizable containers.
+/// signature-less formats (CSV, EML) and unrecognizable containers.
 pub fn to_markdown(path: impl AsRef<Path>) -> Result<String, ConvertError> {
     let path = path.as_ref();
     let bytes = std::fs::read(path)?;
@@ -116,7 +116,7 @@ pub fn to_markdown(path: impl AsRef<Path>) -> Result<String, ConvertError> {
 
 /// Convert an in-memory document to Markdown. Pass a [`Format`] to select the
 /// parser, or `None` to detect it from the content ([`Format::from_bytes`]),
-/// which signature-less formats (CSV) have to name explicitly.
+/// which signature-less formats (CSV, EML) have to name explicitly.
 pub fn to_markdown_bytes(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
