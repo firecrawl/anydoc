@@ -131,7 +131,8 @@ export declare const enum Format {
   xlsx = 'xlsx',
   ods = 'ods',
   odp = 'odp',
-  csv = 'csv'
+  csv = 'csv',
+  eml = 'eml'
 }
 
 /**

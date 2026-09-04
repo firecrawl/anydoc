@@ -3,7 +3,7 @@
 
 const { readFile, writeFile } = require('node:fs/promises')
 
-const FORMATS = 'doc, docx, odt, pdf, ppt, pptx, rtf, epub, xlsx, ods, odp, csv'
+const FORMATS = 'doc, docx, odt, pdf, ppt, pptx, rtf, epub, xlsx, ods, odp, csv, eml'
 
 const HELP = `anydoc: convert documents to GitHub-Flavored Markdown
 
@@ -32,8 +32,8 @@ Options:
   -V, --version          Print the version and exit
 
 The format is detected from the file content; the file extension is the
-fallback for signature-less formats (CSV). stdin has no extension, so CSV
-input from stdin needs --format csv. Scanned or image-only pages need OCR,
+fallback for signature-less formats (CSV, EML). stdin has no extension, so
+CSV and EML input from stdin needs --format csv or --format eml. Scanned or image-only pages need OCR,
 which anydoc does not do: the document exits 3, or goes to Firecrawl Parse
 with --ocr hosted.
 

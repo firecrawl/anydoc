@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://skills.sh/b/firecrawl/anydoc)](https://skills.sh/firecrawl/anydoc)
 
-Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
+Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, email, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
 
 Built by [Firecrawl](https://firecrawl.dev) to turn any office document into LLM-ready Markdown in single-digit milliseconds, with one consistent output no matter which format goes in. It powers [Firecrawl Parse](https://firecrawl.dev/parse), so if you'd rather not run it yourself, the hosted API gives you the same conversion plus our OCR models for the scanned pages anydoc can't read on its own.
 
@@ -167,6 +167,7 @@ Only documents that need OCR leave the machine, and the whole document goes, sin
 | Rich Text Format | `.rtf`                                                     |
 | EPUB             | `.epub`                                                    |
 | CSV              | `.csv`                                                     |
+| Email            | `.eml`                                                     |
 | PDF              | `.pdf`                                                     |
 
 ## Benchmark
@@ -209,7 +210,7 @@ Speed is one warm conversion per document on a Ryzen 9 9950X3D (Windows 11, 64 G
 
 ## Format detection
 
-The format is read from the file content, using the marker its specification designates: the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types. CSV has no such marker, so the extension or an explicit format names it instead.
+The format is read from the file content, using the marker its specification designates: the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types. CSV and EML have no such marker, so the extension or an explicit format names them instead.
 
 ```rust
 Format::from_bytes(&bytes); // Some(Format::Docx), or None when nothing matches
@@ -261,7 +262,7 @@ document bytes
   ├─► format detection      → content markers, not the extension
   │
   ├─► format parser          → one per format (doc, docx, ppt, pptx, xls,
-  │                            xlsx, odt/ods/odp, rtf, epub, csv)
+  │                            xlsx, odt/ods/odp, rtf, epub, csv, eml)
   │         │
   │         └─► Document     → shared model: blocks, inlines, tables,
   │                            footnotes, assets

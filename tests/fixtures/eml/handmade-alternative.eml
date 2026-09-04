@@ -1,0 +1,20 @@
+From: Ada Lovelace <ada@example.com>
+To: Charles Babbage <charles@example.org>
+Cc: notes@example.net
+Subject: Engine notes
+Date: Tue, 4 Mar 2025 09:15:00 +1100
+Content-Type: multipart/alternative; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+The difference engine needs a wider carriage =E2=80=94 twenty digits, not =
+sixteen.
+
+Second paragraph, after a blank line.
+--b1
+Content-Type: text/html; charset="utf-8"
+
+<p>The difference engine needs a wider carriage.</p>
+--b1--

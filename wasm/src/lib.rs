@@ -32,6 +32,7 @@ pub enum Format {
     Ods = "ods",
     Odp = "odp",
     Csv = "csv",
+    Eml = "eml",
 }
 
 impl From<Format> for anydoc::Format {
@@ -49,6 +50,7 @@ impl From<Format> for anydoc::Format {
             Format::Ods => anydoc::Format::Ods,
             Format::Odp => anydoc::Format::Odp,
             Format::Csv => anydoc::Format::Csv,
+            Format::Eml => anydoc::Format::Eml,
             Format::__Invalid => unreachable!("wasm-bindgen rejects invalid enum strings"),
         }
     }
@@ -69,6 +71,7 @@ impl From<anydoc::Format> for Format {
             anydoc::Format::Ods => Format::Ods,
             anydoc::Format::Odp => Format::Odp,
             anydoc::Format::Csv => Format::Csv,
+            anydoc::Format::Eml => Format::Eml,
         }
     }
 }
