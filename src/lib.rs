@@ -8,6 +8,12 @@
 
 pub mod model;
 
+// The command line shared by the `anydoc` binary and the Python package's
+// console script. Hidden from the docs: it is an implementation detail of
+// those front ends, not a stable library API.
+#[doc(hidden)]
+pub mod cli;
+
 mod error;
 mod formats;
 mod package;

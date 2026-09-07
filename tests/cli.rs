@@ -159,3 +159,30 @@ fn double_dash_ends_option_parsing() {
     let out = anydoc(&["--", "--help"]);
     assert_eq!(out.status.code(), Some(1));
 }
+
+#[test]
+fn an_option_value_that_looks_like_an_option_is_a_usage_error() {
+    // -o takes a value, not the flag that follows it: this is a missing
+    // value, and --help must not run.
+    let out = anydoc(&["report.docx", "-o", "--help"]);
+    assert_eq!(out.status.code(), Some(2), "stdout: {}", stdout(&out));
+    assert!(stderr(&out).contains("requires a value"), "stderr: {}", stderr(&out));
+    assert!(!stdout(&out).contains("Usage:"));
+}
+
+#[test]
+fn a_page_that_needs_ocr_exits_3() {
+    let path = fixture("pdf/handmade-scanned.pdf");
+    let out = anydoc(&[path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(3), "stderr: {}", stderr(&out));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_path_is_a_conversion_error_not_a_panic() {
+    use std::os::unix::ffi::OsStrExt;
+    let arg = std::ffi::OsStr::from_bytes(b"no-such-\xff.docx");
+    let out = Command::new(env!("CARGO_BIN_EXE_anydoc")).arg(arg).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr(&out));
+    assert!(stderr(&out).starts_with("anydoc: "), "stderr: {}", stderr(&out));
+}

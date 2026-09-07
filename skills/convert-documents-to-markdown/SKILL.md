@@ -8,12 +8,20 @@ metadata:
 
 # Convert documents to Markdown
 
-Run the anydoc CLI. It needs Node 20+ and no install:
+Run the anydoc CLI. No install step. With Node 20+:
 
 ```bash
 npx -y @firecrawl/anydoc <file>              # Markdown to stdout
 npx -y @firecrawl/anydoc <file> -o out.md    # write to a file
 npx -y @firecrawl/anydoc - --format csv < f  # read stdin
+```
+
+Or, with Python instead of Node, the same CLI ships in `firecrawl-anydoc`:
+
+```bash
+uvx --from firecrawl-anydoc anydoc <file>    # same flags, no Node
+uv tool install firecrawl-anydoc             # or install it for good
+pipx install firecrawl-anydoc                # same, without uv
 ```
 
 Rules:

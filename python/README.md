@@ -52,6 +52,18 @@ anydoc converts locally and does not do OCR, so a PDF with scanned or image-only
 markdown = anydoc.to_markdown("scan.pdf", ocr="hosted")
 ```
 
+## Command line
+
+The package installs an `anydoc` command, so the conversion is one step away with no Node:
+
+```bash
+uvx --from firecrawl-anydoc anydoc report.docx          # Markdown to stdout
+uvx --from firecrawl-anydoc anydoc slides.pptx -o slides.md
+uvx --from firecrawl-anydoc anydoc - --format csv < data.csv
+```
+
+`uv tool install firecrawl-anydoc` (or `pipx install firecrawl-anydoc`) puts `anydoc` on the `PATH` for good; `python -m anydoc` works too. It is the same command line the `cargo install anydoc` binary provides: same options and the same exit codes (`0` success, `1` conversion error, `2` usage error). Run `anydoc --help` for the full list.
+
 ## Errors
 
 A conversion raises only when no complete Markdown could come out of the file. The exception type names what went wrong:
