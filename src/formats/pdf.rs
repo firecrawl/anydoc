@@ -13,6 +13,7 @@ use pdf_inspector::PdfError;
 
 pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
     let result = pdf_inspector::process_pdf_mem(bytes).map_err(map_error)?;
+    let has_text = result.markdown.as_deref().is_some_and(|m| !m.trim().is_empty());
     if !result.pages_needing_ocr.is_empty() {
         // Detection samples content streams and over-reports short or
         // image-heavy text pages; extraction knows which of them yielded none.
@@ -21,7 +22,17 @@ pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
             .map_err(map_error)?
             .pages_needing_ocr;
         if !pages.is_empty() {
-            return Err(ConvertError::NeedsOcr { pages, page_count: result.page_count });
+            if !has_text {
+                return Err(ConvertError::NeedsOcr { pages, page_count: result.page_count });
+            }
+            // The document as a whole already classified as text-based and
+            // extracted real content; a handful of confirmed pages should not
+            // discard it (#162), so report them instead of failing the document.
+            log::warn!(
+                "{} of {} pages need OCR and were not extracted",
+                pages.len(),
+                result.page_count
+            );
         }
     }
     if result.has_encoding_issues {
