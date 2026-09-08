@@ -1,10 +1,12 @@
 //! PDF via [pdf-inspector]: classification plus direct Markdown extraction.
 //!
 //! Unlike the other frontends, pdf-inspector emits Markdown itself, so PDFs
-//! bypass the document model and the shared GFM writer. OCR is out of scope
-//! here: a document with scanned or image-only pages errors naming them,
-//! whether that is every page or one of a hundred, because output missing
-//! those pages would read as complete.
+//! bypass the document model and the shared GFM writer. OCR extraction is out
+//! of scope here: a document that yields no readable text at all errors
+//! naming the pages that need it. A document that still has other readable
+//! text keeps that text and logs a warning naming the confirmed-OCR pages
+//! instead, since discarding the whole document over a handful of pages
+//! would lose more than it protects (#162).
 //!
 //! [pdf-inspector]: https://github.com/firecrawl/pdf-inspector
 
