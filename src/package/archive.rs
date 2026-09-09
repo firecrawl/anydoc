@@ -63,13 +63,8 @@ impl<'a> Package<'a> {
         // remains of the whole-archive total.
         let remaining_total = limits::MAX_TOTAL_BYTES.saturating_sub(self.total_read);
         let cap = limits::MAX_ENTRY_BYTES.min(remaining_total);
-        let mut bytes = Vec::new();
-        let read = (&mut file).take(cap + 1).read_to_end(&mut bytes).map_err(|e| {
-            ConvertError::Malformed {
-                part: Some(name.to_string()),
-                detail: format!("corrupt archive entry: {e}"),
-            }
-        })? as u64;
+        let bytes = read_part_bytes((&mut file).take(cap + 1), name)?;
+        let read = bytes.len() as u64;
         if read > cap {
             return Err(if remaining_total < limits::MAX_ENTRY_BYTES {
                 ConvertError::ResourceLimit {
@@ -138,6 +133,22 @@ impl<'a> Package<'a> {
     }
 }
 
+/// Read an already capped entry before committing it to the package cache.
+fn read_part_bytes(mut reader: impl Read, name: &str) -> Result<Vec<u8>, ConvertError> {
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).map_err(|e| match e.kind() {
+        std::io::ErrorKind::OutOfMemory => ConvertError::ResourceLimit {
+            limit: "memory_allocation",
+            detail: format!("allocation failed while reading {name}: {e}"),
+        },
+        _ => ConvertError::Malformed {
+            part: Some(name.to_string()),
+            detail: format!("corrupt archive entry: {e}"),
+        },
+    })?;
+    Ok(bytes)
+}
+
 /// A zip-open failure on OOXML input may actually be an OLE compound file:
 /// an encrypted package, or a legacy binary document with the wrong
 /// extension.
@@ -167,6 +178,80 @@ mod tests {
         w.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
         w.write_all(bytes).unwrap();
         w.finish().unwrap().into_inner()
+    }
+
+    struct FailingReader(std::io::ErrorKind);
+
+    impl Read for FailingReader {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            Err(self.0.into())
+        }
+    }
+
+    #[test]
+    fn allocation_read_errors_are_fatal_resource_limits() {
+        for prefix in [b"".as_slice(), b"partial content".as_slice()] {
+            let reader = Cursor::new(prefix).chain(FailingReader(std::io::ErrorKind::OutOfMemory));
+            let err = read_part_bytes(reader, "word/document.xml").unwrap_err();
+            assert!(
+                matches!(
+                    &err,
+                    ConvertError::ResourceLimit { limit: "memory_allocation", detail }
+                        if detail.contains("word/document.xml")
+                ),
+                "expected an allocation resource limit, got: {err}"
+            );
+            assert_eq!(err.code(), "resourceLimit");
+            assert!(err.is_fatal(), "optional parts must not swallow allocation failures");
+        }
+    }
+
+    #[test]
+    fn invalid_data_read_errors_remain_malformed() {
+        for prefix in [b"".as_slice(), b"partial content".as_slice()] {
+            let reader = Cursor::new(prefix).chain(FailingReader(std::io::ErrorKind::InvalidData));
+            let err = read_part_bytes(reader, "word/document.xml").unwrap_err();
+            assert!(matches!(
+                &err,
+                ConvertError::Malformed { part: Some(part), detail }
+                    if part == "word/document.xml"
+                        && detail == &format!("corrupt archive entry: {}",
+                            std::io::Error::from(std::io::ErrorKind::InvalidData))
+            ));
+            assert_eq!(err.code(), "malformed");
+            assert!(!err.is_fatal());
+        }
+    }
+
+    #[test]
+    fn corrupt_entry_is_not_cached_or_charged() {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "word/document.xml",
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .unwrap();
+        writer.write_all(b"<document/>").unwrap();
+        let mut data = writer.finish().unwrap().into_inner();
+        let start = zip::ZipArchive::new(Cursor::new(data.as_slice()))
+            .unwrap()
+            .by_name("word/document.xml")
+            .unwrap()
+            .data_start()
+            .unwrap() as usize;
+        data[start] ^= 1; // Change the payload without updating its CRC.
+        let mut pkg = Package::open(&data).unwrap();
+        let err = pkg.part("word/document.xml").unwrap_err();
+        assert!(matches!(&err, ConvertError::Malformed { part: Some(part), detail }
+            if part == "word/document.xml" && detail.starts_with("corrupt archive entry: ")));
+        assert!(!err.is_fatal());
+        assert!(pkg.cache.is_empty());
+        assert_eq!(pkg.total_read, 0);
+        assert!(pkg.optional_part("word/document.xml").unwrap().is_none());
+        assert!(pkg.cache.is_empty());
+        assert_eq!(pkg.total_read, 0);
     }
 
     #[test]

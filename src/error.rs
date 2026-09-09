@@ -2,7 +2,8 @@
 //!
 //! An error means a complete conversion was impossible: the input was
 //! unreadable or structurally unusable, encrypted, or crossed a fixed
-//! safety/resource limit. Recoverable producer quirks never surface here -
+//! safety/resource limit, or encountered a recoverable allocation failure.
+//! Recoverable producer quirks never surface here -
 //! they are recovered or skipped (and logged via the `log` facade) while
 //! conversion continues.
 
@@ -34,8 +35,9 @@ pub enum ConvertError {
     /// The document is encrypted or password-protected.
     Encrypted,
     /// A fixed safety limit was exceeded (decompression, nesting depth, node
-    /// count, repeat expansion, retained asset bytes). These are hard errors
-    /// in every case; see `package::limits` for the documented defaults.
+    /// count, repeat expansion, retained asset bytes), or an allocation failed
+    /// recoverably (`memory_allocation`). These are hard errors in every case;
+    /// see `package::limits` for the documented fixed limits.
     ResourceLimit {
         /// Name of the limit that was hit.
         limit: &'static str,
@@ -117,8 +119,8 @@ impl ConvertError {
         ConvertError::Malformed { part: Some(part.into()), detail: detail.into() }
     }
 
-    /// True when recovery must not swallow this error: fixed safety limits
-    /// hard-fail in every context, including optional parts.
+    /// True when recovery must not swallow this error: resource limits and
+    /// recoverable allocation failures hard-fail even for optional parts.
     pub(crate) fn is_fatal(&self) -> bool {
         matches!(self, ConvertError::ResourceLimit { .. })
     }

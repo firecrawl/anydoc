@@ -57,7 +57,7 @@ try {
 | `needsOcr`      | Pages of a PDF are scanned or image-only; `pages` names them        |
 | `malformed`     | Structurally unusable: no meaningful content could be extracted     |
 | `encrypted`     | Encrypted or password-protected                                     |
-| `resourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |
+| `resourceLimit` | Crossed a fixed safety limit or encountered a recoverable allocation failure   |
 | `missingPart`   | A part required for any meaningful output is absent                 |
 
 `error.message` carries the detail, naming the package part at fault where the format identifies one. TypeScript gets the union as `ConvertErrorCode`. The crate's `io` code has no counterpart here: there is no filesystem to read from.

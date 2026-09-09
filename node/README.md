@@ -88,7 +88,7 @@ try {
 | `needsOcr`      | Scanned or image-only pages of a PDF, listed in `pages`             |
 | `malformed`     | Structurally unusable: no meaningful content could be extracted     |
 | `encrypted`     | Encrypted or password-protected                                     |
-| `resourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |
+| `resourceLimit` | Crossed a fixed safety limit or encountered a recoverable allocation failure   |
 | `missingPart`   | A part required for any meaningful output is absent                 |
 | `io`            | The file could not be read, from `toMarkdown` only                  |
 | `hosted`        | `ocr: 'hosted'` could not get the document through Firecrawl Parse  |
