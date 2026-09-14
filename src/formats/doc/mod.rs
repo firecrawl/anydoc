@@ -23,7 +23,7 @@ use crate::shared::grid::{CellProp, GridRow, build_edge_table};
 use crate::shared::list::MarkerKind;
 use crate::shared::list::{ListEntry, ListKey, flush_list};
 use lists::{LEVELS, ListDef, Lists};
-use sprm::{PapDelta, Tap, apply_chpx, apply_pap_sprms, chpx_istd};
+use sprm::{Chp, PapDelta, Tap, apply_chpx, apply_pap_sprms, chpx_istd};
 use std::collections::HashMap;
 use std::io::Cursor;
 use stsh::Stylesheet;
@@ -80,7 +80,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
 
     // Note references (CP-indexed) and note body ranges.
     let mut note_refs: HashMap<usize, String> = HashMap::new();
-    let mut note_ranges: Vec<(usize, usize, String, NoteKind)> = Vec::new();
+    let mut note_ranges = Vec::new();
     let ftn_base = ccp_text;
     let edn_base = ccp_text + ccp_ftn + ccp_hdd + ccp_mcr + ccp_atn;
     for (ref_off, txt_off, base, prefix, kind) in [
@@ -94,7 +94,8 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             if i + 1 < txt_cps.len() {
                 let lo = text.index_of_cp(base + txt_cps[i] as usize);
                 let hi = text.index_of_cp(base + txt_cps[i + 1] as usize);
-                note_ranges.push((lo, hi, format!("{prefix}{i}"), kind));
+                let reference = text.index_of_cp(ref_cps[i] as usize);
+                note_ranges.push((lo, hi, reference, format!("{prefix}{i}"), kind));
             }
         }
     }
@@ -116,7 +117,17 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     };
     let blocks = assembler.build_blocks(0, main_end)?;
     let mut notes = Vec::new();
-    for (lo, hi, id, kind) in note_ranges {
+    for (lo, hi, reference, id, kind) in note_ranges {
+        // The renderer also emits unreferenced notes. Dropping only the
+        // reference would therefore leak the deleted note's body and assets.
+        if assembler
+            .text
+            .fcs
+            .get(reference)
+            .is_some_and(|&fc| assembler.char_props(fc, reference).deleted)
+        {
+            continue;
+        }
         let lo = lo.min(assembler.text.chars.len());
         let hi = hi.min(assembler.text.chars.len());
         if lo >= hi {
@@ -245,6 +256,7 @@ fn prm0_grpprl(prm: u16) -> Option<Vec<u8>> {
     let isprm = (prm >> 1) & 0x7F;
     let val = (prm >> 8) as u8;
     let sprm: u16 = match isprm {
+        0x41 => 0x0800, // sprmCFRMarkDel
         0x0C => 0x260A, // sprmPIlvl
         0x18 => 0x2416, // sprmPFInTable
         0x19 => 0x2417, // sprmPFTtp
@@ -705,6 +717,25 @@ impl Assembler {
         while i < hi.min(self.text.chars.len()) {
             let c = self.text.chars[i];
             let fc = self.text.fcs[i];
+            let chp = self.char_props(fc, i);
+            if chp.deleted {
+                // Keep field delimiters balanced even when the instruction
+                // or result contains deleted runs. Cell/row delimiters must
+                // still advance the table grid; deletion is not a cell merge.
+                let structural = match c {
+                    '\u{7}' | '\u{13}' | '\u{14}' | '\u{15}' => true,
+                    '\r' => {
+                        let pap = self.effective_pap(fc, i);
+                        pap.effective.inner_cell.unwrap_or(false)
+                            || pap.effective.inner_ttp.unwrap_or(false)
+                    }
+                    _ => false,
+                };
+                if !structural {
+                    i += 1;
+                    continue;
+                }
+            }
             if let Some(id) = self.note_refs.get(&i) {
                 para.push_inline(Inline::NoteRef(id.clone()));
                 i += 1;
@@ -775,12 +806,10 @@ impl Assembler {
                 '\u{14}' => para.field_separate(),
                 '\u{15}' => para.field_end(),
                 '\t' => {
-                    let style = self.char_style(fc, i);
-                    para.push_char(' ', style);
+                    para.push_char(' ', chp.style);
                 }
                 '\u{1e}' => {
-                    let style = self.char_style(fc, i);
-                    para.push_char('-', style);
+                    para.push_char('-', chp.style);
                 }
                 // Inline picture special character: extract the payload
                 // pointed at by sprmCPicLocation.
@@ -792,8 +821,7 @@ impl Assembler {
                 '\u{2}' | '\u{5}' | '\u{8}' | '\u{1f}' => {}
                 c if c.is_control() => {}
                 c => {
-                    let style = self.char_style(fc, i);
-                    para.push_char(c, style);
+                    para.push_char(c, chp.style);
                 }
             }
             i += 1;
@@ -811,20 +839,20 @@ impl Assembler {
         Ok(blocks)
     }
 
-    /// Effective character style in specification order: paragraph/character
+    /// Effective character properties in specification order: paragraph/character
     /// style chain -> CHPX (toggles vs the style base) -> piece Prm.
-    fn char_style(&self, fc: u32, char_index: usize) -> Style {
+    fn char_props(&self, fc: u32, char_index: usize) -> Chp {
         let para_istd = self.papx.lookup(fc).map(|p| p.istd).unwrap_or(0);
         let chpx = self.chpx.lookup(fc).map(|p| p.chpx.as_slice()).unwrap_or(&[]);
         let istd = chpx_istd(chpx).unwrap_or(para_istd);
         let base = self.stylesheet.get(istd).chp;
-        let mut style = apply_chpx(chpx, base, base);
+        let mut props = apply_chpx(chpx, Chp { style: base, deleted: false }, base);
         if let Some(&piece_idx) = self.text.piece_of.get(char_index)
             && let Some(piece_prc) = self.piece_prm(piece_idx as usize)
         {
-            style = apply_chpx(piece_prc, style, base);
+            props = apply_chpx(piece_prc, props, base);
         }
-        style
+        props
     }
 
     fn piece_prm(&self, piece_idx: usize) -> Option<&[u8]> {
