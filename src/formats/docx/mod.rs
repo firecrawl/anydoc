@@ -6,6 +6,7 @@
 mod content;
 mod numbering;
 mod styles;
+mod symbols;
 
 use crate::error::ConvertError;
 use crate::model::{Document, Note, NoteKind};
@@ -245,6 +246,67 @@ mod tests {
             crate::model::MarkerKind::LowerAlpha,
             "level 1 of the style's numbering"
         );
+    }
+
+    #[test]
+    fn symbol_checkboxes_preserve_states_and_run_style() {
+        for (font, empty, checked) in [
+            ("Wingdings 2", "00A3", "0052"),
+            ("wingdings 2", "F0A3", "F052"),
+            ("Wingdings", "006F", "00FE"),
+            ("WINGDINGS", "F06F", "F0FE"),
+        ] {
+            let document = format!(
+                r#"<w:document {W}><w:body><w:p>
+                <w:r><w:rPr><w:b/></w:rPr><w:sym w:font="{font}" w:char="{checked}"/><w:t> yes</w:t></w:r>
+                <w:r><w:t xml:space="preserve"> </w:t><w:sym w:font="{font}" w:char="{empty}"/><w:t> no ☑</w:t></w:r>
+                </w:p></w:body></w:document>"#
+            );
+            let bytes = docx_parts(&[("word/document.xml", &document)]);
+            let doc = parse(&bytes).unwrap();
+            let Some(Block::Paragraph(inlines)) = doc.blocks.first() else { panic!() };
+            assert_eq!(crate::model::inlines_to_plain_text(inlines), "☑ yes □ no ☑");
+            assert_eq!(
+                crate::to_markdown_bytes(&bytes, crate::Format::Docx).unwrap().trim(),
+                "**☑ yes** □ no ☑"
+            );
+        }
+    }
+
+    #[test]
+    fn symbol_checkboxes_in_table_keep_unselected_option_separate() {
+        let document = format!(
+            r#"<w:document {W}><w:body><w:tbl><w:tr><w:tc>
+            <w:p><w:r><w:t>☑ Required, amount:</w:t></w:r></w:p>
+            <w:p><w:r><w:sym w:font="Wingdings 2" w:char="00A3"/><w:t>Not required</w:t></w:r></w:p>
+            </w:tc></w:tr></w:tbl></w:body></w:document>"#
+        );
+        let bytes = docx_parts(&[("word/document.xml", &document)]);
+        let markdown = crate::to_markdown_bytes(&bytes, crate::Format::Docx).unwrap();
+        assert!(markdown.contains("☑ Required, amount:<br>□Not required"), "{markdown}");
+    }
+
+    #[test]
+    fn unknown_or_malformed_symbols_do_not_invent_checkbox_states() {
+        for attrs in [
+            r#"w:font="Arial" w:char="0052""#,
+            r#"w:font="Wingdings 2" w:char="0001""#,
+            r#"w:font="Wingdings 2" w:char="not-hex""#,
+            r#"w:font="Wingdings 2" w:char="100A3""#,
+            r#"w:font="Wingdings 2""#,
+            r#"w:char="00A3""#,
+        ] {
+            let document = format!(
+                r#"<w:document {W}><w:body><w:p><w:r>
+                <w:t>before</w:t><w:sym {attrs}/><w:t>after</w:t>
+                </w:r></w:p></w:body></w:document>"#
+            );
+            let bytes = docx_parts(&[("word/document.xml", &document)]);
+            assert_eq!(
+                crate::to_markdown_bytes(&bytes, crate::Format::Docx).unwrap().trim(),
+                "beforeafter"
+            );
+        }
     }
 
     #[test]
