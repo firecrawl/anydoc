@@ -3,7 +3,12 @@ use crate::package::xml::{Element, ns};
 
 pub(super) fn checkbox(symbol: &Element) -> Option<char> {
     let font = symbol.attr(ns::W, "font")?;
-    let code = u16::from_str_radix(symbol.attr(ns::W, "char")?, 16).ok()?;
+    let value = symbol.attr(ns::W, "char")?;
+    // Reject signs and overlong values even when integer parsing accepts them.
+    if value.is_empty() || value.len() > 4 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let code = u16::from_str_radix(value, 16).ok()?;
     // Word stores legacy symbol-font codes both as bytes and in U+F000..F0FF.
     let code = match code {
         0xf000..=0xf0ff => code - 0xf000,
