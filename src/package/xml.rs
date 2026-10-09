@@ -218,6 +218,7 @@ pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
             .map_err(|e| ConvertError::malformed(format!("unparseable xml: {e}")))?;
         match event {
             Event::Start(e) => {
+                check_start_delimiters(&e)?;
                 if stack.len() >= limits::MAX_XML_DEPTH {
                     return Err(ConvertError::ResourceLimit {
                         limit: "max_xml_depth",
@@ -228,6 +229,7 @@ pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
                 stack.push(start_to_element(&e, &reader, &mut interner));
             }
             Event::Empty(e) => {
+                check_start_delimiters(&e)?;
                 bump_nodes(&mut nodes)?;
                 let elem = start_to_element(&e, &reader, &mut interner);
                 attach(&mut stack, &mut root, Node::Elem(elem));
@@ -276,6 +278,15 @@ pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
         log::warn!("recovered malformed xml (unclosed or mismatched elements)");
     }
     Ok(root)
+}
+
+fn check_start_delimiters(e: &BytesStart<'_>) -> Result<(), ConvertError> {
+    // quick-xml can consume a bare '<' in text together with the next end
+    // tag as one start event. Recovering that tree silently loses content.
+    if e.name().as_ref().is_empty() || e.contains(&b'<') {
+        return Err(ConvertError::malformed("unparseable xml: invalid start-tag delimiter"));
+    }
+    Ok(())
 }
 
 /// Transcode an XML part to UTF-8 based on its BOM or encoding declaration.
@@ -591,6 +602,29 @@ mod tests {
         let r = &root.child_elems().next().unwrap();
         assert_eq!(r.attr_any("a"), Some("caf\u{e9}"));
         assert_eq!(r.text(), "\u{4f60}\u{597d}");
+    }
+
+    #[test]
+    fn bare_less_than_in_text_is_not_silently_recovered() {
+        for xml in [
+            "<r>Pump A < pump B</r>",
+            "<r>< First paragraph.</r>",
+            "<r>Pump A <pump B</r>",
+            "<r>< >later</r>",
+            "<r>< /></r>",
+            "<r a=\"bare < delimiter\"/>",
+        ] {
+            assert!(
+                matches!(parse_xml(xml.as_bytes()), Err(ConvertError::Malformed { .. })),
+                "{xml}"
+            );
+        }
+    }
+
+    #[test]
+    fn escaped_less_than_and_cdata_keep_all_text() {
+        let root = parse_xml(b"<r>before &lt; middle <![CDATA[< after]]></r>").unwrap();
+        assert_eq!(root.text(), "before < middle < after");
     }
 
     #[test]

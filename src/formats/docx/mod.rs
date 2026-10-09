@@ -143,6 +143,39 @@ mod tests {
 
     const W: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main""#;
 
+    #[test]
+    fn bare_less_than_returns_an_error_instead_of_truncated_markdown() {
+        for paragraph in ["Pump A < pump B in flow rate.", "< First paragraph."] {
+            let document = format!(
+                r#"<w:document {W}><w:body>
+                <w:p><w:r><w:t>Before.</w:t></w:r></w:p>
+                <w:p><w:r><w:t>{paragraph}</w:t></w:r></w:p>
+                <w:p><w:r><w:t>After.</w:t></w:r></w:p>
+                </w:body></w:document>"#
+            );
+            let bytes = docx_parts(&[("word/document.xml", &document)]);
+            assert!(matches!(
+                crate::to_markdown_bytes(&bytes, crate::Format::Docx),
+                Err(ConvertError::Malformed { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn escaped_less_than_keeps_later_paragraphs() {
+        let document = format!(
+            r#"<w:document {W}><w:body>
+            <w:p><w:r><w:t>Pump A &lt; pump B.</w:t></w:r></w:p>
+            <w:p><w:r><w:t>After.</w:t></w:r></w:p>
+            </w:body></w:document>"#
+        );
+        let bytes = docx_parts(&[("word/document.xml", &document)]);
+        assert_eq!(
+            crate::to_markdown_bytes(&bytes, crate::Format::Docx).unwrap(),
+            "Pump A < pump B.\n\nAfter.\n"
+        );
+    }
+
     fn find_image(blocks: &[Block]) -> Option<&Inline> {
         blocks.iter().find_map(|b| match b {
             Block::Paragraph(inlines) => inlines.iter().find(|i| matches!(i, Inline::Image { .. })),
