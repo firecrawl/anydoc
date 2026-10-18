@@ -21,6 +21,10 @@ Options:
                          ${FORMATS}
                          (extension aliases like xls, docm, ppsx resolve
                          to these)
+  -p, --password <pw>    Decrypt a password-protected OOXML file first.
+                         Falls back to the ANYDOC_PASSWORD environment
+                         variable when omitted (argv leaks into shell
+                         history and ps).
   --ocr <mode>           What to do with a PDF whose pages need OCR:
                          reject (default) exits 3; hosted sends the
                          document to Firecrawl Parse
@@ -63,7 +67,15 @@ function fail(code, message) {
 }
 
 function parseArgs(argv) {
-  const args = { input: null, output: null, format: null, ocr: null, apiKey: null, apiUrl: null }
+  const args = {
+    input: null,
+    output: null,
+    format: null,
+    password: process.env.ANYDOC_PASSWORD || null,
+    ocr: null,
+    apiKey: null,
+    apiUrl: null,
+  }
   let positionalOnly = false
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i]
@@ -108,6 +120,10 @@ function parseArgs(argv) {
       case '--format':
         args.format = value()
         break
+      case '-p':
+      case '--password':
+        args.password = value()
+        break
       case '--ocr':
         args.ocr = value()
         if (!OCR_MODES.includes(args.ocr)) {
@@ -146,7 +162,13 @@ async function main() {
 
   // Loaded after argument handling so --help and --version work even where
   // no native binding is available.
-  const { formatFromExtension, toMarkdown, toMarkdownBytes } = require('./anydoc.js')
+  const {
+    formatFromBytes,
+    formatFromExtension,
+    formatFromPath,
+    toMarkdown,
+    toMarkdownBytes,
+  } = require('./anydoc.js')
 
   let format
   if (args.format !== null) {
@@ -156,13 +178,22 @@ async function main() {
     }
   }
 
-  const options = { ocr: args.ocr ?? undefined, apiKey: args.apiKey ?? undefined, apiUrl: args.apiUrl ?? undefined }
+  const options = {
+    ocr: args.ocr ?? undefined,
+    apiKey: args.apiKey ?? undefined,
+    apiUrl: args.apiUrl ?? undefined,
+    password: args.password ?? undefined,
+  }
   let markdown
   try {
-    if (args.input === '-') {
-      markdown = await toMarkdownBytes(await readStdin(), format, options)
-    } else if (format !== undefined) {
-      markdown = await toMarkdownBytes(await readFile(args.input), format, options)
+    // A password only reaches the byte-level entry points; a path without
+    // --format would otherwise drop it on the floor (#130 review).
+    if (args.input === '-' || format !== undefined || args.password !== null) {
+      const bytes = await (args.input === '-' ? readStdin() : readFile(args.input))
+      // CSV has no content signature, so the path extension stays the last
+      // fallback exactly as the no-password flow treats it (#130 review).
+      const resolved = format ?? formatFromBytes(bytes) ?? formatFromPath(args.input)
+      markdown = await toMarkdownBytes(bytes, resolved, options)
     } else {
       markdown = await toMarkdown(args.input, options)
     }

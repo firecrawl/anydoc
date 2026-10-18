@@ -14,6 +14,12 @@ export interface ConvertOptions {
   apiKey?: string
   /** Firecrawl API URL for `hosted`, else `FIRECRAWL_API_URL`, else `https://api.firecrawl.dev`. */
   apiUrl?: string
+  /**
+   * Decrypt a password-protected OOXML package (`.docx`/`.xlsx`/`.pptx`)
+   * before converting. A wrong password rejects with the same encrypted
+   * error as no password at all.
+   */
+  password?: string
 }
 
 /**
@@ -31,10 +37,13 @@ export declare function toMarkdown(path: string, options?: ConvertOptions): Prom
  * detected from the content, which signature-less formats (CSV) have to name
  * explicitly.
  *
+ * The third argument may be a password string or a `ConvertOptions` object
+ * (OCR settings and/or `password`).
+ *
  * Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
  */
 export declare function toMarkdownBytes(
   bytes: Uint8Array,
   format?: Format | null,
-  options?: ConvertOptions,
+  passwordOrOptions?: string | ConvertOptions | null,
 ): Promise<string>

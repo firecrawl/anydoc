@@ -13,8 +13,13 @@ const TIMEOUT_MS = 300_000
  * Convert a document file to Markdown. `options.ocr` decides what happens to
  * a PDF whose pages need OCR: `'reject'` (the default) rejects with
  * `needsOcr`, `'hosted'` sends the document to Firecrawl Parse instead.
+ * `options.password` decrypts a password-protected OOXML package first.
  */
 async function toMarkdown(path, options) {
+  // Password only reaches the byte-level native entry point.
+  if (options?.password) {
+    return toMarkdownBytes(await readFile(path), native.formatFromPath(path), options)
+  }
   try {
     return await native.toMarkdown(path)
   } catch (error) {
@@ -23,13 +28,30 @@ async function toMarkdown(path, options) {
   }
 }
 
-/** `toMarkdown` for bytes; `options` as there. */
-async function toMarkdownBytes(bytes, format, options) {
+/**
+ * `toMarkdown` for bytes. The third argument is either a password string
+ * (native/bindings shape) or a `ConvertOptions` object (OCR + password).
+ */
+async function toMarkdownBytes(bytes, format, passwordOrOptions) {
+  const { password, options } = splitPasswordOptions(passwordOrOptions)
   try {
-    return await native.toMarkdownBytes(bytes, format)
+    return await native.toMarkdownBytes(bytes, format, password)
   } catch (error) {
     if (!sendsToHosted(error, options)) throw error
     return parseHosted(bytes, 'document.pdf', options)
+  }
+}
+
+function splitPasswordOptions(passwordOrOptions) {
+  if (
+    passwordOrOptions == null ||
+    typeof passwordOrOptions === 'string'
+  ) {
+    return { password: passwordOrOptions ?? null, options: undefined }
+  }
+  return {
+    password: passwordOrOptions.password ?? null,
+    options: passwordOrOptions,
   }
 }
 
