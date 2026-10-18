@@ -195,9 +195,22 @@ fn to_document(
     document::document(py, parsed)
 }
 
+/// Run the `anydoc` command line and return its process exit code. `argv` is
+/// the argument list without the program name. Output goes to this process's
+/// own stdout/stderr, so this is only useful from the package's console entry
+/// point (`anydoc`, `python -m anydoc`); it is the same command the
+/// `cargo install anydoc` binary runs. `OsString` keeps non-UTF-8 filenames
+/// intact, so they reach the converter (and fail as I/O) just as they do
+/// through the binary, rather than raising here.
+#[pyfunction]
+fn _cli(py: Python<'_>, argv: Vec<std::ffi::OsString>) -> i32 {
+    py.detach(|| anydoc::cli::run(argv))
+}
+
 /// Convert documents to GitHub-Flavored Markdown.
 #[pymodule]
 fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(_cli, m)?)?;
     m.add_function(wrap_pyfunction!(format_from_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(format_from_extension, m)?)?;
     m.add_function(wrap_pyfunction!(format_from_path, m)?)?;

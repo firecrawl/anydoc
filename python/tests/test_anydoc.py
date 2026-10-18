@@ -4,6 +4,8 @@ import ast
 import io
 import json
 import os
+import subprocess
+import sys
 import threading
 import unittest
 import zipfile
@@ -151,6 +153,51 @@ class AnydocTest(unittest.TestCase):
             anydoc.to_markdown("no-such-file.docx")
         with self.assertRaisesRegex(ValueError, "unknown format"):
             anydoc.to_markdown_bytes(b"", "wat")
+
+    def test_the_command_line_converts_a_document_and_reports_its_exit_codes(self):
+        def anydoc_cli(*args, stdin=None):
+            return subprocess.run(
+                [sys.executable, "-m", "anydoc", *args],
+                capture_output=True,
+                text=True,
+                input=stdin,
+                timeout=30,
+            )
+
+        converted = anydoc_cli(str(OUTLINE))
+        self.assertEqual(converted.returncode, 0, converted.stderr)
+        self.assertRegex(converted.stdout, r"(?m)^# ")
+
+        # stdin has no extension, so signature-less CSV has to be named.
+        piped = anydoc_cli("-", "--format", "csv", stdin=CSV.read_text())
+        self.assertEqual(piped.returncode, 0, piped.stderr)
+        self.assertIn("| --- |", piped.stdout)
+
+        # No input at all is a usage error; an unreadable file is a conversion
+        # error; a scanned page needs OCR (exit 3). Each names itself on stderr.
+        usage = anydoc_cli()
+        self.assertEqual(usage.returncode, 2)
+        self.assertIn("missing input", usage.stderr)
+
+        unreadable = anydoc_cli("no-such-file.docx")
+        self.assertEqual(unreadable.returncode, 1)
+        self.assertIn("no-such-file.docx", unreadable.stderr)
+
+        needs_ocr = anydoc_cli(str(MIXED))
+        self.assertEqual(needs_ocr.returncode, 3, needs_ocr.stderr)
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX-only non-UTF-8 filename")
+    def test_the_command_line_survives_a_non_utf8_filename(self):
+        # The byte reaches sys.argv as a surrogate; it must pass through to the
+        # converter and fail as a normal read error, not raise UnicodeError.
+        result = subprocess.run(
+            [sys.executable, "-m", "anydoc", b"no-such-\xff.docx"],
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(result.stderr.startswith(b"anydoc: "), result.stderr)
+        self.assertNotIn(b"UnicodeError", result.stderr)
 
     def test_the_stubs_cover_the_module(self):
         stub = Path(anydoc.__file__).with_name("_anydoc.pyi")

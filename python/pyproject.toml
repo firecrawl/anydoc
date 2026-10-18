@@ -26,5 +26,10 @@ Homepage = "https://github.com/firecrawl/anydoc#readme"
 Repository = "https://github.com/firecrawl/anydoc"
 Issues = "https://github.com/firecrawl/anydoc/issues"
 
+# Console script, so `uvx --from firecrawl-anydoc anydoc <file>` and
+# `uv tool install firecrawl-anydoc` both give the Node-free CLI.
+[project.scripts]
+anydoc = "anydoc.__main__:main"
+
 [tool.maturin]
 module-name = "anydoc._anydoc"
