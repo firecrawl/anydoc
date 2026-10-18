@@ -7,9 +7,11 @@ use super::controls::{Checkboxes, cell_inlines, read_vml_checkboxes};
 use super::numfmt::{DateParts, NumberFormat, Rendered, builtin_code};
 use super::{format_duration_days, format_float, format_time_of_day};
 use crate::error::ConvertError;
-use crate::model::{Block, Cell, Document, GridBuilder, Inline, Table, TableKind};
+use crate::model::{Block, Cell, Document, GridBuilder, Inline, LinkTarget, Table, TableKind};
 use crate::package::limits;
-use crate::package::relationships::{Relationships, read_rels, rel_type, rels_part_for};
+use crate::package::relationships::{
+    Relationships, TargetMode, read_rels, rel_type, rels_part_for,
+};
 use crate::package::xml::{Element, ns};
 use crate::package::{Package, path};
 use crate::shared::header::resolve_header_rows;
@@ -19,6 +21,8 @@ use std::rc::Rc;
 
 pub(super) const SHARED_STRINGS_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+const HYPERLINK_REL: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 
 /// The grid bounds the format defines; a reference outside them is not a
 /// real cell.
@@ -82,7 +86,8 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
             failed += 1;
             continue;
         };
-        let mut content = read_sheet(worksheet, &shared, &styles, date1904);
+        let sheet_rels = read_rels(pkg, &rels_part_for(part))?;
+        let mut content = read_sheet(worksheet, &shared, &styles, date1904, &sheet_rels);
         content.checkboxes = read_vml_checkboxes(pkg, part)?;
         let Some(table) = build_table(content, &mut slots)? else {
             continue;
@@ -236,6 +241,8 @@ pub(super) fn resolve_format(id: u32, custom: &HashMap<u32, &str>) -> CellFormat
 pub(super) struct SheetContent {
     /// Rendered text by zero-based (row, col); empty results are absent.
     pub(super) cells: HashMap<(u32, u32), String>,
+    /// Hyperlinks attached to individual worksheet cells.
+    pub(super) hyperlinks: HashMap<(u32, u32), LinkTarget>,
     /// Form control checkboxes by the cell they are anchored in.
     pub(super) checkboxes: Checkboxes,
     pub(super) hidden_rows: HashSet<u32>,
@@ -250,6 +257,7 @@ fn read_sheet(
     shared: &[String],
     styles: &Styles,
     date1904: bool,
+    rels: &Relationships,
 ) -> SheetContent {
     let mut out = SheetContent::default();
     for cols in worksheet.find_all(ns::SML, "cols") {
@@ -312,6 +320,31 @@ fn read_sheet(
         let (r1, c1, r2, c2) = region;
         if r1 != r2 || c1 != c2 {
             out.merges.push(region);
+        }
+    }
+    for link in worksheet
+        .first_descendant(ns::SML, "hyperlinks")
+        .into_iter()
+        .flat_map(|links| links.find_all(ns::SML, "hyperlink"))
+    {
+        let Some(at) = link.attr_unqualified("ref").and_then(parse_ref) else {
+            continue;
+        };
+        let target = if let Some(location) = link.attr_unqualified("location") {
+            Some(LinkTarget::Anchor(location.to_string()))
+        } else {
+            link.attr_qualified(ns::R, "id")
+                .and_then(|id| rels.get(id))
+                .filter(|rel| rel.rel_type == HYPERLINK_REL)
+                .map(|rel| {
+                    crate::shared::fields::classify_rel_target(
+                        rel.mode == TargetMode::External,
+                        &rel.target,
+                    )
+                })
+        };
+        if let Some(target) = target {
+            out.hyperlinks.insert(at, target);
         }
     }
     out
@@ -414,6 +447,12 @@ pub(super) fn build_table(
     }
     for (at, text) in sheet.cells.drain() {
         cells.insert(at, vec![Inline::plain(text)]);
+    }
+    for (&at, target) in &sheet.hyperlinks {
+        if let Some(content) = cells.get_mut(&at) {
+            *content =
+                vec![Inline::Link { content: std::mem::take(content), target: target.clone() }];
+        }
     }
     // A merge with no surviving row or column disappears with its content.
     // One whose origin is hidden keeps its content at the first surviving
@@ -867,6 +906,31 @@ mod tests {
             texts(first_table(&doc)),
             vec![vec!["TRUE", "#DIV/0!", "=sum", "2026-03-15", "inline"]]
         );
+    }
+
+    #[test]
+    fn cell_hyperlinks_resolve_external_relationships_and_sheet_locations() {
+        let wb = Wb {
+            extra: vec![(
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdLink" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://docs.example.test/" TargetMode="External"/></Relationships>"#,
+            )],
+            ..one_sheet(
+                r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>External</t></is></c><c r="B1" t="inlineStr"><is><t>Internal</t></is></c></row></sheetData><hyperlinks><hyperlink ref="A1" r:id="rIdLink" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><hyperlink ref="B1" location="Sheet2!A1"/></hyperlinks>"#,
+            )
+        };
+        let doc = parse(&wb.build()).unwrap();
+        let table = first_table(&doc);
+        let link_at = |col| {
+            let CellSlot::Origin(cell) = &table.grid[0][col] else { panic!() };
+            let Block::Paragraph(inlines) = &cell.blocks[0] else { panic!() };
+            let Inline::Link { target, .. } = &inlines[0] else {
+                panic!("expected link at column {col}, got {inlines:?}")
+            };
+            target
+        };
+        assert_eq!(link_at(0), &LinkTarget::External("https://docs.example.test/".into()));
+        assert_eq!(link_at(1), &LinkTarget::Anchor("Sheet2!A1".into()));
     }
 
     #[test]
