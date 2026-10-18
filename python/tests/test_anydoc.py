@@ -20,6 +20,8 @@ CSV = FIXTURES / "csv" / "sheet.csv"
 ENCRYPTED = FIXTURES / "malformed" / "encrypted--errors.odt"
 ZIPBOMB = FIXTURES / "abuse" / "zipbomb--errors.docx"
 MIXED = FIXTURES / "pdf" / "handmade-mixed.pdf"
+PARTLY_SCANNED = FIXTURES / "pdf" / "handmade-partly-scanned.pdf"
+SCANNED = FIXTURES / "pdf" / "handmade-scanned.pdf"
 
 HOSTED_MARKDOWN = "# Read by the hosted parser\n"
 
@@ -133,6 +135,27 @@ class AnydocTest(unittest.TestCase):
             anydoc.to_markdown_bytes(package.getvalue(), "docx")
         self.assertEqual(caught.exception.part, "word/document.xml")
 
+    def test_ocr_skip_converts_the_pages_that_carry_text_and_names_the_rest(self):
+        converted = anydoc.to_markdown(PARTLY_SCANNED, ocr="skip")
+        self.assertEqual((converted.pages_needing_ocr, converted.page_count), ([2, 5], 5))
+        for page in ("one", "three", "four"):
+            self.assertIn(f"Readable page {page}", converted.markdown)
+        # The pages left out are reported, never written into the Markdown.
+        self.assertNotRegex(converted.markdown, r"(?i)OCR|not converted")
+
+        from_bytes = anydoc.to_markdown_bytes(PARTLY_SCANNED.read_bytes(), "pdf", ocr="skip")
+        self.assertEqual(from_bytes.markdown, converted.markdown)
+
+        # A document that converted whole reports no pages either way.
+        whole = anydoc.to_markdown_bytes(OUTLINE.read_bytes(), "docx", ocr="skip")
+        self.assertEqual(whole.pages_needing_ocr, [])
+        self.assertRegex(whole.markdown, r"(?m)^# ")
+
+    def test_ocr_skip_still_raises_when_no_page_carries_text(self):
+        with self.assertRaises(anydoc.NeedsOcrError) as caught:
+            anydoc.to_markdown(SCANNED, ocr="skip")
+        self.assertEqual((caught.exception.pages, caught.exception.page_count), ([1, 2], 2))
+
     def test_ocr_hosted_sends_a_pdf_with_scanned_pages_to_firecrawl_parse_and_nothing_else(self):
         reply = {"success": True, "data": {"markdown": HOSTED_MARKDOWN}}
         with hosted_stub(200, reply) as hits:
@@ -151,6 +174,8 @@ class AnydocTest(unittest.TestCase):
             anydoc.to_markdown("no-such-file.docx")
         with self.assertRaisesRegex(ValueError, "unknown format"):
             anydoc.to_markdown_bytes(b"", "wat")
+        with self.assertRaisesRegex(ValueError, "unknown ocr"):
+            anydoc.to_markdown_bytes_with(b"", "docx", "cloud")
 
     def test_the_stubs_cover_the_module(self):
         stub = Path(anydoc.__file__).with_name("_anydoc.pyi")

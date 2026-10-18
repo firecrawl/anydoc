@@ -65,6 +65,15 @@ const markdown = await toMarkdown('scan.pdf', { ocr: 'hosted' });
 
 On the CLI, `anydoc scan.pdf --ocr hosted`.
 
+Where OCR is not an option, `ocr: 'skip'` converts the pages that do carry text instead of rejecting, and resolves to a `Conversion` naming the pages it left out. The Markdown holds content and nothing else: the pages left out are reported as data, never written into the output.
+
+```js
+const { markdown, pagesNeedingOcr, pageCount } = await toMarkdown('contract.pdf', { ocr: 'skip' });
+// markdown: the readable pages. pagesNeedingOcr: [3]. pageCount: 80.
+```
+
+A PDF where no page yielded text still rejects with `needsOcr`. On the CLI, `anydoc contract.pdf --ocr skip` keeps stdout Markdown alone and names the pages on stderr.
+
 ## Errors
 
 A conversion rejects only when no complete Markdown could come out of the file. The rejection is an `Error` whose `code` names what went wrong:

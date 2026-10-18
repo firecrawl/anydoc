@@ -23,7 +23,9 @@ Options:
                          to these)
   --ocr <mode>           What to do with a PDF whose pages need OCR:
                          reject (default) exits 3; hosted sends the
-                         document to Firecrawl Parse
+                         document to Firecrawl Parse; skip converts the
+                         pages that carry text and reports the rest on
+                         stderr
   --api-key <key>        Firecrawl API key for --ocr hosted, else
                          FIRECRAWL_API_KEY, else keyless
   --api-url <url>        Firecrawl API URL for --ocr hosted, else
@@ -35,7 +37,9 @@ The format is detected from the file content; the file extension is the
 fallback for signature-less formats (CSV). stdin has no extension, so CSV
 input from stdin needs --format csv. Scanned or image-only pages need OCR,
 which anydoc does not do: the document exits 3, or goes to Firecrawl Parse
-with --ocr hosted.
+with --ocr hosted. With --ocr skip the readable pages are converted and the
+pages left out are named on stderr, so stdout stays Markdown alone; a
+document where no page yielded text still exits 3.
 
 Exit codes:
   0  success
@@ -49,9 +53,10 @@ Examples:
   anydoc - --format csv < data.csv
   curl -s https://example.com/paper.pdf | anydoc -
   anydoc scan.pdf --ocr hosted
+  anydoc contract.pdf --ocr skip
 `
 
-const OCR_MODES = ['reject', 'hosted']
+const OCR_MODES = ['reject', 'hosted', 'skip']
 
 const USAGE_ERROR = 2
 const CONVERSION_ERROR = 1
@@ -127,6 +132,17 @@ function parseArgs(argv) {
   return args
 }
 
+// `2, 5-7, 12` from ascending page numbers, as the needsOcr message spells it.
+function pageRanges(pages) {
+  const ranges = []
+  for (let i = 0; i < pages.length; i++) {
+    const start = pages[i]
+    while (i + 1 < pages.length && pages[i + 1] === pages[i] + 1) i++
+    ranges.push(pages[i] > start ? `${start}-${pages[i]}` : `${start}`)
+  }
+  return ranges.join(', ')
+}
+
 async function readStdin() {
   if (process.stdin.isTTY) {
     fail(USAGE_ERROR, 'stdin is a terminal; pipe or redirect a document into anydoc -')
@@ -159,12 +175,28 @@ async function main() {
   const options = { ocr: args.ocr ?? undefined, apiKey: args.apiKey ?? undefined, apiUrl: args.apiUrl ?? undefined }
   let markdown
   try {
+    let converted
     if (args.input === '-') {
-      markdown = await toMarkdownBytes(await readStdin(), format, options)
+      converted = await toMarkdownBytes(await readStdin(), format, options)
     } else if (format !== undefined) {
-      markdown = await toMarkdownBytes(await readFile(args.input), format, options)
+      converted = await toMarkdownBytes(await readFile(args.input), format, options)
     } else {
-      markdown = await toMarkdown(args.input, options)
+      converted = await toMarkdown(args.input, options)
+    }
+    // --ocr skip resolves to a Conversion; the pages it left out are a
+    // diagnostic, so they go to stderr and stdout stays Markdown alone.
+    if (typeof converted === 'string') {
+      markdown = converted
+    } else {
+      markdown = converted.markdown
+      const { pagesNeedingOcr: pages, pageCount } = converted
+      if (pages.length > 0) {
+        // Singular and plural as the needsOcr message spells them.
+        const left = pages.length === 1 ? `page ${pages[0]} needs` : `pages ${pageRanges(pages)} need`
+        process.stderr.write(
+          `anydoc: converted ${pageCount - pages.length} of ${pageCount} pages; ${left} OCR\n`,
+        )
+      }
     }
   } catch (error) {
     fail(error.code === 'needsOcr' ? NEEDS_OCR : CONVERSION_ERROR, error.message)

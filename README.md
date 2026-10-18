@@ -130,6 +130,11 @@ let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Csv)?;
 
 // Or stop at the document model, which also carries embedded assets:
 let document = anydoc::to_document(&bytes, None)?;
+
+// A PDF with scanned pages fails; convert the readable ones instead:
+let options = anydoc::Options::default().ocr(anydoc::Ocr::Skip);
+let converted = anydoc::to_markdown_with("contract.pdf", options)?;
+// converted.markdown, converted.pages_needing_ocr, converted.page_count
 ```
 
 ## OCR
@@ -142,7 +147,30 @@ anydoc reads text-based PDFs locally but does no OCR, so a PDF with scanned or i
 | Node   | `toMarkdown('scan.pdf', { ocr: 'hosted' })`    | `apiKey`                      |
 | Python | `anydoc.to_markdown("scan.pdf", ocr="hosted")` | `api_key`                     |
 
-Only documents that need OCR leave the machine, and the whole document goes, since Parse has no page selection. If Parse cannot convert it, Node rejects with `code: 'hosted'` and Python raises `HostedError`. `--api-url`, `apiUrl` and `api_url`, else `FIRECRAWL_API_URL`, point at another Parse deployment. The Rust crate has no `ocr` option and never makes network calls.
+Only documents that need OCR leave the machine, and the whole document goes, since Parse has no page selection. If Parse cannot convert it, Node rejects with `code: 'hosted'` and Python raises `HostedError`. `--api-url`, `apiUrl` and `api_url`, else `FIRECRAWL_API_URL`, point at another Parse deployment. The Rust crate has no `hosted` mode and never makes network calls.
+
+### Converting without the scanned pages
+
+Where OCR is not an option, `skip` converts the pages that do carry text instead of failing the document, and reports the pages it left out. One image on page 3 of an eighty-page contract then costs you page 3, not the other seventy-nine.
+
+|        | Opt in                                                | The pages left out             |
+| ------ | ----------------------------------------------------- | ------------------------------ |
+| CLI    | `anydoc contract.pdf --ocr skip`                      | named on stderr                |
+| Node   | `toMarkdown('contract.pdf', { ocr: 'skip' })`          | `pagesNeedingOcr`, `pageCount` |
+| Python | `anydoc.to_markdown("contract.pdf", ocr="skip")`      | `pages_needing_ocr`            |
+| Rust   | `to_markdown_with(path, Options::default().ocr(Ocr::Skip))` | `Conversion::pages_needing_ocr` |
+
+```js
+const { markdown, pagesNeedingOcr, pageCount } = await toMarkdown('contract.pdf', { ocr: 'skip' })
+// markdown: the readable pages. pagesNeedingOcr: [3]. pageCount: 80.
+```
+
+The Markdown holds content and nothing else: the pages left out are reported as data, never written into the output, so what you pass on to a reader or a model is unchanged by having asked. Under `skip` a PDF where *no* page yielded text still fails with `NeedsOcr` - there is nothing to hand back, and the error is what tells you the document needs OCR rather than better parsing. On the CLI, stdout stays Markdown alone and the report goes to stderr:
+
+```
+$ anydoc contract.pdf --ocr skip > contract.md
+anydoc: converted 79 of 80 pages; page 3 needs OCR
+```
 
 ## Features
 
@@ -153,7 +181,7 @@ Only documents that need OCR leave the machine, and the whole document goes, sin
 - **Content-based format detection.** The format is read from the bytes themselves (PDF header, RTF open group, OLE stream names, ZIP package mimetype), so mislabeled files still convert correctly.
 - **Fast.** Pure Rust, no ML models, no external services. Median conversion time is under 5ms per document.
 - **Bindings that stay out of the way.** Node.js conversion runs on the libuv thread pool and never blocks the event loop; Python releases the GIL so other threads keep running. TypeScript types and Python stubs ship with the packages.
-- **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required. Scanned pages can opt into [hosted OCR](#scanned-pdfs-ocr).
+- **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required. Scanned pages can opt into [hosted OCR](#ocr), or be [left out and reported](#converting-without-the-scanned-pages) so the rest of the document still converts.
 - **Agent ready.** Ships as an [Agent Skill](#agent-skill): one `npx skills add firecrawl/anydoc` and any agent can read office documents.
 
 ## Supported formats
@@ -251,7 +279,7 @@ match anydoc::to_markdown(path) {
 
 Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per variant, or `OSError` when the file cannot be read.
 
-anydoc converts locally and does not do OCR, so a PDF with scanned pages fails with `NeedsOcr`. Opt in with `ocr: 'hosted'` in Node, `ocr="hosted"` in Python or `--ocr hosted` on the CLI to send that document to [Firecrawl Parse](https://firecrawl.dev/parse). No signup needed. Set `FIRECRAWL_API_KEY` for higher limits.
+anydoc converts locally and does not do OCR, so a PDF with scanned pages fails with `NeedsOcr`. Opt in with `ocr: 'hosted'` in Node, `ocr="hosted"` in Python or `--ocr hosted` on the CLI to send that document to [Firecrawl Parse](https://firecrawl.dev/parse). No signup needed. Set `FIRECRAWL_API_KEY` for higher limits. To convert the readable pages instead, without leaving the machine, see [converting without the scanned pages](#converting-without-the-scanned-pages).
 
 ## How it works
 

@@ -70,6 +70,52 @@ impl From<anydoc::Format> for Format {
     }
 }
 
+/// What conversion does with PDF pages that need OCR.
+#[napi(string_enum)]
+#[derive(Clone, Copy)]
+#[allow(non_camel_case_types)]
+pub enum Ocr {
+    /// Reject with `needsOcr` naming the pages (the default).
+    reject,
+    /// Convert the pages that carry text and name the rest on
+    /// `pagesNeedingOcr`. A document where no page yielded text still
+    /// rejects with `needsOcr`.
+    skip,
+}
+
+impl From<Ocr> for anydoc::Ocr {
+    fn from(ocr: Ocr) -> Self {
+        match ocr {
+            Ocr::reject => anydoc::Ocr::Reject,
+            Ocr::skip => anydoc::Ocr::Skip,
+        }
+    }
+}
+
+/// Markdown from a conversion, and what the conversion left out.
+#[napi(object)]
+pub struct Conversion {
+    /// The Markdown. Content only: conversion never writes notes about
+    /// itself into the output.
+    pub markdown: String,
+    /// 1-indexed PDF pages left unconverted because they need OCR. Only
+    /// `ocr: 'skip'` can leave any. Empty for a document that converted
+    /// whole, and for every non-PDF format.
+    pub pages_needing_ocr: Vec<u32>,
+    /// Pages in the document, or 0 for the formats that do not paginate.
+    pub page_count: u32,
+}
+
+impl From<anydoc::Conversion> for Conversion {
+    fn from(converted: anydoc::Conversion) -> Self {
+        Conversion {
+            markdown: converted.markdown,
+            pages_needing_ocr: converted.pages_needing_ocr,
+            page_count: converted.page_count,
+        }
+    }
+}
+
 /// Detect the format from the content itself: the signature and identity each
 /// container specification designates (PDF header, RTF open group, OLE stream
 /// names, ZIP package mimetype/content types). Plain-text formats (CSV) carry
@@ -102,6 +148,18 @@ pub fn to_markdown(path: String) -> AsyncTask<MarkdownFileTask> {
     AsyncTask::new(MarkdownFileTask { path, failure: Failure::default() })
 }
 
+/// `toMarkdown` reporting what it left out. `ocr: 'skip'` converts a PDF
+/// whose other pages need OCR instead of rejecting; without it this is
+/// `toMarkdown` with the Markdown on `markdown`.
+#[napi(ts_return_type = "Promise<Conversion>")]
+pub fn to_markdown_with(path: String, ocr: Option<Ocr>) -> AsyncTask<ConversionFileTask> {
+    AsyncTask::new(ConversionFileTask {
+        path,
+        ocr: ocr.map(Into::into).unwrap_or_default(),
+        failure: Failure::default(),
+    })
+}
+
 /// Convert an in-memory document to Markdown. Without a format, it is
 /// detected from the content, which signature-less formats (CSV) have to name
 /// explicitly.
@@ -115,6 +173,22 @@ pub fn to_markdown_bytes(
     AsyncTask::new(MarkdownBytesTask {
         bytes: bytes.to_vec(),
         format: format.map(Into::into),
+        failure: Failure::default(),
+    })
+}
+
+/// `toMarkdownBytes` reporting what it left out; `ocr` as for
+/// `toMarkdownWith`.
+#[napi(ts_return_type = "Promise<Conversion>")]
+pub fn to_markdown_bytes_with(
+    bytes: Uint8Array,
+    format: Option<Format>,
+    ocr: Option<Ocr>,
+) -> AsyncTask<ConversionBytesTask> {
+    AsyncTask::new(ConversionBytesTask {
+        bytes: bytes.to_vec(),
+        format: format.map(Into::into),
+        ocr: ocr.map(Into::into).unwrap_or_default(),
         failure: Failure::default(),
     })
 }
@@ -218,6 +292,56 @@ impl Task for MarkdownBytesTask {
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output)
+    }
+
+    fn reject(&mut self, env: Env, error: Error) -> Result<Self::JsValue> {
+        Err(self.failure.reject(env, error))
+    }
+}
+
+pub struct ConversionFileTask {
+    path: String,
+    ocr: anydoc::Ocr,
+    failure: Failure,
+}
+
+impl Task for ConversionFileTask {
+    type Output = anydoc::Conversion;
+    type JsValue = Conversion;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let options = anydoc::Options::default().ocr(self.ocr);
+        anydoc::to_markdown_with(&self.path, options).map_err(|e| self.failure.capture(e))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output.into())
+    }
+
+    fn reject(&mut self, env: Env, error: Error) -> Result<Self::JsValue> {
+        Err(self.failure.reject(env, error))
+    }
+}
+
+pub struct ConversionBytesTask {
+    bytes: Vec<u8>,
+    format: Option<anydoc::Format>,
+    ocr: anydoc::Ocr,
+    failure: Failure,
+}
+
+impl Task for ConversionBytesTask {
+    type Output = anydoc::Conversion;
+    type JsValue = Conversion;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let options = anydoc::Options::default().ocr(self.ocr);
+        anydoc::to_markdown_bytes_with(&self.bytes, self.format, options)
+            .map_err(|e| self.failure.capture(e))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output.into())
     }
 
     fn reject(&mut self, env: Env, error: Error) -> Result<Self::JsValue> {

@@ -125,7 +125,7 @@ impl ConvertError {
 }
 
 /// `2, 5-7, 12` from ascending page numbers.
-fn page_ranges(pages: &[u32]) -> String {
+pub(crate) fn page_ranges(pages: &[u32]) -> String {
     let mut ranges = Vec::new();
     let mut pages = pages.iter().copied().peekable();
     while let Some(start) = pages.next() {

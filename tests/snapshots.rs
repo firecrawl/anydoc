@@ -127,6 +127,81 @@ fn scanned_pages_are_reported_not_dropped() {
     }
 }
 
+/// `Ocr::Skip` converts the pages that carry text, including the ones after
+/// a scanned page, and names the pages it left out rather than failing the
+/// whole document.
+#[test]
+fn skip_keeps_the_pages_after_a_scanned_one() {
+    let bytes = std::fs::read(fixture_root().join("pdf/handmade-partly-scanned.pdf")).unwrap();
+    let converted = convert_skipping_ocr(&bytes).expect("readable pages convert");
+    assert_eq!(converted.pages_needing_ocr, vec![2, 5]);
+    assert_eq!(converted.page_count, 5);
+    for page in ["one", "three", "four"] {
+        assert!(
+            converted.markdown.contains(&format!("Readable page {page}")),
+            "page {page} missing from {:?}",
+            converted.markdown
+        );
+    }
+    insta::assert_snapshot!("pdf__handmade-partly-scanned--skip", converted.markdown);
+}
+
+/// The Markdown carries content and nothing else: the pages left out are
+/// reported on the result, never written into output that a reader or a model
+/// will be handed.
+#[test]
+fn skip_writes_no_notices_into_the_markdown() {
+    let bytes = std::fs::read(fixture_root().join("pdf/handmade-partly-scanned.pdf")).unwrap();
+    let markdown = convert_skipping_ocr(&bytes).unwrap().markdown.to_lowercase();
+    for notice in ["ocr", "not converted", "image-only", "page 2", "page 5"] {
+        assert!(!markdown.contains(notice), "{notice:?} leaked into the Markdown: {markdown:?}");
+    }
+}
+
+/// A document where no page yielded text still fails under `Ocr::Skip`:
+/// there is no partial result to give, and the error is what tells a caller
+/// the document needs OCR rather than better parsing.
+#[test]
+fn skip_still_errors_when_no_page_has_text() {
+    let bytes = std::fs::read(fixture_root().join("pdf/handmade-scanned.pdf")).unwrap();
+    match convert_skipping_ocr(&bytes) {
+        Err(anydoc::ConvertError::NeedsOcr { pages, page_count }) => {
+            assert_eq!((pages, page_count), (vec![1, 2], 2));
+        }
+        other => panic!("expected NeedsOcr, got {other:?}"),
+    }
+}
+
+/// `Ocr::Skip` only ever changes a document that would otherwise have
+/// failed: a PDF whose pages all carry text converts identically either way,
+/// down to the byte.
+#[test]
+fn skip_matches_the_default_for_a_text_pdf() {
+    let bytes = std::fs::read(fixture_root().join("pdf/text.pdf")).unwrap();
+    let default = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Pdf).unwrap();
+    let skipped = convert_skipping_ocr(&bytes).unwrap();
+    assert_eq!(skipped.markdown, default);
+    assert!(skipped.pages_needing_ocr.is_empty());
+}
+
+/// Default options are the documented behavior of the plain functions, so
+/// the opt-in cannot drift into the default path.
+#[test]
+fn default_options_match_the_plain_functions() {
+    let bytes = std::fs::read(fixture_root().join("pdf/handmade-mixed.pdf")).unwrap();
+    let with = anydoc::to_markdown_bytes_with(&bytes, anydoc::Format::Pdf, Default::default());
+    assert!(matches!(with, Err(anydoc::ConvertError::NeedsOcr { .. })));
+    let text = std::fs::read(fixture_root().join("docx/text.docx")).unwrap();
+    let plain = anydoc::to_markdown_bytes(&text, anydoc::Format::Docx).unwrap();
+    let with = anydoc::to_markdown_bytes_with(&text, anydoc::Format::Docx, Default::default());
+    assert_eq!(with.unwrap().markdown, plain);
+}
+
+fn convert_skipping_ocr(bytes: &[u8]) -> Result<anydoc::Conversion, anydoc::ConvertError> {
+    let options = anydoc::Options::default().ocr(anydoc::Ocr::Skip);
+    anydoc::to_markdown_bytes_with(bytes, anydoc::Format::Pdf, options)
+}
+
 /// Embedded object payloads land in `Document::assets` with their identity
 /// and media type (the Markdown output shows only the alt text).
 #[test]

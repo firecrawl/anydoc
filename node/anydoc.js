@@ -12,9 +12,12 @@ const TIMEOUT_MS = 300_000
 /**
  * Convert a document file to Markdown. `options.ocr` decides what happens to
  * a PDF whose pages need OCR: `'reject'` (the default) rejects with
- * `needsOcr`, `'hosted'` sends the document to Firecrawl Parse instead.
+ * `needsOcr`, `'hosted'` sends the document to Firecrawl Parse instead, and
+ * `'skip'` converts the pages that carry text and resolves to a `Conversion`
+ * naming the pages it left out.
  */
 async function toMarkdown(path, options) {
+  if (skipsPages(options)) return native.toMarkdownWith(path, 'skip')
   try {
     return await native.toMarkdown(path)
   } catch (error) {
@@ -25,12 +28,19 @@ async function toMarkdown(path, options) {
 
 /** `toMarkdown` for bytes; `options` as there. */
 async function toMarkdownBytes(bytes, format, options) {
+  if (skipsPages(options)) return native.toMarkdownBytesWith(bytes, format, 'skip')
   try {
     return await native.toMarkdownBytes(bytes, format)
   } catch (error) {
     if (!sendsToHosted(error, options)) throw error
     return parseHosted(bytes, 'document.pdf', options)
   }
+}
+
+// `skip` resolves to a Conversion rather than a string, so it is decided
+// before conversion rather than as a recovery: there is no error to catch.
+function skipsPages(options) {
+  return options?.ocr === 'skip'
 }
 
 function sendsToHosted(error, options) {
@@ -97,7 +107,10 @@ module.exports.InlineKind = native.InlineKind
 module.exports.LinkTargetKind = native.LinkTargetKind
 module.exports.MarkerKind = native.MarkerKind
 module.exports.NoteKind = native.NoteKind
+module.exports.Ocr = native.Ocr
 module.exports.TableKind = native.TableKind
 module.exports.toDocument = native.toDocument
 module.exports.toMarkdown = toMarkdown
 module.exports.toMarkdownBytes = toMarkdownBytes
+module.exports.toMarkdownBytesWith = native.toMarkdownBytesWith
+module.exports.toMarkdownWith = native.toMarkdownWith

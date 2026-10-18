@@ -12,6 +12,7 @@ import {
   formatFromPath,
   toDocument,
   toMarkdownBytes,
+  toMarkdownBytesWith,
 } from './pkg/anydoc_wasm.js'
 
 const fixture = (name) => fileURLToPath(new URL(`../tests/fixtures/${name}`, import.meta.url))
@@ -24,6 +25,8 @@ const CSV = await readFile(fixture('csv/sheet.csv'))
 const PDF = await readFile(fixture('pdf/text.pdf'))
 const ENCRYPTED = await readFile(fixture('malformed/encrypted--errors.odt'))
 const MIXED = await readFile(fixture('pdf/handmade-mixed.pdf'))
+const PARTLY_SCANNED = await readFile(fixture('pdf/handmade-partly-scanned.pdf'))
+const SCANNED = await readFile(fixture('pdf/handmade-scanned.pdf'))
 
 test('toMarkdownBytes converts in memory', () => {
   const markdown = toMarkdownBytes(RICH, 'docx')
@@ -84,6 +87,23 @@ test('conversion errors throw a coded Error', () => {
   throws(() => toMarkdownBytes(ENCRYPTED, 'odt'), 'encrypted', /encrypted/)
   throws(() => toDocument(ENCRYPTED, 'odt'), 'encrypted', /encrypted/)
   throws(() => toMarkdownBytes(MIXED), 'needsOcr', /page 2 of 2 needs OCR/)
+})
+
+test("ocr: 'skip' converts the pages that carry text and names the rest", () => {
+  const { markdown, pagesNeedingOcr, pageCount } = toMarkdownBytesWith(PARTLY_SCANNED, 'pdf', 'skip')
+  assert.deepEqual([pagesNeedingOcr, pageCount], [[2, 5], 5])
+  assert.match(markdown, /Readable page three/)
+  // The pages left out are reported, never written into the Markdown.
+  assert.doesNotMatch(markdown, /OCR|not converted/i)
+  assert.throws(() => toMarkdownBytesWith(SCANNED, 'pdf', 'skip'), (error) => {
+    assert.equal(error.code, 'needsOcr')
+    return true
+  })
+  // Without it, the report form is the default: rejecting is still the default.
+  assert.throws(() => toMarkdownBytesWith(PARTLY_SCANNED, 'pdf'), (error) => {
+    assert.equal(error.code, 'needsOcr')
+    return true
+  })
 })
 
 test('a pdf with scanned pages throws naming them instead of dropping them', () => {

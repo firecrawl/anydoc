@@ -52,6 +52,17 @@ anydoc converts locally and does not do OCR, so a PDF with scanned or image-only
 markdown = anydoc.to_markdown("scan.pdf", ocr="hosted")
 ```
 
+Where OCR is not an option, `ocr="skip"` converts the pages that do carry text instead of raising, and returns a `Conversion` naming the pages it left out. The Markdown holds content and nothing else: the pages left out are reported as data, never written into the output.
+
+```python
+converted = anydoc.to_markdown("contract.pdf", ocr="skip")
+converted.markdown           # the readable pages
+converted.pages_needing_ocr  # [3]
+converted.page_count         # 80
+```
+
+A PDF where no page yielded text still raises `NeedsOcrError`.
+
 ## Errors
 
 A conversion raises only when no complete Markdown could come out of the file. The exception type names what went wrong:
