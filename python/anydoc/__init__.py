@@ -45,15 +45,23 @@ Format = Literal[
 variants that share a parser (`.docm`, `.xlsm`, `.ppsx`, ...) map onto these
 via `format_from_bytes` or `format_from_extension`."""
 
-Ocr = Literal["reject", "hosted"]
+Ocr = Literal["reject", "hosted", "llm"]
 """What happens to a PDF whose pages need OCR. `reject` (the default) raises
 `NeedsOcrError` naming the pages. `hosted` sends the whole document to
-Firecrawl Parse instead, keyless unless a key is given. Documents anydoc
-converts itself never leave the machine."""
+Firecrawl Parse. `llm` rasterises the pages and transcribes them with a
+vision model through LiteLLM, configured from `ANYDOC_OCR_*` environment
+variables and needing the `llm` extra (`pip install firecrawl-anydoc[llm]`).
+Documents anydoc converts itself never leave the machine."""
 
 
 class HostedError(ConvertError):
     """`ocr="hosted"` could not get the document through Firecrawl Parse."""
+
+
+class LlmOcrError(ConvertError):
+    """`ocr="llm"` could not transcribe the document: the `llm` extra is not
+    installed, the `ANYDOC_OCR_*` settings are missing or invalid, or the
+    model call failed."""
 
 
 def to_markdown(
@@ -62,6 +70,7 @@ def to_markdown(
     ocr: Ocr = "reject",
     api_key: "str | None" = None,
     api_url: "str | None" = None,
+    model: "str | None" = None,
 ) -> str:
     """Convert a document file to Markdown. The format is detected from the
     file content; the extension is the fallback for signature-less formats
@@ -69,14 +78,18 @@ def to_markdown(
 
     For `ocr="hosted"`, `api_key` falls back to `FIRECRAWL_API_KEY`, then
     keyless; `api_url` to `FIRECRAWL_API_URL`, then
-    `https://api.firecrawl.dev`."""
+    `https://api.firecrawl.dev`. For `ocr="llm"`, `model` overrides
+    `ANYDOC_OCR_MODEL`; the rest of the configuration is read from
+    `ANYDOC_OCR_*`."""
     try:
         return _to_markdown(path)
     except NeedsOcrError:
-        if ocr != "hosted":
-            raise
-    path = Path(path)
-    return _parse_hosted(path.read_bytes(), path.name, api_key, api_url)
+        if ocr == "hosted":
+            path = Path(path)
+            return _parse_hosted(path.read_bytes(), path.name, api_key, api_url)
+        if ocr == "llm":
+            return _parse_llm(Path(path).read_bytes(), model)
+        raise
 
 
 def to_markdown_bytes(
@@ -86,17 +99,20 @@ def to_markdown_bytes(
     ocr: Ocr = "reject",
     api_key: "str | None" = None,
     api_url: "str | None" = None,
+    model: "str | None" = None,
 ) -> str:
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
-    name explicitly. `ocr`, `api_key` and `api_url` are as for
+    name explicitly. `ocr`, `api_key`, `api_url` and `model` are as for
     `to_markdown`."""
     try:
         return _to_markdown_bytes(data, format)
     except NeedsOcrError:
-        if ocr != "hosted":
-            raise
-    return _parse_hosted(bytes(data), "document.pdf", api_key, api_url)
+        if ocr == "hosted":
+            return _parse_hosted(bytes(data), "document.pdf", api_key, api_url)
+        if ocr == "llm":
+            return _parse_llm(bytes(data), model)
+        raise
 
 
 _API_URL = "https://api.firecrawl.dev"
@@ -180,6 +196,20 @@ def _version() -> str:
         return "unknown"
 
 
+def _parse_llm(data: bytes, model: "str | None") -> str:
+    """Rasterise the PDF and transcribe every page with a vision model through
+    LiteLLM. Setup problems and model-call failures alike surface as
+    `LlmOcrError`."""
+    from anydoc import _llm_ocr
+
+    try:
+        return _llm_ocr.parse_llm(data, model)
+    except _llm_ocr.LlmOcrConfigError as error:
+        raise LlmOcrError(str(error)) from error
+    except Exception as error:  # noqa: BLE001 - any litellm failure becomes LlmOcrError
+        raise LlmOcrError(f"llm OCR: {error}") from error
+
+
 __all__ = [
     "Asset",
     "Block",
@@ -195,6 +225,7 @@ __all__ = [
     "LinkTarget",
     "List",
     "ListItem",
+    "LlmOcrError",
     "MalformedError",
     "MissingPartError",
     "NeedsOcrError",

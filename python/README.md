@@ -52,6 +52,25 @@ anydoc converts locally and does not do OCR, so a PDF with scanned or image-only
 markdown = anydoc.to_markdown("scan.pdf", ocr="hosted")
 ```
 
+Or keep the document on your own infrastructure with `ocr="llm"`: it rasterises
+the pages and transcribes them with a vision model of your choosing through
+[LiteLLM](https://docs.litellm.ai). Install the extra and point it at a model:
+
+```bash
+pip install "firecrawl-anydoc[llm]"
+export ANYDOC_OCR_MODEL=openai/gpt-4o-mini   # any LiteLLM model string
+export OPENAI_API_KEY=...                    # or ANYDOC_OCR_API_KEY
+```
+
+```python
+markdown = anydoc.to_markdown("scan.pdf", ocr="llm")
+```
+
+Configuration is read from `ANYDOC_OCR_*`: `MODEL` (required), `API_BASE`,
+`API_KEY`, `PROMPT`, `DPI` (default 200), `MAX_PAGES` (default 100),
+`PAGE_CONCURRENCY` (default 4), `TIMEOUT` (seconds, default 120). `model=`
+overrides `ANYDOC_OCR_MODEL` per call. Failures raise `LlmOcrError`.
+
 ## Errors
 
 A conversion raises only when no complete Markdown could come out of the file. The exception type names what went wrong:
@@ -74,6 +93,7 @@ except (anydoc.EncryptedError, anydoc.UnsupportedError) as error:
 | `ResourceLimitError` | Crossed a fixed safety limit (decompression, nesting, node count)   |
 | `MissingPartError`   | A part required for any meaningful output is absent                 |
 | `HostedError`        | `ocr="hosted"` could not get the document through Firecrawl Parse   |
+| `LlmOcrError`        | `ocr="llm"` could not transcribe it (missing extra/config, or model failure) |
 | `OSError`            | The file could not be read, from `to_markdown` only                 |
 
 Every conversion failure subclasses `anydoc.ConvertError`, so catching that handles all of them at once. `MalformedError.part` and `MissingPartError.part` name the package part at fault, `ResourceLimitError.limit` names the limit crossed, and `str(error)` carries the whole message. A `format` argument naming no supported format raises `ValueError`.
