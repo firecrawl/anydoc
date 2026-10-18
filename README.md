@@ -101,10 +101,10 @@ import init, { toMarkdownBytes, toDocument } from '@firecrawl/anydoc-wasm';
 await init();
 
 // From bytes, with the format detected from the content:
-const markdown = toMarkdownBytes(bytes);
+const markdown = await toMarkdownBytes(bytes);
 
 // Or name it, which signature-less formats (CSV) need:
-const fromCsv = toMarkdownBytes(bytes, 'csv');
+const fromCsv = await toMarkdownBytes(bytes, 'csv');
 
 // Or stop at the document model, which also carries embedded assets:
 const document = toDocument(bytes);
@@ -136,13 +136,14 @@ let document = anydoc::to_document(&bytes, None)?;
 
 anydoc reads text-based PDFs locally but does no OCR, so a PDF with scanned or image-only pages fails with `NeedsOcr`. Opt in and those documents go to [Firecrawl Parse](https://firecrawl.dev/parse), which OCRs them and returns the same Markdown. No signup needed; set `FIRECRAWL_API_KEY` for higher limits.
 
-|        | Opt in                                         | Key, else `FIRECRAWL_API_KEY` |
-| ------ | ---------------------------------------------- | ----------------------------- |
-| CLI    | `anydoc scan.pdf --ocr hosted`                 | `--api-key <key>`             |
-| Node   | `toMarkdown('scan.pdf', { ocr: 'hosted' })`    | `apiKey`                      |
-| Python | `anydoc.to_markdown("scan.pdf", ocr="hosted")` | `api_key`                     |
+|        | Opt in                                             | Key, else `FIRECRAWL_API_KEY` |
+| ------ | -------------------------------------------------- | ----------------------------- |
+| CLI    | `anydoc scan.pdf --ocr hosted`                     | `--api-key <key>`             |
+| Node   | `toMarkdown('scan.pdf', { ocr: 'hosted' })`        | `apiKey`                      |
+| Python | `anydoc.to_markdown("scan.pdf", ocr="hosted")`     | `api_key`                     |
+| wasm   | `toMarkdownBytes(bytes, 'pdf', { ocr: 'hosted' })` | `apiKey` only                 |
 
-Only documents that need OCR leave the machine, and the whole document goes, since Parse has no page selection. If Parse cannot convert it, Node rejects with `code: 'hosted'` and Python raises `HostedError`. `--api-url`, `apiUrl` and `api_url`, else `FIRECRAWL_API_URL`, point at another Parse deployment. The Rust crate has no `ocr` option and never makes network calls.
+Only documents that need OCR leave the machine, and the whole document goes, since Parse has no page selection. If Parse cannot convert it, Node and wasm reject with `code: 'hosted'` and Python raises `HostedError`. `--api-url`, `apiUrl` and `api_url`, else `FIRECRAWL_API_URL` (not in wasm), point at another Parse deployment. The Rust crate has no `ocr` option and never makes network calls.
 
 ## Features
 
@@ -251,7 +252,7 @@ match anydoc::to_markdown(path) {
 
 Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per variant, or `OSError` when the file cannot be read.
 
-anydoc converts locally and does not do OCR, so a PDF with scanned pages fails with `NeedsOcr`. Opt in with `ocr: 'hosted'` in Node, `ocr="hosted"` in Python or `--ocr hosted` on the CLI to send that document to [Firecrawl Parse](https://firecrawl.dev/parse). No signup needed. Set `FIRECRAWL_API_KEY` for higher limits.
+anydoc converts locally and does not do OCR, so a PDF with scanned pages fails with `NeedsOcr`. Opt in with `ocr: 'hosted'` in Node and wasm, `ocr="hosted"` in Python or `--ocr hosted` on the CLI to send that document to [Firecrawl Parse](https://firecrawl.dev/parse). No signup needed. Set `FIRECRAWL_API_KEY`, or pass `apiKey` in wasm, for higher limits.
 
 ## How it works
 

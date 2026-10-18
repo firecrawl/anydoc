@@ -800,12 +800,12 @@
         $('result').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
 
-      function convert(name, bytes) {
+      async function convert(name, bytes) {
         const format = formatFromBytes(bytes) ?? formatFromPath(name);
         baseName = name.replace(/\.[^.]*$/, '') || 'document';
         try {
           const started = performance.now();
-          markdown = toMarkdownBytes(bytes, format);
+          markdown = await toMarkdownBytes(bytes, format);
           const ms = Math.max(1, Math.round(performance.now() - started));
           const chars = markdown.length.toLocaleString('en-US');
           showResult(

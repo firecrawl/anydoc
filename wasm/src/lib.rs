@@ -1,11 +1,14 @@
 //! WebAssembly bindings for anydoc.
 //!
 //! Mirrors the Rust lib API, minus the path-based `to_markdown`: wasm has no
-//! filesystem, so conversion always starts from bytes.
+//! filesystem, so conversion always starts from bytes. Like the Node and
+//! Python bindings, `toMarkdownBytes` can send a PDF that needs OCR to
+//! Firecrawl Parse (`hosted.rs`).
 
 use wasm_bindgen::prelude::*;
 
 mod document;
+mod hosted;
 mod typescript;
 
 pub use document::*;
@@ -21,8 +24,9 @@ pub enum Format {
     Odt = "odt",
     /// Converted with pdf-inspector, which emits Markdown directly:
     /// `toDocument` is unsupported for PDFs. Scanned or image-only pages
-    /// need OCR, which anydoc does not do: the document throws `needsOcr`
-    /// naming them.
+    /// need OCR, which anydoc does not do: the document rejects with
+    /// `needsOcr` naming them, unless `ocr: 'hosted'` sends it to Firecrawl
+    /// Parse.
     Pdf = "pdf",
     Ppt = "ppt",
     Pptx = "pptx",
@@ -94,14 +98,39 @@ pub fn format_from_path(path: &str) -> Option<Format> {
     anydoc::Format::from_path(std::path::Path::new(path)).map(Format::from)
 }
 
+#[wasm_bindgen]
+extern "C" {
+    /// Declared in `typescript.rs`.
+    #[wasm_bindgen(typescript_type = "ConvertOptions")]
+    pub type ConvertOptions;
+}
+
 /// Convert an in-memory document to Markdown. Without a format, it is
 /// detected from the content, which signature-less formats (CSV) have to name
-/// explicitly.
+/// explicitly. `options.ocr` decides what happens to a PDF whose pages need
+/// OCR: `'reject'` (the default) rejects with `needsOcr`, `'hosted'` sends
+/// the document to Firecrawl Parse instead.
 ///
-/// Throws an `Error` carrying a `ConvertErrorCode` on `code`.
+/// Conversion itself runs on the calling thread; only the hosted request
+/// waits on the network.
+///
+/// Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
 #[wasm_bindgen(js_name = toMarkdownBytes)]
-pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String, JsValue> {
-    anydoc::to_markdown_bytes(bytes, format.map(anydoc::Format::from)).map_err(convert_error)
+pub async fn to_markdown_bytes(
+    bytes: Vec<u8>,
+    format: Option<Format>,
+    options: Option<ConvertOptions>,
+) -> Result<String, JsValue> {
+    let error = match anydoc::to_markdown_bytes(&bytes, format.map(anydoc::Format::from)) {
+        Ok(markdown) => return Ok(markdown),
+        Err(error) => error,
+    };
+    match options {
+        Some(options) if error.code() == "needsOcr" && hosted::wants_hosted(&options) => {
+            hosted::parse_hosted(&bytes, &options).await
+        }
+        _ => Err(convert_error(error)),
+    }
 }
 
 /// Parse an in-memory document into the document model, which also carries

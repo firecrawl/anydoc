@@ -10,10 +10,10 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(typescript_custom_section)]
 const TYPESCRIPT: &str = r#"
 /**
- * `code` on the `Error` a failed conversion throws. Conversion fails only
- * when no complete Markdown could be produced; producer quirks are
- * recovered or skipped instead. The crate's `io` code has no wasm
- * counterpart: there is no filesystem to read from.
+ * `code` on the `Error` a failed conversion throws or rejects with.
+ * Conversion fails only when no complete Markdown could be produced;
+ * producer quirks are recovered or skipped instead. The crate's `io` code
+ * has no wasm counterpart: there is no filesystem to read from.
  */
 export type ConvertErrorCode =
   /** Unknown format, or one that cannot be converted. */
@@ -31,6 +31,23 @@ export type ConvertErrorCode =
   | 'resourceLimit'
   /** A part required for any meaningful output is absent. */
   | 'missingPart'
+  /** `ocr: 'hosted'` could not get the document through Firecrawl Parse. */
+  | 'hosted'
+
+/** What happens to a PDF whose pages need OCR. */
+export interface ConvertOptions {
+  /**
+   * `reject` (the default) rejects with `needsOcr` naming the pages.
+   * `hosted` sends the whole document to Firecrawl Parse instead, keyless
+   * unless a key is given. Documents anydoc converts itself never leave the
+   * page.
+   */
+  ocr?: 'reject' | 'hosted'
+  /** Firecrawl API key for `hosted`, else keyless. */
+  apiKey?: string
+  /** Firecrawl API URL for `hosted`, else `https://api.firecrawl.dev`. */
+  apiUrl?: string
+}
 
 /** The error thrown for a PDF with pages that need OCR. */
 export interface NeedsOcrError extends Error {
