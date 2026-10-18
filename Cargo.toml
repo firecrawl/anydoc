@@ -30,6 +30,7 @@ log = "0.4"
 pdf-inspector = "1.14.2"
 quick-xml = "0.41.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+unicode-properties = "0.1.4"
 
 [profile.release]
 lto = "thin"
