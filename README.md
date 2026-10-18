@@ -30,7 +30,6 @@ The [skill](skills/convert-documents-to-markdown/SKILL.md) teaches the agent to 
 npx @firecrawl/anydoc report.docx               # Markdown to stdout
 npx @firecrawl/anydoc slides.pptx -o slides.md  # or to a file
 npx @firecrawl/anydoc - --format csv < data.csv # read stdin
-npx @firecrawl/anydoc scan.pdf --ocr hosted     # scanned pages via Firecrawl Parse
 ```
 
 `npx` downloads the prebuilt binary for your platform on first run. For a permanent `anydoc` command, install globally with `npm install -g @firecrawl/anydoc`. Run `anydoc --help` for all options.
@@ -46,9 +45,6 @@ import { toDocument, toMarkdown, toMarkdownBytes } from '@firecrawl/anydoc';
 
 // From a file path:
 const markdown = await toMarkdown('report.docx');
-
-// To enable OCR:
-const markdown = await toMarkdown('report.docx', { ocr: 'hosted' );
 
 // From bytes, with the format detected from the content:
 const fromBytes = await toMarkdownBytes(bytes);
@@ -73,9 +69,6 @@ import anydoc
 
 # From a file path:
 markdown = anydoc.to_markdown("report.docx")
-
-# To enable OCR:
-markdown = anydoc.to_markdown("report.docx", ocr="hosted")
 
 # From bytes, with the format detected from the content:
 markdown = anydoc.to_markdown_bytes(data)
@@ -132,28 +125,15 @@ let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Csv)?;
 let document = anydoc::to_document(&bytes, None)?;
 ```
 
-## OCR
-
-anydoc reads text-based PDFs locally but does no OCR, so a PDF with scanned or image-only pages fails with `NeedsOcr`. Opt in and those documents go to [Firecrawl Parse](https://firecrawl.dev/parse), which OCRs them and returns the same Markdown. No signup needed; set `FIRECRAWL_API_KEY` for higher limits.
-
-|        | Opt in                                         | Key, else `FIRECRAWL_API_KEY` |
-| ------ | ---------------------------------------------- | ----------------------------- |
-| CLI    | `anydoc scan.pdf --ocr hosted`                 | `--api-key <key>`             |
-| Node   | `toMarkdown('scan.pdf', { ocr: 'hosted' })`    | `apiKey`                      |
-| Python | `anydoc.to_markdown("scan.pdf", ocr="hosted")` | `api_key`                     |
-
-Only documents that need OCR leave the machine, and the whole document goes, since Parse has no page selection. If Parse cannot convert it, Node rejects with `code: 'hosted'` and Python raises `HostedError`. `--api-url`, `apiUrl` and `api_url`, else `FIRECRAWL_API_URL`, point at another Parse deployment. The Rust crate has no `ocr` option and never makes network calls.
-
 ## Features
 
 - **One output for every format.** Each format parses into a shared document model and renders through a single Markdown serializer, so escaping, tables, heading anchors, and footnotes behave identically whether the input was a `.doc` from 2003 or a `.pptx` from yesterday.
 - **Full document structure.** Headings with anchors, bold/italic/strikethrough, inline code and code blocks, links and internal cross-references, bulleted/numbered/nested/task lists with the source's own numbering, tables with merged cells and header rows, block quotes, footnotes and endnotes, and speaker notes.
-- **Equations as LaTeX.** Word and PowerPoint (OMML), OpenDocument and EPUB (MathML), and RTF equations convert to GitHub-flavored math: `$...$` inline and `$$` blocks.
-- **Embedded assets.** Images and embedded objects render as their alt text in the Markdown, and the raw bytes stay available on the document model, tagged with their media type. Images with an external URL become ordinary Markdown images.
+- **Embedded assets.** Images and embedded objects become Markdown image refs of the form `![alt](asset:N)`, where `N` indexes `Document.assets` (raw bytes + media type). Rewrite those hrefs after writing the files out, or consume the document model directly. Images with an external URL become ordinary Markdown images.
 - **Content-based format detection.** The format is read from the bytes themselves (PDF header, RTF open group, OLE stream names, ZIP package mimetype), so mislabeled files still convert correctly.
 - **Fast.** Pure Rust, no ML models, no external services. Median conversion time is under 5ms per document.
 - **Bindings that stay out of the way.** Node.js conversion runs on the libuv thread pool and never blocks the event loop; Python releases the GIL so other threads keep running. TypeScript types and Python stubs ship with the packages.
-- **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required. Scanned pages can opt into [hosted OCR](#scanned-pdfs-ocr).
+- **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required.
 - **Agent ready.** Ships as an [Agent Skill](#agent-skill): one `npx skills add firecrawl/anydoc` and any agent can read office documents.
 
 ## Supported formats
@@ -221,17 +201,13 @@ The same three functions exist in Node (`formatFromBytes`, ...) and Python (`any
 
 ## Errors
 
-A conversion returns `Err` only when no complete Markdown could come out of the file. `ConvertError` names what went wrong:
+A conversion returns `Err` only when no meaningful Markdown could come out of the file. `ConvertError` names what went wrong:
 
 ```rust
 match anydoc::to_markdown(path) {
     Ok(markdown) => Some(markdown),
     // No document comes out of these, so record the file and take the next one.
-    Err(
-        error @ (ConvertError::Encrypted
-        | ConvertError::Unsupported(_)
-        | ConvertError::NeedsOcr { .. }),
-    ) => {
+    Err(error @ (ConvertError::Encrypted | ConvertError::Unsupported(_))) => {
         unconverted.push((path, error));
         None
     }
@@ -241,8 +217,7 @@ match anydoc::to_markdown(path) {
 
 | Variant         | Meaning                                                             |
 | --------------- | ------------------------------------------------------------------- |
-| `Unsupported`   | Unknown format, or one that cannot be converted                     |
-| `NeedsOcr`      | Scanned or image-only pages of a PDF, listed in `pages`             |
+| `Unsupported`   | Unknown format, or one that cannot be converted (an image-only PDF) |
 | `Malformed`     | Structurally unusable: no meaningful content could be extracted     |
 | `Encrypted`     | Encrypted or password-protected                                     |
 | `ResourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |
@@ -250,8 +225,6 @@ match anydoc::to_markdown(path) {
 | `Io`            | The file could not be read, from `to_markdown` only                 |
 
 Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per variant, or `OSError` when the file cannot be read.
-
-anydoc converts locally and does not do OCR, so a PDF with scanned pages fails with `NeedsOcr`. Opt in with `ocr: 'hosted'` in Node, `ocr="hosted"` in Python or `--ocr hosted` on the CLI to send that document to [Firecrawl Parse](https://firecrawl.dev/parse). No signup needed. Set `FIRECRAWL_API_KEY` for higher limits.
 
 ## How it works
 

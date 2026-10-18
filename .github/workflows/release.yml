@@ -466,18 +466,9 @@ jobs:
       - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
-        # Notes come from .github/releases/<tag>.md, committed with the version
-        # bump; a release without one gets generated notes.
         # --clobber keeps a re-run green when some assets already uploaded.
         run: |
           if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            notes=".github/releases/$GITHUB_REF_NAME.md"
-            if [ -f "$notes" ]; then
-              gh release create "$GITHUB_REF_NAME" --verify-tag \
-                --title "$(head -n 1 "$notes" | sed 's/^# //')" \
-                --notes-file <(tail -n +2 "$notes")
-            else
-              gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
-            fi
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
           fi
           gh release upload "$GITHUB_REF_NAME" assets/* --clobber

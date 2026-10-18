@@ -1,10 +1,9 @@
 //! Inline run normalization and rendering.
 
-use crate::model::{ImageSource, Inline, LinkTarget, Style, checkbox_text, inlines_are_empty};
+use crate::model::{ImageSource, Inline, LinkTarget, Style, inlines_are_empty};
 use crate::render::markdown::Ctx;
 use crate::render::markdown::escape::{
-    Delims, EscapeOpts, InlineContext, backtick_fence, escape_cell_code_span, escape_text,
-    escape_url_as_text, format_url,
+    EscapeOpts, InlineContext, backtick_fence, escape_text, escape_url_as_text, format_url,
 };
 use std::borrow::Cow;
 use std::fmt::Write as _;
@@ -16,8 +15,6 @@ pub(crate) enum Norm<'a> {
     Anchor(&'a str),
     NoteRef(&'a str),
     LineBreak,
-    Math(&'a str),
-    Checkbox(bool),
 }
 
 /// Single-pass normalization: drops empty runs, strips styling from
@@ -76,9 +73,6 @@ pub(crate) fn normalize<'a>(inlines: &'a [Inline], rc: &Ctx) -> Vec<Norm<'a>> {
             Inline::Anchor(id) => out.push(Norm::Anchor(id)),
             Inline::NoteRef(id) => out.push(Norm::NoteRef(id)),
             Inline::LineBreak => out.push(Norm::LineBreak),
-            Inline::Math(tex) if tex.trim().is_empty() => continue,
-            Inline::Math(tex) => out.push(Norm::Math(tex.trim())),
-            Inline::Checkbox(checked) => out.push(Norm::Checkbox(*checked)),
         }
     }
     out
@@ -90,32 +84,18 @@ pub(crate) fn render_inlines(inlines: &[Inline], ctx: InlineContext, rc: &Ctx) -
 
 fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, rc: &Ctx) -> String {
     let runs = normalize(inlines, rc);
-    let suffix = delims_ahead(&runs, rc);
     let mut out = String::new();
     for (idx, run) in runs.iter().enumerate() {
         match run {
             Norm::Text { text, style } => {
-                let next = runs.get(idx + 1);
                 let next_active = matches!(
-                    next,
-                    Some(Norm::Link { .. } | Norm::Image { .. } | Norm::NoteRef(_) | Norm::Math(_))
+                    runs.get(idx + 1),
+                    Some(Norm::Link { .. } | Norm::Image { .. } | Norm::NoteRef(_))
                 ) || matches!(
-                    next,
+                    runs.get(idx + 1),
                     Some(Norm::Text { style, .. }) if *style != Style::PLAIN
                 );
-                // A hard break renders as `\`, an anchor as `<a ...>`: not
-                // markup, but a nonspace character a run-final delimiter can
-                // be left-flanking against.
-                let next_nonspace = matches!(next, Some(Norm::Anchor(_) | Norm::Checkbox(_)))
-                    || (matches!(next, Some(Norm::LineBreak)) && ctx != InlineContext::Heading);
-                let opts = EscapeOpts {
-                    trailing_active: next_active,
-                    trailing_nonspace: next_nonspace,
-                    trailing_delims: suffix[idx + 1],
-                    in_label,
-                    ..Default::default()
-                };
-                render_text_run(text, *style, ctx, opts, &mut out)
+                render_text_run(text, *style, ctx, next_active, in_label, &mut out)
             }
             Norm::NoteRef(id) => {
                 if let Some(num) = rc.nums.get(*id) {
@@ -134,14 +114,6 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
                 InlineContext::Heading => out.push(' '),
                 InlineContext::TableCell => out.push('\n'),
             },
-            Norm::Math(tex) => push_math_span(tex, ctx, &mut out),
-            Norm::Checkbox(checked) => {
-                out.push_str(checkbox_text(*checked));
-                // The token stands apart from a caption that follows it.
-                if matches!(runs.get(idx + 1), Some(run) if !starts_with_space(run)) {
-                    out.push(' ');
-                }
-            }
         }
     }
     out
@@ -192,10 +164,16 @@ fn render_image(
                 escape_text(alt.trim(), ctx, EscapeOpts { in_label: true, ..Default::default() });
             let _ = write!(out, "![{}]({})", alt, format_url(url));
         }
-        // Embedded assets render as their alt text: Markdown cannot embed
-        // bytes, and the bytes stay available in `Document::assets`. A
-        // source-less image has only its alt text to offer.
-        ImageSource::Asset(_) | ImageSource::Unavailable => {
+        // Embedded assets cannot carry bytes in Markdown, but they keep a
+        // stable positional marker (`asset:N`) that indexes `Document::assets`
+        // so callers can rewrite the href after writing files out.
+        ImageSource::Asset(id) => {
+            let alt =
+                escape_text(alt.trim(), ctx, EscapeOpts { in_label: true, ..Default::default() });
+            let _ = write!(out, "![{}](asset:{})", alt, id.0);
+        }
+        // A source-less image has only its alt text to offer.
+        ImageSource::Unavailable => {
             if !alt.trim().is_empty() {
                 out.push_str(&escape_text(
                     alt.trim(),
@@ -207,122 +185,22 @@ fn render_image(
     }
 }
 
-/// Pairable delimiters the remaining runs will emit into the current rendered
-/// line: closer-capable literals in plain text, plus the markup that styled runs,
-/// code spans, links and images produce. A delimiter in an earlier run can
-/// pair with any of them across the run seam, hard breaks included.
-/// The delimiters each suffix of `runs` emits, indexed by where the suffix
-/// starts, so one reverse pass answers every run's lookahead.
-fn delims_ahead(runs: &[Norm], rc: &Ctx) -> Vec<Delims> {
-    let mut suffix = vec![Delims::default(); runs.len() + 1];
-    for idx in (0..runs.len()).rev() {
-        let mut delims = suffix[idx + 1];
-        delims.union(delims_of(&runs[idx], rc));
-        suffix[idx] = delims;
-    }
-    suffix
-}
-
-/// What one run contributes to a later run's pairing partners.
-fn delims_of(run: &Norm, rc: &Ctx) -> Delims {
-    let mut delims = Delims::default();
-    match run {
-        Norm::Text { style, .. } if style.code => delims.insert('`'),
-        Norm::Text { text, style } if *style == Style::PLAIN => delims.insert_closers(text),
-        Norm::Text { text, style } => {
-            // Emphasis content is escaped, which neutralizes everything
-            // but backticks: code spans ignore backslash escapes, so an
-            // emitted `\`` still closes a span an earlier raw backtick
-            // opens. `]` is the one character escaping leaves raw.
-            if style.bold || style.italic {
-                delims.insert('*');
-            }
-            if style.strike {
-                delims.insert('~');
-            }
-            if text.contains('`') {
-                delims.insert('`');
-            }
-            if text.contains(']') {
-                delims.insert(']');
-            }
-            delims.insert_closers(&text.replace(|c: char| c != '$' && !c.is_whitespace(), "x"));
-        }
-        Norm::Link { content, target } => match target {
-            // An unresolved target degrades to its rendered content
-            // (see render_link), which emits like any sibling runs.
-            LinkTarget::Anchor(id) if rc.anchors.fragment(id).is_none() => {
-                for run in &normalize(content, rc) {
-                    delims.union(delims_of(run, rc));
-                }
-            }
-            // Emphasis cannot cross a link boundary, but a code span
-            // can: a backtick in the label or destination pairs with
-            // one outside.
-            _ => {
-                if emits_backtick(content) || target_has_backtick(target) {
-                    delims.insert('`');
-                }
-            }
-        },
-        Norm::Image { alt, source } => match source {
-            ImageSource::External(_) if alt.contains('`') => delims.insert('`'),
-            ImageSource::External(_) => {}
-            // Sourceless images degrade to their alt as plain text.
-            ImageSource::Asset(_) | ImageSource::Unavailable => delims.insert_closers(alt),
-        },
-        Norm::NoteRef(_)
-        | Norm::Anchor(_)
-        | Norm::LineBreak
-        | Norm::Math(_)
-        | Norm::Checkbox(_) => {}
-    }
-    delims
-}
-
-fn starts_with_space(run: &Norm) -> bool {
-    match run {
-        Norm::Text { text, .. } => text.starts_with(char::is_whitespace),
-        Norm::LineBreak => true,
-        _ => false,
-    }
-}
-
-fn target_has_backtick(target: &LinkTarget) -> bool {
-    match target {
-        LinkTarget::External(url) | LinkTarget::Relative(url) => url.contains('`'),
-        LinkTarget::Anchor(_) => false,
-    }
-}
-
-/// True when rendering `inlines` inside a link label emits a backtick an
-/// earlier raw one can pair with: any backtick in text counts even where the
-/// label escapes it (code spans ignore backslash escapes), and a code run
-/// emits fences unless it is whitespace-only and loses its styling.
-fn emits_backtick(inlines: &[Inline]) -> bool {
-    inlines.iter().any(|inline| match inline {
-        Inline::Text { text, style } => {
-            text.contains('`') || (style.code && !text.trim().is_empty())
-        }
-        Inline::Link { content, target } => emits_backtick(content) || target_has_backtick(target),
-        Inline::Image { alt, .. } => alt.contains('`'),
-        _ => false,
-    })
-}
-
 /// Emit a styled run, moving edge whitespace outside the delimiters.
-/// `opts` carries the trailing context; `at_line_start` and `styled` are
-/// filled in here.
 fn render_text_run(
     text: &str,
     style: Style,
     ctx: InlineContext,
-    opts: EscapeOpts,
+    trailing_active: bool,
+    in_label: bool,
     out: &mut String,
 ) {
     if style == Style::PLAIN {
         let at_line_start = out.is_empty() || out.ends_with('\n');
-        out.push_str(&escape_text(text, ctx, EscapeOpts { at_line_start, ..opts }));
+        out.push_str(&escape_text(
+            text,
+            ctx,
+            EscapeOpts { at_line_start, trailing_active, in_label, ..Default::default() },
+        ));
         return;
     }
     let core_start = text.len() - text.trim_start().len();
@@ -333,7 +211,7 @@ fn render_text_run(
     }
     if !core.is_empty() {
         if style.code {
-            push_code_span(core, ctx, out);
+            push_code_span(core, out);
         } else {
             let mut open = String::new();
             if style.strike {
@@ -350,7 +228,7 @@ fn render_text_run(
             out.push_str(&escape_text(
                 core,
                 ctx,
-                EscapeOpts { styled: true, in_label: opts.in_label, ..Default::default() },
+                EscapeOpts { styled: true, in_label, ..Default::default() },
             ));
             out.push_str(&close);
         }
@@ -360,50 +238,9 @@ fn render_text_run(
     }
 }
 
-/// GFM inline math: `$` hugging both ends of the source. A line break
-/// inside it would end the paragraph's math span, and a bare `$` (never
-/// valid inside math) would close it early.
-pub(crate) fn push_math_span(tex: &str, ctx: InlineContext, out: &mut String) {
-    let mut source = String::with_capacity(tex.len());
-    let mut backslashes = 0;
-    for c in tex.trim().chars() {
-        match c {
-            '\n' => source.push(' '),
-            '$' if backslashes % 2 == 0 => source.push_str("\\$"),
-            c => source.push(c),
-        }
-        backslashes = if c == '\\' { backslashes + 1 } else { 0 };
-    }
-    // A row is split into cells before the math span is parsed, so a bare
-    // pipe is syntax here; GFM strips the escaping backslash before the
-    // math is read, so an already escaped pipe stays as it is.
-    let source = match ctx {
-        InlineContext::TableCell => {
-            let mut escaped = String::with_capacity(source.len());
-            let mut backslashes = 0;
-            for c in source.chars() {
-                if c == '|' && backslashes % 2 == 0 {
-                    escaped.push('\\');
-                }
-                escaped.push(c);
-                backslashes = if c == '\\' { backslashes + 1 } else { 0 };
-            }
-            escaped
-        }
-        _ => source,
-    };
-    let _ = write!(out, "${source}$");
-}
-
-pub(crate) fn push_code_span(text: &str, ctx: InlineContext, out: &mut String) {
+pub(crate) fn push_code_span(text: &str, out: &mut String) {
     let text = text.replace('\n', " ");
     let fence = backtick_fence(&text, 1);
     let pad = if text.starts_with('`') || text.ends_with('`') { " " } else { "" };
-    // A row is split into cells before any code span is parsed, so a pipe is
-    // syntax here even though everything else between the fences is literal.
-    let text = match ctx {
-        InlineContext::TableCell => escape_cell_code_span(&text),
-        _ => text,
-    };
     let _ = write!(out, "{fence}{pad}{text}{pad}{fence}");
 }
