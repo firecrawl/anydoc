@@ -225,11 +225,11 @@ pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
                     });
                 }
                 bump_nodes(&mut nodes)?;
-                stack.push(start_to_element(&e, &reader, &mut interner));
+                stack.push(start_to_element(&e, &reader, &mut interner, &mut nodes)?);
             }
             Event::Empty(e) => {
                 bump_nodes(&mut nodes)?;
-                let elem = start_to_element(&e, &reader, &mut interner);
+                let elem = start_to_element(&e, &reader, &mut interner, &mut nodes)?;
                 attach(&mut stack, &mut root, Node::Elem(elem));
             }
             Event::End(end) => match stack.pop() {
@@ -359,7 +359,8 @@ fn start_to_element(
     e: &BytesStart,
     reader: &NsReader<&[u8]>,
     interner: &mut HashMap<Vec<u8>, Rc<str>>,
-) -> Element {
+    nodes: &mut usize,
+) -> Result<Element, ConvertError> {
     let (res, local) = reader.resolver().resolve_element(e.name());
     let ns = match res {
         ResolveResult::Bound(namespace) => Some(intern(interner, namespace.as_ref())),
@@ -367,7 +368,17 @@ fn start_to_element(
     };
     let local = String::from_utf8_lossy(local.as_ref()).into_owned();
     let mut attrs = Vec::new();
-    for attr in e.attributes() {
+    for (index, attr) in e.attributes().enumerate() {
+        if index >= limits::MAX_XML_ATTRS_PER_ELEMENT {
+            return Err(ConvertError::ResourceLimit {
+                limit: "max_xml_attrs",
+                detail: format!(
+                    "element carries more than {} attributes",
+                    limits::MAX_XML_ATTRS_PER_ELEMENT
+                ),
+            });
+        }
+        bump_nodes(nodes)?;
         let attr = match attr {
             Ok(a) => a,
             Err(e) => {
@@ -421,7 +432,7 @@ fn start_to_element(
             .collect::<Vec<_>>()
             .join(" ");
     }
-    Element { ns, local, attrs, children: Vec::new() }
+    Ok(Element { ns, local, attrs, children: Vec::new() })
 }
 
 fn push_text(stack: &mut [Element], root: &mut Element, text: String) {
@@ -609,6 +620,37 @@ mod tests {
         }
         let err = parse_xml(&xml).unwrap_err();
         assert!(matches!(err, ConvertError::ResourceLimit { limit: "max_xml_depth", .. }));
+    }
+
+    #[test]
+    fn attribute_limit_is_hard_error() {
+        let mut xml = b"<r".to_vec();
+        for i in 0..=limits::MAX_XML_ATTRS_PER_ELEMENT {
+            xml.extend_from_slice(format!(" a{i}=\"\"").as_bytes());
+        }
+        xml.extend_from_slice(b"/>");
+        let err = parse_xml(&xml).unwrap_err();
+        assert!(matches!(err, ConvertError::ResourceLimit { limit: "max_xml_attrs", .. }));
+        xml.truncate(xml.len() - b" a1024=\"\"/>".len());
+        xml.extend_from_slice(b"/>");
+        assert!(parse_xml(&xml).is_ok());
+    }
+
+    #[test]
+    fn attributes_count_against_node_budget() {
+        let per = limits::MAX_XML_ATTRS_PER_ELEMENT;
+        let mut elem = b"<e".to_vec();
+        for i in 0..per {
+            elem.extend_from_slice(format!(" a{i}=\"\"").as_bytes());
+        }
+        elem.extend_from_slice(b"/>");
+        let count = limits::MAX_XML_NODES / per + 1;
+        let mut xml = b"<r>".to_vec();
+        for _ in 0..count {
+            xml.extend_from_slice(&elem);
+        }
+        let err = parse_xml(&xml).unwrap_err();
+        assert!(matches!(err, ConvertError::ResourceLimit { limit: "max_xml_nodes", .. }));
     }
 
     #[test]

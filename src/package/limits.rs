@@ -18,10 +18,15 @@ pub const MAX_ENTRY_COUNT: usize = 100_000;
 /// Maximum XML element nesting depth.
 pub const MAX_XML_DEPTH: usize = 256;
 
-/// Maximum number of XML nodes (elements + text runs) in one part. Sized
-/// from the measured worst-case DOM cost (~400 bytes/node, see the node-cap
-/// memory test) so a saturating part stays around the archive budget.
+/// Maximum number of XML nodes (elements, attributes, text runs) in one
+/// part. Sized from the measured worst-case DOM cost (~400 bytes/node, see
+/// the node-cap memory test) so a saturating part stays around the archive
+/// budget.
 pub const MAX_XML_NODES: usize = 2_000_000;
+
+/// Maximum attributes on one XML element. Real markup stays far below
+/// 100; attributes also count against [`MAX_XML_NODES`].
+pub const MAX_XML_ATTRS_PER_ELEMENT: usize = 1024;
 
 /// Maximum grid positions one spreadsheet table may materialize: 4 million.
 pub const MAX_GRID_SLOTS: u64 = 4_000_000;
