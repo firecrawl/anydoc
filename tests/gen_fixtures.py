@@ -2059,6 +2059,31 @@ def malformed():
         (m / "brokenpersist--recovers.ppt").write_bytes(raw)
 
 
+def limit_shapes(a):
+    # Recovery mode (no usable persist directory) takes notes containers
+    # inline; nesting them must hit the same record depth cap.
+    notes = struct.pack("<HHI", 0x0000, 0x0FA8, 4) + b"deep"
+    for _ in range(100):
+        notes = struct.pack("<HHI", 0x000F, 0x03F0, len(notes)) + notes
+    write_cfb(a / "deepnotes--errors.ppt", [
+        ("Current User", b""),
+        ("PowerPoint Document", notes),
+    ])
+    # One element carrying more attributes than any real markup.
+    attrs = " ".join(f'a{i}=""' for i in range(2000))
+    attr_doc = (f'<?xml version="1.0"?><w:document {W}><w:body>'
+                f'<w:p {attrs}><w:r><w:t>attrs</w:t></w:r></w:p>'
+                "</w:body></w:document>")
+    write_zip(a / "manyattrs--errors.docx", [
+        ("[Content_Types].xml", CONTENT_TYPES_BASE.format(extra="")),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/document.xml", attr_doc),
+    ])
+    # Group nesting far beyond any real RTF.
+    (a / "deepgroups--errors.rtf").write_bytes(
+        b"{\\rtf1 " + b"{" * 2000 + b"deep" + b"}" * 2001)
+
+
 def abuse():
     a = OUT / "abuse"
     a.mkdir(parents=True, exist_ok=True)
@@ -2112,6 +2137,7 @@ def abuse():
         ("Current User", b""),
         ("PowerPoint Document", nested),
     ])
+    limit_shapes(a)
     repeat_ods = """<?xml version="1.0"?>
 <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
  xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
