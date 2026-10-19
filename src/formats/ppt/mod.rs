@@ -89,6 +89,16 @@ fn collect_pictures<R: std::io::Read + std::io::Seek>(
     Ok(sink.assets)
 }
 
+fn check_record_depth(depth: usize) -> Result<(), ConvertError> {
+    if depth >= limits::MAX_RECORD_DEPTH {
+        return Err(ConvertError::ResourceLimit {
+            limit: "max_record_depth",
+            detail: format!("record nesting exceeds {}", limits::MAX_RECORD_DEPTH),
+        });
+    }
+    Ok(())
+}
+
 /// Iterate the records laid out back to back in `data`.
 fn children(data: &[u8]) -> impl Iterator<Item = (u16, u16, &[u8])> {
     let mut pos = 0;
@@ -376,11 +386,15 @@ impl Extractor {
     /// Iterative container walk over an explicit stack with fixed depth and
     /// record-count bounds — nesting or record counts beyond any real
     /// presentation are attack shapes and hard-fail.
+    /// Recovery-mode notes containers descend on the same stack and cap.
     fn walk(&mut self, data: &[u8]) -> Result<(), ConvertError> {
-        let mut stack: Vec<(&[u8], usize)> = vec![(data, 0)];
-        while let Some((buf, pos)) = stack.last_mut() {
+        let mut stack: Vec<(&[u8], usize, bool)> = vec![(data, 0, false)];
+        while let Some((buf, pos, _)) = stack.last_mut() {
             let Some((ver_inst, rec_type, body)) = record_at(buf, *pos) else {
-                stack.pop();
+                if let Some((.., true)) = stack.pop() {
+                    self.end_segment(None);
+                    self.current_is_notes = false;
+                }
                 continue;
             };
             *pos += 8 + body.len();
@@ -402,11 +416,10 @@ impl Extractor {
                         .and_then(|(.., atom)| get_u32(atom, 0))
                         .is_some_and(|id| id & 0x8000_0000 != 0);
                     if !master {
+                        check_record_depth(stack.len())?;
                         self.end_segment(None);
                         self.current_is_notes = true;
-                        self.walk(body)?;
-                        self.end_segment(None);
-                        self.current_is_notes = false;
+                        stack.push((body, 0, true));
                     }
                 }
                 // Notes, master, and handout containers are walked via their
@@ -415,13 +428,8 @@ impl Extractor {
                 // Only instance 0 of SlideListWithText holds slide text here.
                 0x0FF0 if ver_inst >> 4 != 0 => {}
                 _ => {
-                    if stack.len() >= limits::MAX_RECORD_DEPTH {
-                        return Err(ConvertError::ResourceLimit {
-                            limit: "max_record_depth",
-                            detail: format!("record nesting exceeds {}", limits::MAX_RECORD_DEPTH),
-                        });
-                    }
-                    stack.push((body, 0));
+                    check_record_depth(stack.len())?;
+                    stack.push((body, 0, false));
                 }
             }
         }
