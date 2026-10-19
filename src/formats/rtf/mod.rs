@@ -9,6 +9,7 @@ mod tables;
 
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Note, NoteKind, Style, inlines_are_empty};
+use crate::package::limits;
 use crate::package::xml::{Element, Node, ns};
 use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
@@ -651,6 +652,15 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.lexer.next_token() {
             match token {
                 Token::Open => {
+                    if self.stack.len() >= limits::MAX_RTF_GROUP_DEPTH {
+                        return Err(ConvertError::ResourceLimit {
+                            limit: "max_rtf_group_depth",
+                            detail: format!(
+                                "group nesting exceeds {}",
+                                limits::MAX_RTF_GROUP_DEPTH
+                            ),
+                        });
+                    }
                     self.flush_pending();
                     self.stack.push(self.state);
                     if self.state.capture == Capture::Math

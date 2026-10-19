@@ -45,5 +45,8 @@ pub const MAX_ASSET_TOTAL_BYTES: usize = 128 * 1024 * 1024;
 /// Maximum nesting depth of binary record containers (legacy PPT stream).
 pub const MAX_RECORD_DEPTH: usize = 64;
 
+/// Maximum RTF group nesting depth. Real documents nest well under 50.
+pub const MAX_RTF_GROUP_DEPTH: usize = 1024;
+
 /// Maximum total binary records visited in one legacy record stream.
 pub const MAX_RECORDS: u64 = 16_000_000;
