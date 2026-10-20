@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# First
+
+first topic
+
+# Second
+
+second topic

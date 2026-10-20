@@ -1,0 +1,42 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+- [使用指南](#z-intro-htm)
+
+  - [命令参考](#a-commands-htm)
+
+- [再次阅读](#使用指南)
+
+<a id="z-intro-htm"></a>
+
+# 使用指南
+
+中文说明：配置路由器
+
+[命令语法](#語法)\
+拓扑图
+
+- 第一步
+- 第二步
+
+<a id="a-commands-htm"></a>
+
+# 命令参考
+
+## 語法
+
+```
+show version
+show ip
+```
+
+| 命令 | 说明 |
+| --- | --- |
+| show version | 显示版本 |
+
+[返回指南](#使用指南)拓扑图
+
+# 补充说明
+
+未列出的主题
