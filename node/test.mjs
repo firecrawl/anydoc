@@ -164,7 +164,7 @@ test("parseMode picks the Parse pdf mode, 'auto' by default", async () => {
 test('an invalid parseMode rejects before anything is sent', async () => {
   await withHostedStub(HOSTED, async (hits) => {
     for (const convert of [
-      () => toMarkdown(MIXED, { ocr: 'hosted', parseMode: 'OCR' }),
+      () => toMarkdown(OUTLINE, { ocr: 'hosted', parseMode: 'OCR' }),
       async () => toMarkdownBytes(await readFile(MIXED), 'pdf', { ocr: 'hosted', parseMode: 'accurate' }),
     ]) {
       await assert.rejects(convert(), (error) => {

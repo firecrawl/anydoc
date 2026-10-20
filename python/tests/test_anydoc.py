@@ -170,7 +170,7 @@ class AnydocTest(unittest.TestCase):
         expected = "invalid parse_mode .*expected one of: auto, fast, ocr"
         with hosted_stub(200, reply) as hits:
             with self.assertRaisesRegex(anydoc.HostedError, expected):
-                anydoc.to_markdown(MIXED, ocr="hosted", parse_mode="OCR")
+                anydoc.to_markdown(OUTLINE, ocr="hosted", parse_mode="OCR")
             with self.assertRaisesRegex(anydoc.HostedError, expected):
                 anydoc.to_markdown_bytes(MIXED.read_bytes(), ocr="hosted", parse_mode="accurate")
             self.assertEqual(hits, [])
