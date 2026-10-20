@@ -98,7 +98,6 @@ dependencies = [
  "html5ever",
  "insta",
  "log",
- "lzxd",
  "pdf-inspector",
  "quick-xml",
  "sha2 0.11.0",
@@ -908,12 +907,6 @@ dependencies = [
  "ttf-parser",
  "weezl",
 ]
-
-[[package]]
-name = "lzxd"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c17f346186eccb574ba5581acefc514f0c70a642db4f96e245034a0a158a7168"
 
 [[package]]
 name = "markup5ever"

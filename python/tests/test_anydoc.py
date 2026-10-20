@@ -115,6 +115,10 @@ class AnydocTest(unittest.TestCase):
         self.assertIsInstance(document.assets[0].data, bytes)
         self.assertGreater(len(document.assets[0].data), 0)
 
+    def test_chm_spaninfo_streams_huffman_frames_across_dictionary_resets(self):
+        data = CHM.with_name("handmade-huffman-spaninfo.chm").read_bytes()
+        self.assertEqual(anydoc.to_markdown_bytes(data).strip(), "A" * 65536 + "B" * 65536)
+
     def test_format_detection_reads_content_extension_and_path(self):
         self.assertEqual(anydoc.format_from_bytes(RICH.read_bytes()), "docx")
         # CSV carries no signature: only the extension names it.

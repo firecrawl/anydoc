@@ -2,6 +2,7 @@
 
 mod archive;
 mod html;
+mod lzx;
 
 use crate::error::ConvertError;
 use crate::model::{
@@ -36,12 +37,17 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         .or_else(|| index.paths.keys().find(|path| extension(path) == "hhc").cloned());
     let mut toc = Vec::new();
     let mut toc_encoding = system.encoding;
+    let mut toc_base = toc_path.clone().unwrap_or_default();
     if let Some(path) = &toc_path
         && let Some(bytes) = optional_part(&archive, index.original(path))?
     {
         toc_encoding = html::encoding(&bytes, system.encoding);
         match html::parse(&bytes, system.encoding) {
-            Ok(tree) => toc = parse_toc(&tree),
+            Ok(tree) => {
+                toc_base =
+                    document_base(&tree, &toc_base, toc_encoding, system.compiled.as_deref());
+                toc = parse_toc(&tree);
+            }
             Err(e) if e.is_fatal() => return Err(e),
             Err(e) => log::warn!("skipping unusable CHM contents {path}: {e}"),
         }
@@ -50,8 +56,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let mut doc = Document::default();
     let mut ordered = Vec::new();
     let mut seen = HashSet::new();
-    let toc_base = toc_path.as_deref().unwrap_or("");
-    collect_topics(&toc, toc_base, &system, toc_encoding, &index, &mut ordered, &mut seen);
+    collect_topics(&toc, &toc_base, &system, toc_encoding, &index, &mut ordered, &mut seen);
     // A missing/binary TOC, or a TOC naming only part of the book, never
     // prevents conversion of the remaining HTML. BTreeMap order is stable.
     for path in pages {
@@ -64,7 +69,8 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         archive: &archive,
         index: &index,
         assets: &assets,
-        base: toc_base,
+        base: toc_path.as_deref().unwrap_or(""),
+        reference_base: &toc_base,
         topics: &topics,
         encoding: toc_encoding,
         compiled: system.compiled.as_deref(),
@@ -85,19 +91,21 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             }
         };
         let Some(body) = tree.descendants_any("body").next() else { continue };
-        let css = stylesheet(&tree, path, &archive, &index, &system, &mut css_cache)?;
+        let reference_base = document_base(&tree, path, encoding, system.compiled.as_deref());
         let ctx = Ctx {
             archive: &archive,
             index: &index,
             assets: &assets,
             base: path,
+            reference_base: &reference_base,
             topics: &topics,
             encoding,
             compiled: system.compiled.as_deref(),
         };
+        let css = stylesheet(&tree, &ctx, &mut css_cache)?;
         let blocks = crate::shared::html::to_blocks(body, &css, &ctx)?;
         doc.blocks.push(Block::Paragraph(vec![Inline::Anchor(path.clone())]));
-        if !blocks.iter().any(|block| matches!(block, Block::Heading { .. }))
+        if !blocks.iter().any(|block| matches!(block, Block::Heading { level: 1, .. }))
             && let Some(title) = tree.descendants_any("title").next().map(Element::text)
             && !title.trim().is_empty()
         {
@@ -209,14 +217,7 @@ fn system_info(bytes: Option<&[u8]>, lcid: u32) -> System {
             pos += len;
         }
     }
-    let encoding = match lcid & 0xffff {
-        0x0804 | 0x1004 => encoding_rs::GBK,
-        0x0404 | 0x0c04 | 0x1404 => encoding_rs::BIG5,
-        0x0411 => encoding_rs::SHIFT_JIS,
-        0x0412 => encoding_rs::EUC_KR,
-        0x0419 | 0x0422 | 0x0423 => encoding_rs::WINDOWS_1251,
-        _ => encoding_rs::WINDOWS_1252,
-    };
+    let encoding = language_encoding(lcid);
     let string = |code| {
         records.iter().find(|(kind, _)| *kind == code).and_then(|(_, value)| {
             let value = value.split(|b| *b == 0).next().unwrap_or(value);
@@ -225,6 +226,35 @@ fn system_info(bytes: Option<&[u8]>, lcid: u32) -> System {
         })
     };
     System { toc: string(0), compiled: string(6), encoding }
+}
+
+fn language_encoding(lcid: u32) -> &'static Encoding {
+    // Script variants have different ANSI codepages even with the same
+    // primary language. Other regional variants share their family's page.
+    match lcid & 0xffff {
+        0x0404 | 0x0c04 | 0x1404 => return encoding_rs::BIG5,
+        0x082c | 0x0843 | 0x0c1a | 0x1c1a | 0x201a | 0x281a | 0x301a => {
+            return encoding_rs::WINDOWS_1251;
+        }
+        _ => {}
+    }
+    match lcid & 0x03ff {
+        0x04 => encoding_rs::GBK,
+        0x11 => encoding_rs::SHIFT_JIS,
+        0x12 => encoding_rs::EUC_KR,
+        0x05 | 0x0e | 0x15 | 0x18 | 0x1a | 0x1b | 0x1c | 0x24 => encoding_rs::WINDOWS_1250,
+        0x02 | 0x19 | 0x22 | 0x23 | 0x28 | 0x2f | 0x3f | 0x40 | 0x44 | 0x50 => {
+            encoding_rs::WINDOWS_1251
+        }
+        0x08 => encoding_rs::WINDOWS_1253,
+        0x1f | 0x2c | 0x43 => encoding_rs::WINDOWS_1254,
+        0x0d => encoding_rs::WINDOWS_1255,
+        0x01 | 0x20 | 0x29 | 0x63 | 0x80 => encoding_rs::WINDOWS_1256,
+        0x25..=0x27 => encoding_rs::WINDOWS_1257,
+        0x2a => encoding_rs::WINDOWS_1258,
+        0x1e => encoding_rs::WINDOWS_874,
+        _ => encoding_rs::WINDOWS_1252,
+    }
 }
 
 #[derive(Debug)]
@@ -300,7 +330,7 @@ fn collect_topics(
 ) {
     for node in nodes {
         if let Some(href) = &node.href
-            && let Some(target) = resolve_local(base, href, encoding, system.compiled.as_deref())
+            && let Some(target) = resolve_target(base, href, encoding, system.compiled.as_deref())
             && let Some(path) = index.canonical(&target.path).filter(|path| is_html(path))
             && seen.insert(path.to_string())
         {
@@ -336,11 +366,8 @@ fn render_toc(nodes: &[TocNode], ctx: &Ctx<'_, '_>) -> Option<Block> {
 
 fn stylesheet(
     tree: &Element,
-    base: &str,
-    archive: &RefCell<Archive<'_>>,
-    index: &Index,
-    system: &System,
-    cache: &mut HashMap<String, Option<String>>,
+    ctx: &Ctx<'_, '_>,
+    cache: &mut HashMap<(String, &'static str), Option<String>>,
 ) -> Result<Stylesheet, ConvertError> {
     let mut sheet = Stylesheet::default();
     for elem in tree.descendant_elems() {
@@ -353,16 +380,18 @@ fn stylesheet(
                 .split_whitespace()
                 .any(|rel| rel.eq_ignore_ascii_case("stylesheet"))
             && let Some(href) = elem.attr_any("href")
-            && let Some(target) =
-                resolve_local(base, href, system.encoding, system.compiled.as_deref())
-            && let Some(path) = index.canonical(&target.path)
+            && let Some(target) = ctx.resolve(href)
+            && let Some(path) = ctx.index.canonical(&target.path)
         {
-            if !cache.contains_key(path) {
-                let text = optional_part(archive, index.original(path))?
-                    .map(|bytes| html::decode(&bytes, system.encoding));
-                cache.insert(path.to_string(), text);
+            // A stylesheet without its own charset inherits the referring
+            // page's encoding, so the decoded cache must include that context.
+            let key = (path.to_string(), ctx.encoding.name());
+            if !cache.contains_key(&key) {
+                let text = optional_part(ctx.archive, ctx.index.original(path))?
+                    .map(|bytes| html::decode_stylesheet(&bytes, ctx.encoding));
+                cache.insert(key.clone(), text);
             }
-            if let Some(Some(text)) = cache.get(path) {
+            if let Some(Some(text)) = cache.get(&key) {
                 sheet.add(text);
             }
         }
@@ -375,9 +404,16 @@ struct Ctx<'a, 'b> {
     index: &'b Index,
     assets: &'b RefCell<AssetSink>,
     base: &'b str,
+    reference_base: &'b str,
     topics: &'b HashSet<String>,
     encoding: &'static Encoding,
     compiled: Option<&'b str>,
+}
+
+impl Ctx<'_, '_> {
+    fn resolve(&self, reference: &str) -> Option<Target> {
+        resolve_target(self.reference_base, reference, self.encoding, self.compiled)
+    }
 }
 
 impl HtmlCtx for Ctx<'_, '_> {
@@ -385,16 +421,17 @@ impl HtmlCtx for Ctx<'_, '_> {
         if href.trim().is_empty() {
             return None;
         }
-        if let Some(target) = resolve_local(self.base, href, self.encoding, self.compiled)
+        if let Some(target) = self.resolve(href)
             && let Some(path) =
                 self.index.canonical(&target.path).filter(|path| self.topics.contains(*path))
         {
             return Some(LinkTarget::Anchor(scoped(path, target.fragment.as_deref())));
         }
-        Some(if is_absolute_uri(href) || href.starts_with("//") {
-            LinkTarget::External(href.to_string())
+        let href = resolve_reference(self.reference_base, href);
+        Some(if is_absolute_uri(&href) || href.starts_with("//") {
+            LinkTarget::External(href)
         } else {
-            LinkTarget::Relative(href.to_string())
+            LinkTarget::Relative(href)
         })
     }
 
@@ -402,7 +439,7 @@ impl HtmlCtx for Ctx<'_, '_> {
         if src.trim().is_empty() {
             return Ok(None);
         }
-        if let Some(target) = resolve_local(self.base, src, self.encoding, self.compiled) {
+        if let Some(target) = self.resolve(src) {
             let Some(path) = self.index.canonical(&target.path) else { return Ok(None) };
             return match optional_part(self.archive, self.index.original(path))? {
                 Some(bytes) => self
@@ -413,8 +450,8 @@ impl HtmlCtx for Ctx<'_, '_> {
                 None => Ok(None),
             };
         }
-        Ok((is_absolute_uri(src) || src.starts_with("//"))
-            .then(|| ImageSource::External(src.to_string())))
+        let src = resolve_reference(self.reference_base, src);
+        Ok((is_absolute_uri(&src) || src.starts_with("//")).then_some(ImageSource::External(src)))
     }
 
     fn anchor_id(&self, raw: &str) -> AnchorId {
@@ -429,6 +466,103 @@ fn scoped(path: &str, fragment: Option<&str>) -> AnchorId {
     }
 }
 
+/// The first base href controls references, while anchor definitions always
+/// stay scoped to the actual topic path in Ctx::base.
+fn document_base(
+    tree: &Element,
+    path: &str,
+    encoding: &'static Encoding,
+    compiled: Option<&str>,
+) -> String {
+    let Some(href) = tree.descendants_any("base").find_map(|elem| elem.attr_any("href")) else {
+        return path.to_string();
+    };
+    let href = href.trim();
+    if let Some(mut target) = resolve_local(path, href, encoding, compiled) {
+        let raw_path = href.split(['?', '#']).next().unwrap_or(href);
+        if raw_path.ends_with(['/', '\\'])
+            || matches!(raw_path.rsplit('/').next(), Some("." | ".."))
+        {
+            target.path.push('/');
+        }
+        return target.path;
+    }
+    if (is_absolute_uri(href) || href.starts_with("//"))
+        && !href.to_ascii_lowercase().starts_with("javascript:")
+        && !href.to_ascii_lowercase().starts_with("data:")
+    {
+        return href.to_string();
+    }
+    path.to_string()
+}
+
+fn resolve_target(
+    base: &str,
+    reference: &str,
+    encoding: &'static Encoding,
+    compiled: Option<&str>,
+) -> Option<Target> {
+    let reference = resolve_reference(base, reference);
+    if (is_absolute_uri(base) || base.starts_with("//"))
+        && !is_absolute_uri(&reference)
+        && !reference.starts_with("::")
+    {
+        return None;
+    }
+    resolve_local(base, &reference, encoding, compiled)
+}
+
+/// Join an external base without decoding its percent-escaped path. Local
+/// CHM references instead retain the legacy encoding and archive checks.
+fn resolve_reference(base: &str, reference: &str) -> String {
+    let reference = reference.trim();
+    if is_absolute_uri(reference) || reference.starts_with("::") {
+        return reference.to_string();
+    }
+    let hierarchy =
+        base.find("://").map(|pos| pos + 3).or_else(|| base.starts_with("//").then_some(2));
+    let (origin, path) = if let Some(start) = hierarchy {
+        if reference.starts_with("//") {
+            return base.find("://").map_or_else(
+                || reference.to_string(),
+                |pos| format!("{}{reference}", &base[..=pos]),
+            );
+        }
+        let end = base[start..].find(['/', '?', '#']).map_or(base.len(), |pos| start + pos);
+        (&base[..end], &base[end..])
+    } else if is_absolute_uri(base)
+        && let Some((origin, path)) = base.split_once("::")
+    {
+        (&base[..origin.len() + 2], path)
+    } else {
+        return reference.to_string();
+    };
+    if reference.starts_with('#') {
+        return format!("{origin}{}{reference}", path.split('#').next().unwrap_or(path));
+    }
+    if reference.starts_with('?') {
+        return format!("{origin}{}{reference}", path.split(['?', '#']).next().unwrap_or(path));
+    }
+    let base_path = path.split(['?', '#']).next().unwrap_or(path);
+    let split = reference.find(['?', '#']).unwrap_or(reference.len());
+    let (relative_path, suffix) = reference.split_at(split);
+    if relative_path.is_empty() {
+        return format!("{origin}{path}");
+    }
+    let joined = if relative_path.starts_with('/') {
+        relative_path.to_string()
+    } else {
+        let directory = base_path.rsplit_once('/').map_or("", |(dir, _)| dir);
+        format!("{directory}/{relative_path}")
+    };
+    let trailing = joined.ends_with('/') || matches!(joined.rsplit('/').next(), Some("." | ".."));
+    let mut normalized = format!("/{}", normalize_path(&joined));
+    if trailing && !normalized.ends_with('/') {
+        normalized.push('/');
+    }
+    format!("{origin}{normalized}{suffix}")
+}
+
 fn resolve_local(
     base: &str,
     reference: &str,
@@ -436,6 +570,7 @@ fn resolve_local(
     compiled: Option<&str>,
 ) -> Option<Target> {
     let mut reference = reference.trim();
+    let mut archive_root = false;
     let lower = reference.to_ascii_lowercase();
     if lower.starts_with("ms-its:")
         || lower.starts_with("its:")
@@ -453,8 +588,10 @@ fn resolve_local(
             return None;
         }
         reference = topic.split('>').next().unwrap_or(topic);
+        archive_root = true;
     } else if let Some(topic) = reference.strip_prefix("::") {
         reference = topic;
+        archive_root = true;
     } else if is_absolute_uri(reference) || reference.starts_with("//") {
         return None;
     }
@@ -466,11 +603,13 @@ fn resolve_local(
     if path.is_empty() {
         return Some(Target { path: base.to_string(), fragment });
     }
-    let mut parts: Vec<String> = if path.starts_with('/') {
+    let mut parts: Vec<String> = if archive_root || path.starts_with('/') {
         Vec::new()
     } else {
         base.rsplit_once('/')
-            .map(|(dir, _)| dir.split('/').map(str::to_string).collect())
+            .map(|(dir, _)| {
+                dir.split('/').filter(|part| !part.is_empty()).map(str::to_string).collect()
+            })
             .unwrap_or_default()
     };
     for part in path.split('/') {
@@ -493,31 +632,91 @@ fn resolve_local(
 
 fn decode_url(component: &str, encoding: &'static Encoding) -> String {
     let bytes = component.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut decoded = String::with_capacity(bytes.len());
+    let mut pending = Vec::new();
     let mut pos = 0;
     while pos < bytes.len() {
         if bytes[pos] == b'%'
             && let Some(pair) = bytes.get(pos + 1..pos + 3)
             && pair.iter().all(u8::is_ascii_hexdigit)
-            && let Ok(pair) = std::str::from_utf8(pair)
-            && let Ok(value) = u8::from_str_radix(pair, 16)
         {
-            decoded.push(value);
+            pending.push(u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap());
             pos += 3;
         } else {
-            decoded.push(bytes[pos]);
-            pos += 1;
+            let ch = component[pos..].chars().next().unwrap();
+            if ch.is_ascii() {
+                // A literal ASCII byte can be a legacy multibyte trail, as
+                // in GBK %81A. Decode it with the adjacent escaped bytes.
+                pending.push(ch as u8);
+            } else {
+                decoded.push_str(&encoding.decode(&pending).0);
+                pending.clear();
+                decoded.push(ch);
+            }
+            pos += ch.len_utf8();
         }
     }
-    match std::str::from_utf8(&decoded) {
-        Ok(text) => text.to_string(),
-        Err(_) => encoding.decode(&decoded).0.into_owned(),
-    }
+    decoded.push_str(&encoding.decode(&pending).0);
+    decoded
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn regional_lcids_use_their_legacy_windows_codepage() {
+        for (lcid, expected) in [
+            (0x0415, encoding_rs::WINDOWS_1250),
+            (0x0408, encoding_rs::WINDOWS_1253),
+            (0x041f, encoding_rs::WINDOWS_1254),
+            (0x040d, encoding_rs::WINDOWS_1255),
+            (0x0c01, encoding_rs::WINDOWS_1256),
+            (0x0425, encoding_rs::WINDOWS_1257),
+            (0x042a, encoding_rs::WINDOWS_1258),
+            (0x041e, encoding_rs::WINDOWS_874),
+            (0x081a, encoding_rs::WINDOWS_1250),
+            (0x0c1a, encoding_rs::WINDOWS_1251),
+            (0x082c, encoding_rs::WINDOWS_1251),
+        ] {
+            assert_eq!(system_info(None, lcid).encoding, expected, "LCID {lcid:#06x}");
+        }
+    }
+
+    #[test]
+    fn legacy_percent_escapes_keep_the_selected_encoding_and_literal_unicode() {
+        assert_eq!(decode_url("%C2%A9", encoding_rs::GBK), "漏");
+        assert_eq!(decode_url("漏%C2%A9", encoding_rs::GBK), "漏漏");
+        assert_eq!(decode_url("%C2%A9", encoding_rs::UTF_8), "©");
+        assert_eq!(decode_url("%81A", encoding_rs::GBK), "丄");
+        assert_eq!(decode_url("乙%A4A", encoding_rs::BIG5), "乙乙");
+    }
+
+    #[test]
+    fn external_bases_keep_authority_query_and_fragment_semantics() {
+        for (base, reference, expected) in [
+            (
+                "https://example.invalid/a/page.htm?old#old",
+                "../b.htm?q#f",
+                "https://example.invalid/b.htm?q#f",
+            ),
+            (
+                "https://example.invalid/a/page.htm?old#old",
+                "#new",
+                "https://example.invalid/a/page.htm?old#new",
+            ),
+            (
+                "https://example.invalid/a/page.htm?old",
+                "?new#f",
+                "https://example.invalid/a/page.htm?new#f",
+            ),
+            ("https://example.invalid/a/", "//cdn.invalid/p.png", "https://cdn.invalid/p.png"),
+            ("//example.invalid:8080/a/", "//cdn.invalid/p.png", "//cdn.invalid/p.png"),
+            ("https://example.invalid", "p.png", "https://example.invalid/p.png"),
+        ] {
+            assert_eq!(resolve_reference(base, reference), expected);
+        }
+    }
 
     #[test]
     fn hhc_preserves_nested_groups_and_repeated_topic_references() {
@@ -570,6 +769,14 @@ mod tests {
         .unwrap();
         assert_eq!(target.path, "topic.htm");
         assert_eq!(target.fragment.as_deref(), Some("api"));
+        for reference in ["ms-its:manual.chm::topic.htm#api", "::topic.htm#api"] {
+            assert_eq!(
+                resolve_local("docs/start.htm", reference, encoding_rs::UTF_8, Some("manual"))
+                    .unwrap()
+                    .path,
+                "topic.htm"
+            );
+        }
         assert!(
             resolve_local(
                 "",

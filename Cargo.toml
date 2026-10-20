@@ -28,7 +28,6 @@ flate2 = "1"
 encoding_rs = "0.8.35"
 html5ever = "0.40"
 log = "0.4"
-lzxd = "0.2.7"
 pdf-inspector = "1.14.2"
 quick-xml = "0.41.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }

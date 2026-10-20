@@ -85,10 +85,52 @@ pub(super) fn decode(bytes: &[u8], fallback: &'static Encoding) -> String {
     decode_as(bytes, encoding(bytes, fallback))
 }
 
+pub(super) fn decode_stylesheet(bytes: &[u8], fallback: &'static Encoding) -> String {
+    let encoding = Encoding::for_bom(bytes)
+        .map(|(enc, _)| enc)
+        .or_else(|| {
+            stylesheet_charset(bytes).map(|(encoding, _)| {
+                // An ASCII @charset declaration cannot describe UTF-16 bytes.
+                if encoding == encoding_rs::UTF_16LE || encoding == encoding_rs::UTF_16BE {
+                    encoding_rs::UTF_8
+                } else {
+                    encoding
+                }
+            })
+        })
+        .unwrap_or(fallback);
+    let mut text = decode_as(bytes, encoding);
+    // The shared CSS subset starts with selectors, so remove the consumed
+    // declaration before handing it the first rule. Inspect decoded text
+    // too: a BOM may have taken precedence over the declared encoding.
+    if let Some((_, end)) = stylesheet_charset(text.as_bytes()) {
+        text.drain(..end);
+    }
+    text
+}
+
+fn stylesheet_charset(bytes: &[u8]) -> Option<(&'static Encoding, usize)> {
+    // CSS's byte-level encoding declaration must be the first rule,
+    // with this exact syntax. HTML meta tags, comments, and strings
+    // in a stylesheet do not declare its encoding.
+    const PREFIX: &[u8] = b"@charset \"";
+    let declaration = bytes[..bytes.len().min(1024)].strip_prefix(PREFIX)?;
+    let end = declaration.iter().position(|&byte| byte == b'"')?;
+    if declaration.get(end + 1) != Some(&b';') {
+        return None;
+    }
+    let encoding = Encoding::for_label(&declaration[..end])?;
+    Some((encoding, PREFIX.len() + end + 2))
+}
+
 pub(super) fn encoding(bytes: &[u8], fallback: &'static Encoding) -> &'static Encoding {
-    Encoding::for_bom(bytes).map(|(enc, _)| enc).or_else(|| sniff_encoding(bytes)).unwrap_or_else(
-        || if std::str::from_utf8(bytes).is_ok() { encoding_rs::UTF_8 } else { fallback },
-    )
+    // ASCII and some legacy byte sequences are also valid UTF-8. Keep the
+    // book's encoding unless the page explicitly declares another one: it
+    // also governs percent-encoded URLs in otherwise ASCII-only pages.
+    Encoding::for_bom(bytes)
+        .map(|(enc, _)| enc)
+        .or_else(|| sniff_encoding(bytes))
+        .unwrap_or(fallback)
 }
 
 fn decode_as(bytes: &[u8], encoding: &'static Encoding) -> String {
@@ -438,6 +480,113 @@ mod tests {
         let (bytes, _, _) = encoding_rs::GBK.encode("<P>配置路由器");
         let tree = parse(&bytes, encoding_rs::GBK).unwrap();
         assert!(tree.text().contains("配置路由器"));
+    }
+
+    #[test]
+    fn ascii_html_retains_the_book_encoding_for_percent_encoded_links() {
+        for fallback in [encoding_rs::GBK, encoding_rs::BIG5, encoding_rs::WINDOWS_1250] {
+            let (_, selected) =
+                parse_with_encoding(b"<a href='%C2%A9.htm'>Topic</a>", fallback).unwrap();
+            assert_eq!(selected, fallback);
+        }
+    }
+
+    #[test]
+    fn undeclared_html_does_not_guess_utf8_from_ambiguous_legacy_bytes() {
+        for fallback in [encoding_rs::GBK, encoding_rs::BIG5, encoding_rs::WINDOWS_1250] {
+            let input = b"<p>\xc2\xa9";
+            let (tree, selected) = parse_with_encoding(input, fallback).unwrap();
+            let (expected, _, errors) = fallback.decode(b"\xc2\xa9");
+            assert!(!errors);
+            assert_eq!(selected, fallback);
+            assert_eq!(tree.text(), expected);
+        }
+    }
+
+    #[test]
+    fn explicit_html_encodings_take_precedence_over_the_book_encoding() {
+        for input in [
+            "\u{feff}<meta charset=big5><p>é",
+            "<meta charset=utf-8><p>é",
+            "<?xml version='1.0' encoding='utf-8'?><p>é",
+        ] {
+            let (tree, selected) = parse_with_encoding(input.as_bytes(), encoding_rs::GBK).unwrap();
+            assert_eq!(selected, encoding_rs::UTF_8);
+            assert!(tree.text().contains('é'));
+        }
+    }
+
+    #[test]
+    fn stylesheets_use_css_charset_declarations_before_the_fallback() {
+        for (encoding, label, selector) in [
+            (encoding_rs::GBK, "gbk", "隐藏"),
+            (encoding_rs::BIG5, "big5", "隱藏"),
+            (encoding_rs::WINDOWS_1250, "windows-1250", "ukryć"),
+        ] {
+            let input = format!("@charset \"{label}\"; .{selector} {{ display: none; }}");
+            let (bytes, _, errors) = encoding.encode(&input);
+            assert!(!errors);
+            assert_eq!(
+                decode_stylesheet(&bytes, encoding_rs::WINDOWS_1252),
+                input.split_once(';').unwrap().1
+            );
+        }
+    }
+
+    #[test]
+    fn stylesheet_bom_wins_over_charset_and_html_meta_is_not_a_declaration() {
+        assert_eq!(
+            decode_stylesheet(
+                "\u{feff}@charset \"big5\"; .隱藏 { display: none; }".as_bytes(),
+                encoding_rs::WINDOWS_1252,
+            ),
+            " .隱藏 { display: none; }"
+        );
+        for prefix in [
+            "/* <meta charset=windows-1252> */",
+            "/* @charset \"windows-1252\"; */",
+            "p::before { content: '<meta charset=windows-1252>'; }",
+        ] {
+            let input = format!("{prefix} .隐藏 {{ display: none; }}");
+            let (bytes, _, errors) = encoding_rs::GBK.encode(&input);
+            assert!(!errors);
+            assert_eq!(decode_stylesheet(&bytes, encoding_rs::GBK), input);
+        }
+    }
+
+    #[test]
+    fn css_charset_does_not_hide_the_first_rule_from_the_shared_stylesheet() {
+        for (encoding, prefix, selector) in [
+            (encoding_rs::GBK, "@charset \"gbk\";", "隐藏"),
+            (encoding_rs::BIG5, "@charset \"big5\";", "隱藏"),
+            (encoding_rs::WINDOWS_1250, "@charset \"windows-1250\";", "ukryć"),
+            (encoding_rs::UTF_8, "\u{feff}@charset \"big5\";", "隱藏"),
+        ] {
+            let input = format!("{prefix} .{selector} {{ display: none; }}");
+            let (bytes, _, errors) = encoding.encode(&input);
+            assert!(!errors);
+            let mut stylesheet = Stylesheet::default();
+            stylesheet.add(&decode_stylesheet(&bytes, encoding_rs::WINDOWS_1252));
+            let input = format!("<p class='{selector}'>Hidden</p><p>Visible</p>");
+            let tree = parse(input.as_bytes(), encoding_rs::UTF_8).unwrap();
+            let body = tree.descendants_any("body").next().unwrap();
+            let blocks = to_blocks(body, &stylesheet, &Ctx).unwrap();
+            assert_eq!(blocks.len(), 1, "{prefix}");
+            let Block::Paragraph(text) = &blocks[0] else { panic!("visible paragraph") };
+            assert_eq!(inlines_to_plain_text(text), "Visible");
+        }
+    }
+
+    #[test]
+    fn malformed_or_misplaced_css_charset_text_is_preserved() {
+        for input in [
+            "@charset \"unknown-codec\"; .hidden { display: none; }",
+            "@charset 'gbk'; .hidden { display: none; }",
+            "@charset \"gbk\" .hidden { display: none; }",
+            " @charset \"gbk\"; .hidden { display: none; }",
+        ] {
+            assert_eq!(decode_stylesheet(input.as_bytes(), encoding_rs::GBK), input);
+        }
     }
 
     #[test]

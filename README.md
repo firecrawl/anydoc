@@ -173,8 +173,12 @@ Only documents that need OCR leave the machine, and the whole document goes, sin
 CHM topics are read in `.hhc` table-of-contents order, with the hierarchy
 preserved as a nested list. Unlisted HTML topics are appended in stable path
 order; the same fallback applies when the TOC is missing, unreadable, or binary.
-Legacy HTML and Chinese GBK/Big5 encodings are decoded locally. Embedded images
-remain available on `Document.assets`, as with the other formats.
+Legacy HTML uses BOM/charset declarations, then the book's Windows language
+encoding (including GBK/Big5). Topic links, HTML bases, and stylesheet encodings
+are resolved locally. LZX supports 4/8-byte reset tables and sequential SpanInfo
+streams; the private decoder adaptation and its MIT notice are under
+`src/formats/chm/lzx/`. Embedded images remain available on `Document.assets`,
+as with the other formats.
 
 ## Benchmark
 

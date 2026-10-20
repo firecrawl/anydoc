@@ -81,6 +81,11 @@ test('chm converts through the bytes and document APIs', () => {
   assert.ok(document.assets[0].data.length > 0)
 })
 
+test('chm SpanInfo streams Huffman frames across dictionary resets', async () => {
+  const bytes = await readFile(fixture('chm/handmade-huffman-spaninfo.chm'))
+  assert.equal(toMarkdownBytes(bytes).trim(), 'A'.repeat(65536) + 'B'.repeat(65536))
+})
+
 test('format detection reads content, extension, and path', () => {
   assert.equal(formatFromBytes(RICH), 'docx')
   // CSV carries no signature: only the extension names it.
