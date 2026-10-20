@@ -240,7 +240,8 @@ fn render_list(list: &List, rc: &Ctx) -> Option<String> {
             (None, kind) => format!("- {} ", kind.label(list.start.saturating_add(i as u64))),
         };
         let body = render_blocks(&item.blocks, rc);
-        if item.blocks.len() > 1 {
+        // Invisible anchor paragraphs must not turn a tight list loose.
+        if item.blocks.iter().filter(|block| !block_is_blank(block)).take(2).count() > 1 {
             loose = true;
         }
         let indent = " ".repeat(marker.chars().count());

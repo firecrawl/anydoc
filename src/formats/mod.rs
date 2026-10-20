@@ -1,5 +1,6 @@
 //! One frontend per input format; each parses bytes into the document model.
 
+mod chm;
 mod csv;
 pub mod detect;
 mod doc;
@@ -18,6 +19,7 @@ use crate::model::Document;
 
 pub fn parse(bytes: &[u8], format: Format) -> Result<Document, ConvertError> {
     match format {
+        Format::Chm => chm::parse(bytes),
         Format::Excel => sheet::parse(bytes),
         Format::Csv => csv::parse(bytes),
         Format::Docx => docx::parse(bytes),

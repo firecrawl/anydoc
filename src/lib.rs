@@ -25,6 +25,8 @@ use std::path::Path;
 /// [`Format::from_extension`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Format {
+    /// Compiled HTML Help (`.chm`).
+    Chm,
     /// Binary Word 97-2003 (`.doc`).
     Doc,
     /// WordprocessingML (`.docx`, `.docm`), both Transitional and Strict.
@@ -72,6 +74,7 @@ impl Format {
     /// case-insensitively. `None` for anything unrecognized.
     pub fn from_extension(ext: &str) -> Option<Format> {
         Some(match ext.to_ascii_lowercase().as_str() {
+            "chm" => Format::Chm,
             "doc" => Format::Doc,
             "docx" | "docm" => Format::Docx,
             "odt" => Format::Odt,

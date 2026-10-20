@@ -82,6 +82,7 @@ const STRICT_ANNOTATIONS: bool = true;
 fn fixtures_detect_from_content() {
     use anydoc::Format;
     let expected = [
+        ("chm", Some(Format::Chm)),
         ("doc", Some(Format::Doc)),
         ("docx", Some(Format::Docx)),
         ("epub", Some(Format::Epub)),

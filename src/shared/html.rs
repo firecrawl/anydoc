@@ -34,8 +34,12 @@ pub fn to_blocks(
 ) -> Result<Vec<Block>, ConvertError> {
     let mut builder =
         Builder { blocks: Vec::new(), inlines: Vec::new(), css, ctx, start_boundary: true };
+    builder.push_anchor(body);
+    let anchors = std::mem::take(&mut builder.inlines);
     builder.walk_children(body, StyleDelta::default())?;
-    Ok(builder.finish())
+    let mut blocks = builder.finish();
+    prepend_anchors(&mut blocks, anchors);
+    Ok(blocks)
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +228,36 @@ fn keeps_paragraph(inlines: &[Inline]) -> bool {
     !inlines_are_empty(inlines) || inlines.iter().any(|i| matches!(i, Inline::Anchor(_)))
 }
 
+/// Owner-element anchors occupy the start of their content. Merge them into
+/// the first inline-bearing block so invisible ids do not create extra list
+/// paragraphs or table-cell line breaks.
+fn prepend_anchors(blocks: &mut Vec<Block>, mut anchors: Vec<Inline>) {
+    if anchors.is_empty() {
+        return;
+    }
+    match blocks.first_mut() {
+        Some(Block::Paragraph(content) | Block::Heading { content, .. }) => {
+            anchors.append(content);
+            *content = anchors;
+        }
+        Some(Block::BlockQuote(inner)) => prepend_anchors(inner, anchors),
+        Some(Block::List(list)) if !list.items.is_empty() => {
+            prepend_anchors(&mut list.items[0].blocks, anchors);
+        }
+        Some(Block::Table(table)) => {
+            if let Some(cell) = table.grid.iter_mut().flatten().find_map(|slot| match slot {
+                crate::model::CellSlot::Origin(cell) => Some(cell),
+                _ => None,
+            }) {
+                prepend_anchors(&mut cell.blocks, anchors);
+            } else {
+                blocks.insert(0, Block::Paragraph(anchors));
+            }
+        }
+        _ => blocks.insert(0, Block::Paragraph(anchors)),
+    }
+}
+
 /// Whether text appended after `inlines` sits at a whitespace boundary
 /// (its leading spaces collapse away): at a block start, after emitted
 /// whitespace or a line break, looking through zero-width anchors.
@@ -274,7 +308,7 @@ impl Builder<'_> {
         elem: &Element,
         delta: StyleDelta,
     ) -> Result<Vec<Block>, ConvertError> {
-        self.sub_blocks_at(elem, delta, true)
+        self.sub_blocks_at(elem, delta, true, true)
     }
 
     /// Sub-walk starting at the given whitespace-boundary state (`false`
@@ -285,6 +319,7 @@ impl Builder<'_> {
         elem: &Element,
         delta: StyleDelta,
         start_boundary: bool,
+        anchor_self: bool,
     ) -> Result<Vec<Block>, ConvertError> {
         let mut b = Builder {
             blocks: Vec::new(),
@@ -293,8 +328,14 @@ impl Builder<'_> {
             ctx: self.ctx,
             start_boundary,
         };
+        if anchor_self {
+            b.push_anchor(elem);
+        }
+        let anchors = std::mem::take(&mut b.inlines);
         b.walk_children(elem, delta)?;
-        Ok(b.finish())
+        let mut blocks = b.finish();
+        prepend_anchors(&mut blocks, anchors);
+        Ok(blocks)
     }
 
     /// Element-level props: matching stylesheet rules and the inline `style`
@@ -401,10 +442,14 @@ impl Builder<'_> {
             }
             "ul" | "ol" => {
                 self.flush_paragraph();
+                self.push_anchor(elem);
+                self.flush_paragraph();
                 let lists = self.parse_list(elem, delta)?;
                 self.blocks.extend(lists);
             }
             "table" => {
+                self.flush_paragraph();
+                self.push_anchor(elem);
                 self.flush_paragraph();
                 if let Some(caption) = elem.child_elems().find(|e| e.local == "caption") {
                     let content = self.inline_children(caption, delta)?;
@@ -425,6 +470,8 @@ impl Builder<'_> {
             }
             "pre" => {
                 self.flush_paragraph();
+                self.push_anchor(elem);
+                self.flush_paragraph();
                 let text = elem.text();
                 if !text.trim().is_empty() {
                     self.blocks.push(Block::CodeBlock { lang: None, text });
@@ -432,9 +479,12 @@ impl Builder<'_> {
             }
             "hr" => {
                 self.flush_paragraph();
+                self.push_anchor(elem);
+                self.flush_paragraph();
                 self.blocks.push(Block::Rule);
             }
             "math" => {
+                self.push_anchor(elem);
                 let tex = mathml_to_tex(elem);
                 if tex.is_empty() {
                 } else if mathml_is_display(elem) {
@@ -509,7 +559,7 @@ impl Builder<'_> {
         delta: StyleDelta,
         start_boundary: bool,
     ) -> Result<Vec<Inline>, ConvertError> {
-        let mut blocks = self.sub_blocks_at(elem, delta, start_boundary)?;
+        let mut blocks = self.sub_blocks_at(elem, delta, start_boundary, false)?;
         if blocks.len() == 1
             && let Block::Paragraph(inlines) = &mut blocks[0]
         {
@@ -658,6 +708,7 @@ impl Builder<'_> {
                 if !matches!(cell.local.as_str(), "td" | "th") {
                     continue;
                 }
+                let first_cell = !any_cell;
                 any_cell = true;
                 if cell.local != "th" {
                     all_th = false;
@@ -674,7 +725,10 @@ impl Builder<'_> {
                     Some(n) => n.clamp(1, 65534),
                     None => 1,
                 };
-                let blocks = self.sub_blocks(cell, delta)?;
+                let mut blocks = self.sub_blocks(cell, delta)?;
+                if first_cell && let Some(id) = tr.attr_any("id").filter(|id| !id.is_empty()) {
+                    prepend_anchors(&mut blocks, vec![Inline::Anchor(self.ctx.anchor_id(id))]);
+                }
                 builder.place(Cell::spanning(blocks, col_span, row_span))?;
             }
             if i == header_rows && (*in_head || (all_th && any_cell)) {
@@ -782,6 +836,49 @@ mod tests {
     use super::*;
     use crate::model::{CellSlot, ImageSource, Style};
     use crate::package::xml::parse_xml;
+
+    #[test]
+    fn structural_html_element_ids_remain_internal_link_targets() {
+        let tree = parse_xml(
+            br#"<body id="body"><ul id="list"><li id="item">Item</li></ul>
+            <table id="table"><tr id="row"><td id="cell">Cell</td></tr></table>
+            <pre id="code">literal</pre><hr id="rule"/></body>"#,
+        )
+        .unwrap();
+        let mut blocks =
+            to_blocks(tree.child_elems().next().unwrap(), &Stylesheet::default(), &NullCtx)
+                .unwrap();
+        let ids = ["body", "list", "item", "table", "row", "cell", "code", "rule"];
+        blocks.push(Block::Paragraph(
+            ids.iter()
+                .map(|id| Inline::Link {
+                    content: vec![Inline::plain(*id)],
+                    target: LinkTarget::Anchor((*id).into()),
+                })
+                .collect(),
+        ));
+        let doc = crate::model::Document { blocks, ..Default::default() };
+        let markdown = crate::render::markdown::document_to_markdown(&doc);
+        for id in ids {
+            assert!(markdown.contains(&format!("[{id}](#{id})")), "lost {id}: {markdown}");
+        }
+    }
+
+    #[test]
+    fn unreferenced_structural_anchors_preserve_tight_list_spacing() {
+        let render = |html: &str| {
+            let doc = crate::model::Document { blocks: blocks(html), ..Default::default() };
+            crate::render::markdown::document_to_markdown(&doc)
+        };
+        let plain = render("<body><ul><li><p>A</p></li><li><p>B</p></li></ul></body>");
+        let anchored = render("<body><ul><li id=\"x\"><p>A</p></li><li><p>B</p></li></ul></body>");
+        assert_eq!(plain, "- A\n- B\n");
+        assert_eq!(anchored, plain);
+        let plain = render("<body><ul><li><pre>A</pre></li><li><pre>B</pre></li></ul></body>");
+        let anchored =
+            render("<body><ul><li id=\"x\"><pre>A</pre></li><li><pre>B</pre></li></ul></body>");
+        assert_eq!(anchored, plain);
+    }
 
     struct NullCtx;
 

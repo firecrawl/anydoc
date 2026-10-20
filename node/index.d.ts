@@ -128,6 +128,7 @@ export declare const enum Format {
   pptx = 'pptx',
   rtf = 'rtf',
   epub = 'epub',
+  chm = 'chm',
   xlsx = 'xlsx',
   ods = 'ods',
   odp = 'odp',
@@ -136,9 +137,10 @@ export declare const enum Format {
 
 /**
  * Detect the format from the content itself: the signature and identity each
- * container specification designates (PDF header, RTF open group, OLE stream
- * names, ZIP package mimetype/content types). Plain-text formats (CSV) carry
- * no signature and return `null`; so does anything unrecognized.
+ * container specification designates (CHM ITSF header, PDF header, RTF open
+ * group, OLE stream names, ZIP package mimetype/content types). Plain-text
+ * formats (CSV) carry no signature and return `null`; so does anything
+ * unrecognized.
  */
 export declare function formatFromBytes(bytes: Uint8Array): Format | null
 
