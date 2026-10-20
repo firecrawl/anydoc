@@ -63,7 +63,13 @@ anydoc converts locally and does not do OCR, so a PDF with scanned or image-only
 const markdown = await toMarkdown('scan.pdf', { ocr: 'hosted' });
 ```
 
-On the CLI, `anydoc scan.pdf --ocr hosted`.
+`parseMode` picks the Parse PDF mode: `'auto'` (the default) extracts text and falls back to OCR, `'fast'` extracts text only, `'ocr'` OCRs every page. Any other value rejects with `code: 'hosted'` before anything is sent.
+
+```js
+const markdown = await toMarkdown('scan.pdf', { ocr: 'hosted', parseMode: 'ocr' });
+```
+
+On the CLI, `anydoc scan.pdf --ocr hosted`, and `--parse-mode ocr` to pick the mode.
 
 ## Errors
 

@@ -101,15 +101,18 @@ test('the package exports everything the native binding does', async () => {
 })
 
 // A stand-in for api.firecrawl.dev that answers every request with `reply`
-// and records each hit as [path, whether a PDF came with it]. Runs `run`
-// keyless, whatever the environment.
+// and records each hit as [path, whether a PDF came with it], and the Parse
+// options each one sent. Runs `run` keyless, whatever the environment.
 async function withHostedStub(reply, run) {
   const hits = []
+  const sent = []
   const server = createServer((request, response) => {
     const chunks = []
     request.on('data', (chunk) => chunks.push(chunk))
     request.on('end', () => {
-      hits.push([request.url, Buffer.concat(chunks).includes('%PDF-')])
+      const payload = Buffer.concat(chunks)
+      hits.push([request.url, payload.includes('%PDF-')])
+      sent.push(parseOptions(payload.toString('latin1')))
       response.writeHead(reply.status, { 'content-type': 'application/json' })
       response.end(JSON.stringify(reply.body))
     })
@@ -120,7 +123,7 @@ async function withHostedStub(reply, run) {
   process.env.FIRECRAWL_API_URL = url
   delete process.env.FIRECRAWL_API_KEY
   try {
-    await run(hits, url)
+    await run(hits, url, sent)
   } finally {
     for (const [name, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[name]
@@ -128,6 +131,11 @@ async function withHostedStub(reply, run) {
     }
     server.close()
   }
+}
+
+function parseOptions(payload) {
+  const start = payload.indexOf('name="options"\r\n\r\n') + 'name="options"\r\n\r\n'.length
+  return JSON.parse(payload.slice(start, payload.indexOf('\r\n--', start)))
 }
 
 const HOSTED = { status: 200, body: { success: true, data: { markdown: '# Read by the hosted parser\n' } } }
@@ -138,6 +146,34 @@ test("ocr: 'hosted' sends a pdf with scanned pages to Firecrawl Parse, and nothi
     assert.deepEqual(hits, [['/v2/parse', true]])
     assert.match(await toMarkdown(OUTLINE, { ocr: 'hosted' }), /^# /m)
     assert.deepEqual(hits, [['/v2/parse', true]])
+  })
+})
+
+test("parseMode picks the Parse pdf mode, 'auto' by default", async () => {
+  await withHostedStub(HOSTED, async (hits, url, sent) => {
+    await toMarkdown(MIXED, { ocr: 'hosted' })
+    await toMarkdownBytes(await readFile(MIXED), 'pdf', { ocr: 'hosted', parseMode: 'ocr' })
+    await toMarkdown(MIXED, { ocr: 'hosted', parseMode: 'fast' })
+    assert.deepEqual(
+      sent.map((options) => options.parsers),
+      [[{ type: 'pdf', mode: 'auto' }], [{ type: 'pdf', mode: 'ocr' }], [{ type: 'pdf', mode: 'fast' }]],
+    )
+  })
+})
+
+test('an invalid parseMode rejects before anything is sent', async () => {
+  await withHostedStub(HOSTED, async (hits) => {
+    for (const convert of [
+      () => toMarkdown(MIXED, { ocr: 'hosted', parseMode: 'OCR' }),
+      async () => toMarkdownBytes(await readFile(MIXED), 'pdf', { ocr: 'hosted', parseMode: 'accurate' }),
+    ]) {
+      await assert.rejects(convert(), (error) => {
+        assert.equal(error.code, 'hosted')
+        assert.match(error.message, /invalid parseMode .*expected one of: auto, fast, ocr/)
+        return true
+      })
+    }
+    assert.deepEqual(hits, [])
   })
 })
 
@@ -205,8 +241,24 @@ test('cli --ocr hosted converts a pdf with scanned pages through Firecrawl Parse
   })
 })
 
+test('cli --parse-mode picks the Parse pdf mode', async () => {
+  await withHostedStub(HOSTED, async (hits, url, sent) => {
+    const { code } = await runCli([MIXED, '--ocr', 'hosted', '--parse-mode', 'ocr', '--api-url', url])
+    assert.equal(code, undefined)
+    assert.deepEqual(sent[0].parsers, [{ type: 'pdf', mode: 'ocr' }])
+  })
+})
+
 test('cli exits 2 on usage errors', async () => {
-  for (const args of [[], ['--frmat', 'csv', CSV], ['--format', 'nope', CSV], [OUTLINE, RICH], ['--ocr', 'cloud', MIXED]]) {
+  const usageErrors = [
+    [],
+    ['--frmat', 'csv', CSV],
+    ['--format', 'nope', CSV],
+    [OUTLINE, RICH],
+    ['--ocr', 'cloud', MIXED],
+    ['--parse-mode', 'nope', MIXED],
+  ]
+  for (const args of usageErrors) {
     const { code, stderr } = await runCli(args)
     assert.equal(code, 2)
     assert.match(stderr, /^anydoc: /)

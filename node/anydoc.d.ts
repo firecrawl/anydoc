@@ -10,6 +10,12 @@ export interface ConvertOptions {
    * machine.
    */
   ocr?: 'reject' | 'hosted'
+  /**
+   * Firecrawl Parse PDF mode for `hosted`: `auto` (the default) extracts text
+   * and falls back to OCR, `fast` extracts text only, `ocr` OCRs every page.
+   * Any other value rejects with `code: 'hosted'` before anything is sent.
+   */
+  parseMode?: 'auto' | 'fast' | 'ocr'
   /** Firecrawl API key for `hosted`, else `FIRECRAWL_API_KEY`, else keyless. */
   apiKey?: string
   /** Firecrawl API URL for `hosted`, else `FIRECRAWL_API_URL`, else `https://api.firecrawl.dev`. */

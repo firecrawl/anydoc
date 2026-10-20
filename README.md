@@ -142,7 +142,7 @@ anydoc reads text-based PDFs locally but does no OCR, so a PDF with scanned or i
 | Node   | `toMarkdown('scan.pdf', { ocr: 'hosted' })`    | `apiKey`                      |
 | Python | `anydoc.to_markdown("scan.pdf", ocr="hosted")` | `api_key`                     |
 
-Only documents that need OCR leave the machine, and the whole document goes, since Parse has no page selection. If Parse cannot convert it, Node rejects with `code: 'hosted'` and Python raises `HostedError`. `--api-url`, `apiUrl` and `api_url`, else `FIRECRAWL_API_URL`, point at another Parse deployment. The Rust crate has no `ocr` option and never makes network calls.
+Only documents that need OCR leave the machine, and the whole document goes, since Parse has no page selection. If Parse cannot convert it, Node rejects with `code: 'hosted'` and Python raises `HostedError`. `--api-url`, `apiUrl` and `api_url`, else `FIRECRAWL_API_URL`, point at another Parse deployment. `--parse-mode`, `parseMode` and `parse_mode` pick the Parse PDF mode: `auto` (the default) extracts text and falls back to OCR, `fast` extracts text only, `ocr` OCRs every page. The Rust crate has no `ocr` option and never makes network calls.
 
 ## Features
 

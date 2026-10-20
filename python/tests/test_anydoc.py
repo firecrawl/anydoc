@@ -25,16 +25,19 @@ HOSTED_MARKDOWN = "# Read by the hosted parser\n"
 
 
 @contextmanager
-def hosted_stub(status, body):
+def hosted_stub(status, body, sent=None):
     """A stand-in for api.firecrawl.dev that answers every request with one
-    reply and records each hit as (path, whether a PDF came with it). The
-    block runs keyless, whatever the environment."""
+    reply and records each hit as (path, whether a PDF came with it), and the
+    Parse options each one sent into `sent`. The block runs keyless, whatever
+    the environment."""
     hits = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             payload = self.rfile.read(int(self.headers.get("content-length", 0)))
             hits.append((self.path, b"%PDF-" in payload))
+            if sent is not None:
+                sent.append(parse_options(payload))
             reply = json.dumps(body).encode()
             self.send_response(status)
             self.send_header("content-type", "application/json")
@@ -59,6 +62,11 @@ def hosted_stub(status, body):
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+def parse_options(payload):
+    options = payload.split(b'name="options"\r\n\r\n', 1)[1]
+    return json.loads(options.split(b"\r\n--", 1)[0])
 
 
 class AnydocTest(unittest.TestCase):
@@ -141,6 +149,32 @@ class AnydocTest(unittest.TestCase):
             self.assertRegex(anydoc.to_markdown(OUTLINE, ocr="hosted"), r"(?m)^# ")
             self.assertEqual(hits, [("/v2/parse", True)])
 
+    def test_parse_mode_picks_the_parse_pdf_mode_auto_by_default(self):
+        reply = {"success": True, "data": {"markdown": HOSTED_MARKDOWN}}
+        sent = []
+        with hosted_stub(200, reply, sent):
+            anydoc.to_markdown(MIXED, ocr="hosted")
+            anydoc.to_markdown_bytes(MIXED.read_bytes(), "pdf", ocr="hosted", parse_mode="ocr")
+            anydoc.to_markdown(MIXED, ocr="hosted", parse_mode="fast")
+        self.assertEqual(
+            [options["parsers"] for options in sent],
+            [
+                [{"type": "pdf", "mode": "auto"}],
+                [{"type": "pdf", "mode": "ocr"}],
+                [{"type": "pdf", "mode": "fast"}],
+            ],
+        )
+
+    def test_an_invalid_parse_mode_raises_before_anything_is_sent(self):
+        reply = {"success": True, "data": {"markdown": HOSTED_MARKDOWN}}
+        expected = "invalid parse_mode .*expected one of: auto, fast, ocr"
+        with hosted_stub(200, reply) as hits:
+            with self.assertRaisesRegex(anydoc.HostedError, expected):
+                anydoc.to_markdown(MIXED, ocr="hosted", parse_mode="OCR")
+            with self.assertRaisesRegex(anydoc.HostedError, expected):
+                anydoc.to_markdown_bytes(MIXED.read_bytes(), ocr="hosted", parse_mode="accurate")
+            self.assertEqual(hits, [])
+
     def test_the_keyless_limit_says_to_set_an_api_key(self):
         with hosted_stub(429, {"success": False, "error": "Rate limit exceeded"}):
             with self.assertRaisesRegex(anydoc.HostedError, "set FIRECRAWL_API_KEY"):
@@ -162,7 +196,8 @@ class AnydocTest(unittest.TestCase):
         exported = {name for name in dir(anydoc._anydoc) if not name.startswith("_")}
         self.assertEqual(stubbed, exported)
         # __init__.py re-exports the whole module, plus what it adds itself.
-        self.assertEqual(set(anydoc.__all__), exported | {"Format", "HostedError", "Ocr"})
+        added = {"Format", "HostedError", "Ocr", "ParseMode"}
+        self.assertEqual(set(anydoc.__all__), exported | added)
 
 
 if __name__ == "__main__":
