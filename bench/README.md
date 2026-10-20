@@ -2,7 +2,8 @@
 
 Benchmarks anydoc against well-known document-to-markdown converters on the
 `samples/` corpus, for both speed and quality (deterministic metrics + LLM judge).
-Office, text, and presentation documents; PDFs are out of scope.
+Office, text, presentation, and CHM documents; PDFs are out of scope. CHM runs
+only against anydoc; the competitor format lists are unchanged.
 
 The corpus is not redistributable and is not in the repo. The harness reads
 whatever documents are in `samples/`.
@@ -47,6 +48,33 @@ python report.py                       # aggregates everything into out/report.m
 
 All artifacts land in `out/` (gitignored). `convert.py` appends to
 `out/timings.jsonl`; `report.py` keeps only the latest row per (tool, file).
+
+## CHM time and memory
+
+The standard harness accepts `--formats chm`. For per-process peak memory and
+repeatable comparisons with an external CHM, use the dependency-free macOS/Linux
+runner from the repository root:
+
+```
+cargo build --release --example convert
+python3 -m unittest discover -s bench -p test_chm.py
+python3 bench/chm.py /path/to/book.chm --warmup 1 --iters 3
+python3 bench/chm.py /path/to/book.chm --binary /path/to/baseline/convert
+```
+
+`chm.py` prints one JSONL record with every run and their medians. Redirect stdout
+to retain a local result. It never copies the input or saves converted contents.
+Each warmup and measured run starts a fresh converter process; warmups warm OS
+caches without retaining converter state. Run comparisons serially on the same
+machine/build settings.
+`conversion_ms` is the CLI's rounded API time (CHM to Markdown, including the
+document model); `wall_ms` includes process startup, input I/O, conversion, writing
+Markdown to the null device, and process teardown. Assets are not extracted.
+`peak_rss_bytes` is the converter process's peak resident set from `wait4`, not
+total allocated memory or the Python runner's memory: macOS reports bytes, Linux
+reports KiB, normalized here to bytes. Results include binary path, platform, and
+input size; record the tested commit/build separately. No wall-clock thresholds
+are enforced in CI. Use a local private CHM path without adding it to the corpus.
 
 ## Methodology notes
 

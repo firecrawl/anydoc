@@ -20,7 +20,7 @@ BENCH = Path(__file__).resolve().parent
 ROOT = BENCH.parent
 OUT = BENCH / "out"
 
-ALL_FORMATS = {"doc", "docx", "docm", "odt", "rtf", "epub", "xls", "xlsx", "xlsm", "xlsb", "ods", "csv", "ppt", "pptx", "odp"}
+ALL_FORMATS = {"doc", "docx", "docm", "odt", "rtf", "epub", "xls", "xlsx", "xlsm", "xlsb", "ods", "csv", "ppt", "pptx", "odp", "chm"}
 
 
 def ext(path: Path) -> str:
@@ -231,7 +231,7 @@ TOOLS = {
     "unstructured": ({"doc", "docx", "odt", "rtf", "epub", "xls", "xlsx", "csv", "ppt", "pptx"},
                      convert_unstructured),
     "mammoth": ({"docx"}, convert_mammoth),
-    "libreoffice": (ALL_FORMATS - {"epub", "csv"}, convert_libreoffice),
+    "libreoffice": (ALL_FORMATS - {"epub", "csv", "chm"}, convert_libreoffice),
 }
 
 

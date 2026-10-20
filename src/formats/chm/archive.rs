@@ -4,6 +4,7 @@ use super::lzx::{Lzxd, WindowSize};
 use crate::error::ConvertError;
 use crate::package::limits;
 use std::collections::{HashMap, HashSet};
+use std::ops::{Deref, Range};
 use std::rc::Rc;
 
 const CONTROL: &str = "::DataSpace/Storage/MSCompressed/ControlData";
@@ -18,6 +19,25 @@ struct Entry {
     length: u64,
 }
 
+/// A view that stays valid while other archive entries are read. Stored data
+/// borrows the input; solid entries share the decoded allocation without copies.
+#[derive(Clone)]
+pub(super) enum Part<'a> {
+    Stored(&'a [u8]),
+    Compressed { section: Rc<Vec<u8>>, range: Range<usize> },
+}
+
+impl Deref for Part<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Stored(bytes) => bytes,
+            Self::Compressed { section, range } => &section[range.clone()],
+        }
+    }
+}
+
 pub(super) struct Archive<'a> {
     bytes: &'a [u8],
     data_offset: u64,
@@ -25,9 +45,9 @@ pub(super) struct Archive<'a> {
     entries: Vec<Entry>,
     exact: HashMap<String, usize>,
     folded: HashMap<String, usize>,
-    section: Option<Vec<u8>>,
+    section: Option<Rc<Vec<u8>>>,
     section_failed: bool,
-    cache: HashMap<usize, Rc<[u8]>>,
+    cache: HashMap<usize, Part<'a>>,
     total_read: u64,
 }
 
@@ -148,10 +168,10 @@ impl<'a> Archive<'a> {
         self.entries.iter().map(|entry| entry.name.as_str())
     }
 
-    pub(super) fn part(&mut self, name: &str) -> Result<Option<Rc<[u8]>>, ConvertError> {
+    pub(super) fn part(&mut self, name: &str) -> Result<Option<Part<'a>>, ConvertError> {
         let Some(index) = self.index(name) else { return Ok(None) };
         if let Some(bytes) = self.cache.get(&index) {
-            return Ok(Some(Rc::clone(bytes)));
+            return Ok(Some(bytes.clone()));
         }
         let entry = &self.entries[index];
         if entry.length > limits::MAX_ENTRY_BYTES {
@@ -172,15 +192,23 @@ impl<'a> Archive<'a> {
                 return Err(error);
             }
         }
-        self.check_budget(length)?;
         let bytes = match space {
-            0 => self.stored(&self.entries[index])?,
-            1 => range(self.section.as_deref().unwrap(), start, length)?,
+            0 => {
+                self.check_budget(length)?;
+                let bytes = self.stored(&self.entries[index])?;
+                self.total_read += length;
+                Part::Stored(bytes)
+            }
+            1 => {
+                let section = self.section.as_ref().unwrap();
+                range(section, start, length)?;
+                // The range check above also validates both usize conversions.
+                let range = start as usize..(start + length) as usize;
+                Part::Compressed { section: Rc::clone(section), range }
+            }
             _ => return Err(bad("unsupported CHM data space")),
         };
-        let bytes: Rc<[u8]> = Rc::from(bytes);
-        self.total_read += length;
-        self.cache.insert(index, Rc::clone(&bytes));
+        self.cache.insert(index, bytes.clone());
         Ok(Some(bytes))
     }
 
@@ -218,7 +246,7 @@ impl<'a> Archive<'a> {
         if length > limits::MAX_TOTAL_BYTES.saturating_sub(self.total_read) {
             return Err(limit(
                 "max_total_bytes",
-                "CHM decompression and retained entries exceed the archive budget",
+                "CHM decompressed data exceeds the archive budget",
             ));
         }
         Ok(())
@@ -226,8 +254,8 @@ impl<'a> Archive<'a> {
 
     /// Decode the solid stream once, in physical order. TOC order can jump
     /// arbitrarily between topics; replaying LZX windows per topic would let
-    /// a small archive amplify CPU work. Both the section and retained part
-    /// copies count against the same fixed memory budget.
+    /// a small archive amplify CPU work. Charge the shared section once against
+    /// the same fixed byte budget as independently read stored entries.
     fn decode_section(&mut self) -> Result<(), ConvertError> {
         let control = self.metadata(CONTROL)?;
         if control.get(4..8) != Some(b"LZXC") {
@@ -341,7 +369,7 @@ impl<'a> Archive<'a> {
             next_offset = start + consumed as u64;
         }
         self.total_read += length;
-        self.section = Some(section);
+        self.section = Some(Rc::new(section));
         Ok(())
     }
 }
@@ -463,6 +491,18 @@ mod tests {
             data.extend_from_slice(bytes);
         }
         container(&entries, &data)
+    }
+
+    fn compressed_parts(payload: &[u8], parts: &[Entry<'_>]) -> Vec<u8> {
+        let source = compressed(payload);
+        let archive = Archive::open(&source).unwrap();
+        let mut entries: Vec<_> = archive
+            .entries
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.space, entry.start, entry.length))
+            .collect();
+        entries.extend_from_slice(parts);
+        container(&entries, &source[archive.data_offset as usize..])
     }
 
     fn compressed(payload: &[u8]) -> Vec<u8> {
@@ -823,8 +863,69 @@ mod tests {
         let first = archive.part("page.html").unwrap().unwrap();
         let second = archive.part("/Page.HTML").unwrap().unwrap();
         assert_eq!(&*first, b"<h1>Page</h1>");
-        assert!(Rc::ptr_eq(&first, &second));
+        assert!(std::ptr::eq(first.as_ptr(), second.as_ptr()));
         assert!(archive.part("missing.html").unwrap().is_none());
+    }
+
+    #[test]
+    fn stored_parts_borrow_input_and_outlive_archive_access() {
+        let bytes = stored(&[("/first", b"first"), ("/second", b"second")]);
+        let mut archive = Archive::open(&bytes).unwrap();
+        let input = archive.stored(&archive.entries[0]).unwrap();
+        let first = archive.part("first").unwrap().unwrap();
+        assert!(std::ptr::eq(first.as_ptr(), input.as_ptr()));
+        let second = archive.part("second").unwrap().unwrap();
+        drop(archive);
+        assert_eq!(&*first, b"first");
+        assert_eq!(&*second, b"second");
+    }
+
+    #[test]
+    fn stored_parts_still_charge_the_budget_only_once() {
+        let bytes = stored(&[("/first", b"first"), ("/second", b"second")]);
+        let mut archive = Archive::open(&bytes).unwrap();
+        archive.total_read = limits::MAX_TOTAL_BYTES - 5;
+        assert_eq!(&*archive.part("first").unwrap().unwrap(), b"first");
+        assert_eq!(&*archive.part("first").unwrap().unwrap(), b"first");
+        assert_eq!(archive.total_read, limits::MAX_TOTAL_BYTES);
+        assert!(matches!(
+            archive.part("second"),
+            Err(ConvertError::ResourceLimit { limit: "max_total_bytes", .. })
+        ));
+    }
+
+    #[test]
+    fn compressed_parts_share_one_section_and_outlive_archive_access() {
+        let bytes = compressed_parts(b"abcdef", &[("/middle", 1, 1, 3)]);
+        let mut archive = Archive::open(&bytes).unwrap();
+        let whole = archive.part("page.html").unwrap().unwrap();
+        assert!(std::ptr::eq(whole.as_ptr(), archive.section.as_ref().unwrap().as_ptr()));
+        // Later entries use the already decoded section even if its stream
+        // metadata becomes unreadable. They retain it after Archive is dropped.
+        let content_index = archive.index(CONTENT).unwrap();
+        archive.entries[content_index].start = u64::MAX;
+        let middle = archive.part("middle").unwrap().unwrap();
+        assert!(std::ptr::eq(middle.as_ptr(), whole[1..].as_ptr()));
+        assert_eq!(archive.total_read, 6);
+        drop(archive);
+        assert_eq!(&*whole, b"abcdef");
+        assert_eq!(&*middle, b"bcd");
+    }
+
+    #[test]
+    fn repeated_and_overlapping_compressed_parts_do_not_charge_section_twice() {
+        let bytes = compressed_parts(b"abcdef", &[("/middle", 1, 1, 3), ("/alias", 1, 0, 6)]);
+        let mut archive = Archive::open(&bytes).unwrap();
+        archive.total_read = limits::MAX_TOTAL_BYTES - 6;
+        for (name, expected) in [
+            ("page.html", b"abcdef".as_slice()),
+            ("page.html", b"abcdef".as_slice()),
+            ("middle", b"bcd".as_slice()),
+            ("alias", b"abcdef".as_slice()),
+        ] {
+            assert_eq!(&*archive.part(name).unwrap().unwrap(), expected);
+            assert_eq!(archive.total_read, limits::MAX_TOTAL_BYTES);
+        }
     }
 
     #[test]
@@ -841,7 +942,7 @@ mod tests {
         let mut archive = Archive::open(&bytes).unwrap();
         let first = archive.part("page.html").unwrap().unwrap();
         assert_eq!(&*first, b"<h1>LZX topic</h1>");
-        assert!(Rc::ptr_eq(&first, &archive.part("page.html").unwrap().unwrap()));
+        assert!(std::ptr::eq(first.as_ptr(), archive.part("page.html").unwrap().unwrap().as_ptr()));
     }
 
     #[test]

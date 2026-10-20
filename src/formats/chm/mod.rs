@@ -13,11 +13,10 @@ use crate::package::xml::Element;
 use crate::shared::assets::{AssetSink, media_type_for};
 use crate::shared::html::{HtmlCtx, Stylesheet};
 use crate::shared::uri::is_absolute_uri;
-use archive::Archive;
+use archive::{Archive, Part};
 use encoding_rs::Encoding;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::rc::Rc;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let archive = Archive::open(bytes)?;
@@ -121,10 +120,10 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     Ok(doc)
 }
 
-fn optional_part(
-    archive: &RefCell<Archive<'_>>,
+fn optional_part<'a>(
+    archive: &RefCell<Archive<'a>>,
     path: &str,
-) -> Result<Option<Rc<[u8]>>, ConvertError> {
+) -> Result<Option<Part<'a>>, ConvertError> {
     match archive.borrow_mut().part(path) {
         Ok(bytes) => Ok(bytes),
         Err(e) if e.is_fatal() => Err(e),

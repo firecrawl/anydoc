@@ -26,11 +26,7 @@ pub(super) fn parse_with_encoding(
     }
     let encoding = encoding(bytes, fallback);
     let text = decode_as(bytes, encoding);
-    let sink = Sink {
-        document: DomNode::new(Kind::Document),
-        nodes: Cell::new(1),
-        failure: Rc::new(Cell::new(None)),
-    };
+    let sink = Sink::new();
     let failure = Rc::clone(&sink.failure);
     let mut parser = parse_document(sink, Default::default());
     // Check the sink between bounded chunks: malformed HTML cannot keep
@@ -53,20 +49,20 @@ pub(super) fn parse_with_encoding(
     }
     // HTML's adoption/reparenting rules can move a whole subtree. Validate
     // the final depth too, before the shared recursive element walker runs.
-    let mut stack = vec![(Rc::clone(&document), 0usize)];
+    let mut stack = vec![(Rc::clone(&document.root), 0usize)];
     while let Some((node, depth)) = stack.pop() {
         let depth = depth + usize::from(matches!(node.kind, Kind::Element { .. }));
         if depth > limits::MAX_XML_DEPTH {
             return Err(limit_error("max_xml_depth"));
         }
-        stack.extend(node.children.borrow().iter().map(|child| (Rc::clone(child), depth)));
+        stack.extend(node.children().map(|child| (child, depth)));
     }
     Ok((
         Element {
             ns: None,
             local: String::new(),
             attrs: Vec::new(),
-            children: document.children.borrow().iter().filter_map(adapt).collect(),
+            children: document.root.children().filter_map(|child| adapt(&child)).collect(),
         },
         encoding,
     ))
@@ -216,10 +212,52 @@ impl TokenSink for CharsetSniff {
 
 type Handle = Rc<DomNode>;
 
+#[cfg(test)]
+thread_local! {
+    // Count traversed/moved siblings, rather than relying on CI timing.
+    static SIBLING_STEPS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+fn sibling_steps(count: usize) {
+    SIBLING_STEPS.with(|steps| steps.set(steps.get() + count));
+}
+
 struct DomNode {
     kind: Kind,
-    parent: RefCell<Weak<DomNode>>,
-    children: RefCell<Vec<Handle>>,
+    links: RefCell<Links>,
+}
+
+// The flat arena owns nodes. Weak sibling links allow constant-time insertion
+// and removal, without recursively dropping a wide sibling chain at the end.
+#[derive(Default)]
+struct Links {
+    parent: Weak<DomNode>,
+    previous: Weak<DomNode>,
+    next: Weak<DomNode>,
+    first: Weak<DomNode>,
+    last: Weak<DomNode>,
+}
+
+struct Children {
+    next: Option<Handle>,
+}
+
+impl Iterator for Children {
+    type Item = Handle;
+
+    fn next(&mut self) -> Option<Handle> {
+        let node = self.next.take()?;
+        #[cfg(test)]
+        sibling_steps(1);
+        self.next = node.links.borrow().next.upgrade();
+        Some(node)
+    }
+}
+
+struct Dom {
+    root: Handle,
+    _nodes: Vec<Handle>,
 }
 
 enum Kind {
@@ -236,54 +274,88 @@ enum Kind {
 
 impl DomNode {
     fn new(kind: Kind) -> Handle {
-        Rc::new(Self {
-            kind,
-            parent: RefCell::new(Weak::new()),
-            children: RefCell::new(Vec::new()),
-        })
+        Rc::new(Self { kind, links: RefCell::new(Links::default()) })
+    }
+
+    fn children(&self) -> Children {
+        Children { next: self.links.borrow().first.upgrade() }
     }
 
     fn detach(node: &Handle) {
-        if let Some(parent) = node.parent.borrow().upgrade() {
-            parent.children.borrow_mut().retain(|child| !Rc::ptr_eq(child, node));
+        let mut links = node.links.borrow_mut();
+        let Some(parent) = links.parent.upgrade() else { return };
+        let mut parent_links = parent.links.borrow_mut();
+        if let Some(previous) = links.previous.upgrade() {
+            previous.links.borrow_mut().next = links.next.clone();
+        } else {
+            parent_links.first = links.next.clone();
         }
-        *node.parent.borrow_mut() = Weak::new();
+        if let Some(next) = links.next.upgrade() {
+            next.links.borrow_mut().previous = links.previous.clone();
+        } else {
+            parent_links.last = links.previous.clone();
+        }
+        links.parent = Weak::new();
+        links.previous = Weak::new();
+        links.next = Weak::new();
     }
 }
 
 struct Sink {
     document: Handle,
     nodes: Cell<usize>,
+    arena: RefCell<Vec<Handle>>,
     failure: Rc<Cell<Option<&'static str>>>,
 }
 
 impl Sink {
+    fn new() -> Self {
+        let document = DomNode::new(Kind::Document);
+        Self {
+            arena: RefCell::new(vec![Rc::clone(&document)]),
+            document,
+            nodes: Cell::new(1),
+            failure: Rc::new(Cell::new(None)),
+        }
+    }
+
     fn node(&self, kind: Kind) -> Handle {
         self.nodes.set(self.nodes.get().saturating_add(1));
         if self.nodes.get() > limits::MAX_XML_NODES {
             self.failure.set(Some("max_xml_nodes"));
         }
-        DomNode::new(kind)
+        let node = DomNode::new(kind);
+        if !matches!(node.kind, Kind::Ignored) {
+            self.arena.borrow_mut().push(Rc::clone(&node));
+        }
+        node
     }
 
     fn insert(&self, parent: &Handle, child: NodeOrText<Handle>, before: Option<&Handle>) {
         if self.failure.get().is_some() {
             return;
         }
+        let before = before.filter(|sibling| {
+            sibling.links.borrow().parent.upgrade().is_some_and(|p| Rc::ptr_eq(&p, parent))
+        });
         let child = match child {
-            NodeOrText::AppendNode(node) => node,
+            NodeOrText::AppendNode(node) => {
+                if before.is_some_and(|sibling| Rc::ptr_eq(sibling, &node)) {
+                    return;
+                }
+                node
+            }
             NodeOrText::AppendText(text) => {
-                let children = parent.children.borrow();
-                let index = before
-                    .and_then(|sibling| children.iter().position(|n| Rc::ptr_eq(n, sibling)))
-                    .unwrap_or(children.len());
-                if let Some(previous) = index.checked_sub(1).and_then(|i| children.get(i))
+                let previous = match before {
+                    Some(sibling) => sibling.links.borrow().previous.upgrade(),
+                    None => parent.links.borrow().last.upgrade(),
+                };
+                if let Some(previous) = previous
                     && let Kind::Text(contents) = &previous.kind
                 {
                     contents.borrow_mut().push_tendril(&text);
                     return;
                 }
-                drop(children);
                 self.node(Kind::Text(RefCell::new(text)))
             }
         };
@@ -293,30 +365,47 @@ impl Sink {
         let mut cursor = Some(Rc::clone(parent));
         let mut depth = usize::from(matches!(child.kind, Kind::Element { .. }));
         while let Some(node) = cursor {
+            if Rc::ptr_eq(&node, &child) {
+                self.failure.set(Some("max_xml_depth"));
+                return;
+            }
             depth += usize::from(matches!(node.kind, Kind::Element { .. }));
             if depth > limits::MAX_XML_DEPTH {
                 self.failure.set(Some("max_xml_depth"));
                 return;
             }
-            cursor = node.parent.borrow().upgrade();
+            cursor = node.links.borrow().parent.upgrade();
         }
         DomNode::detach(&child);
-        *child.parent.borrow_mut() = Rc::downgrade(parent);
-        let mut children = parent.children.borrow_mut();
-        let index = before
-            .and_then(|sibling| children.iter().position(|n| Rc::ptr_eq(n, sibling)))
-            .unwrap_or(children.len());
-        children.insert(index, child);
+        let previous = match before {
+            Some(sibling) => sibling.links.borrow().previous.clone(),
+            None => parent.links.borrow().last.clone(),
+        };
+        let child_weak = Rc::downgrade(&child);
+        if let Some(previous) = previous.upgrade() {
+            previous.links.borrow_mut().next = child_weak.clone();
+        } else {
+            parent.links.borrow_mut().first = child_weak.clone();
+        }
+        if let Some(next) = before {
+            next.links.borrow_mut().previous = child_weak.clone();
+        } else {
+            parent.links.borrow_mut().last = child_weak;
+        }
+        let mut links = child.links.borrow_mut();
+        links.parent = Rc::downgrade(parent);
+        links.previous = previous;
+        links.next = before.map_or_else(Weak::new, Rc::downgrade);
     }
 }
 
 impl TreeSink for Sink {
     type Handle = Handle;
-    type Output = Handle;
+    type Output = Dom;
     type ElemName<'a> = &'a QualName;
 
-    fn finish(self) -> Handle {
-        self.document
+    fn finish(self) -> Dom {
+        Dom { root: self.document, _nodes: self.arena.into_inner() }
     }
     fn parse_error(&self, _: Cow<'static, str>) {}
     fn get_document(&self) -> Handle {
@@ -353,7 +442,8 @@ impl TreeSink for Sink {
         self.insert(parent, child, None);
     }
     fn append_before_sibling(&self, sibling: &Handle, child: NodeOrText<Handle>) {
-        if let Some(parent) = sibling.parent.borrow().upgrade() {
+        let parent = sibling.links.borrow().parent.upgrade();
+        if let Some(parent) = parent {
             self.insert(&parent, child, Some(sibling));
         }
     }
@@ -363,7 +453,7 @@ impl TreeSink for Sink {
         previous: &Handle,
         child: NodeOrText<Handle>,
     ) {
-        if element.parent.borrow().upgrade().is_some() {
+        if element.links.borrow().parent.upgrade().is_some() {
             self.append_before_sibling(element, child);
         } else {
             self.append(previous, child);
@@ -393,9 +483,15 @@ impl TreeSink for Sink {
         DomNode::detach(target);
     }
     fn reparent_children(&self, node: &Handle, parent: &Handle) {
-        let children = std::mem::take(&mut *node.children.borrow_mut());
-        for child in children {
+        if Rc::ptr_eq(node, parent) {
+            return;
+        }
+        loop {
+            let Some(child) = node.links.borrow().first.upgrade() else { break };
             self.append(parent, NodeOrText::AppendNode(child));
+            if self.failure.get().is_some() {
+                break;
+            }
         }
     }
 }
@@ -414,7 +510,7 @@ fn adapt(node: &Handle) -> Option<Node> {
                     value: attr.value.to_string(),
                 })
                 .collect(),
-            children: node.children.borrow().iter().filter_map(adapt).collect(),
+            children: node.children().filter_map(|child| adapt(&child)).collect(),
         })),
         Kind::Text(text) => Some(Node::Text(text.borrow().to_string())),
         Kind::Document | Kind::Ignored => None,
@@ -439,6 +535,208 @@ mod tests {
         fn anchor_id(&self, raw: &str) -> AnchorId {
             raw.into()
         }
+    }
+
+    fn test_sink() -> Sink {
+        Sink::new()
+    }
+
+    fn test_element(sink: &Sink, local: &str) -> Handle {
+        sink.create_element(
+            QualName::new(None, Default::default(), local.into()),
+            Vec::new(),
+            ElementFlags::default(),
+        )
+    }
+
+    fn assert_children(parent: &Handle, expected: &[&Handle]) {
+        let children: Vec<_> = parent.children().collect();
+        assert_eq!(children.len(), expected.len());
+        for (index, (child, expected)) in children.iter().zip(expected).enumerate() {
+            assert!(Rc::ptr_eq(child, expected));
+            let links = child.links.borrow();
+            assert!(links.parent.upgrade().is_some_and(|p| Rc::ptr_eq(&p, parent)));
+            let previous = links.previous.upgrade();
+            assert_eq!(previous.is_some(), index > 0);
+            if let Some(previous) = previous {
+                assert!(Rc::ptr_eq(&previous, &children[index - 1]));
+            }
+            let next = links.next.upgrade();
+            assert_eq!(next.is_some(), index + 1 < children.len());
+            if let Some(next) = next {
+                assert!(Rc::ptr_eq(&next, &children[index + 1]));
+            }
+        }
+        let links = parent.links.borrow();
+        for (actual, expected) in
+            [(links.first.upgrade(), children.first()), (links.last.upgrade(), children.last())]
+        {
+            assert_eq!(actual.is_some(), expected.is_some());
+            if let (Some(actual), Some(expected)) = (actual, expected) {
+                assert!(Rc::ptr_eq(&actual, expected));
+            }
+        }
+    }
+
+    #[test]
+    fn sibling_moves_and_removals_preserve_both_directions() {
+        let sink = test_sink();
+        let parent = sink.get_document();
+        let nodes: Vec<_> =
+            ["a", "b", "c", "d"].iter().map(|local| test_element(&sink, local)).collect();
+        for child in &nodes {
+            sink.append(&parent, NodeOrText::AppendNode(Rc::clone(child)));
+        }
+        sink.append_before_sibling(&nodes[1], NodeOrText::AppendNode(Rc::clone(&nodes[3])));
+        assert_children(&parent, &[&nodes[0], &nodes[3], &nodes[1], &nodes[2]]);
+        sink.append_before_sibling(&nodes[2], NodeOrText::AppendNode(Rc::clone(&nodes[0])));
+        assert_children(&parent, &[&nodes[3], &nodes[1], &nodes[0], &nodes[2]]);
+        sink.append_before_sibling(&nodes[0], NodeOrText::AppendNode(Rc::clone(&nodes[0])));
+        sink.append(&parent, NodeOrText::AppendNode(Rc::clone(&nodes[3])));
+        assert_children(&parent, &[&nodes[1], &nodes[0], &nodes[2], &nodes[3]]);
+        for (remove, expected) in [
+            (1, vec![&nodes[0], &nodes[2], &nodes[3]]),
+            (2, vec![&nodes[0], &nodes[3]]),
+            (3, vec![&nodes[0]]),
+            (0, vec![]),
+        ] {
+            sink.remove_from_parent(&nodes[remove]);
+            sink.remove_from_parent(&nodes[remove]);
+            assert_children(&parent, &expected);
+        }
+    }
+
+    #[test]
+    fn inserted_text_merges_only_with_its_previous_text_sibling() {
+        let sink = test_sink();
+        let parent = sink.get_document();
+        let table = test_element(&sink, "table");
+        sink.append(&parent, NodeOrText::AppendNode(Rc::clone(&table)));
+        for text in ["one", "two"] {
+            sink.append_before_sibling(&table, NodeOrText::AppendText(text.into()));
+        }
+        for text in ["after", "+more"] {
+            sink.append(&parent, NodeOrText::AppendText(text.into()));
+        }
+        let children: Vec<_> = parent.children().collect();
+        assert_children(&parent, &[&children[0], &table, &children[2]]);
+        let text = |node: &Handle| match &node.kind {
+            Kind::Text(text) => text.borrow().to_string(),
+            _ => panic!("expected text"),
+        };
+        assert_eq!(text(&children[0]), "onetwo");
+        assert_eq!(text(&children[2]), "after+more");
+        let divider = test_element(&sink, "div");
+        sink.append_before_sibling(&table, NodeOrText::AppendNode(Rc::clone(&divider)));
+        sink.append_before_sibling(&table, NodeOrText::AppendText("three".into()));
+        let children: Vec<_> = parent.children().collect();
+        assert_children(&parent, &[&children[0], &divider, &children[2], &table, &children[4]]);
+        assert_eq!(text(&children[2]), "three");
+    }
+
+    #[test]
+    fn reparenting_keeps_order_and_template_contents_alive_until_finish() {
+        let sink = test_sink();
+        let source = test_element(&sink, "div");
+        let target = test_element(&sink, "section");
+        let nodes: Vec<_> =
+            ["a", "b", "c"].iter().map(|local| test_element(&sink, local)).collect();
+        sink.append(&target, NodeOrText::AppendNode(Rc::clone(&nodes[0])));
+        for child in &nodes[1..] {
+            sink.append(&source, NodeOrText::AppendNode(Rc::clone(child)));
+        }
+        sink.reparent_children(&source, &target);
+        sink.reparent_children(&target, &target);
+        assert_children(&source, &[]);
+        assert_children(&target, &[&nodes[0], &nodes[1], &nodes[2]]);
+
+        let mut flags = ElementFlags::default();
+        flags.template = true;
+        let template = sink.create_element(
+            QualName::new(None, Default::default(), "template".into()),
+            Vec::new(),
+            flags,
+        );
+        let contents = sink.get_template_contents(&template);
+        sink.append(&contents, NodeOrText::AppendText("inside".into()));
+        let text = Rc::downgrade(&contents.children().next().unwrap());
+        let document = sink.finish();
+        assert!(text.upgrade().is_some());
+        drop(document);
+        assert!(text.upgrade().is_none());
+    }
+
+    #[test]
+    fn malformed_tables_and_formatting_keep_html_repair_order() {
+        let tree = parse(
+            b"<table>one<div>two</div>three<tr><td>cell</table><p><b>four<i>five</b>six</i>seven",
+            encoding_rs::UTF_8,
+        )
+        .unwrap();
+        let body = tree.descendants_any("body").next().unwrap();
+        assert_eq!(body.text(), "onetwothreecellfourfivesixseven");
+        let paragraph = body.descendants_any("p").next().unwrap();
+        let bold = paragraph
+            .children
+            .iter()
+            .find_map(|node| match node {
+                Node::Elem(element) if element.local == "b" => Some(element),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(bold.text(), "fourfive");
+        let italic: Vec<_> = paragraph.descendants_any("i").map(Element::text).collect();
+        assert_eq!(italic, ["five", "six"]);
+    }
+
+    #[test]
+    fn ignored_comments_do_not_break_sibling_links_or_text_merging() {
+        let tree = parse(
+            b"<p>before<!-- ignored -->after<span>middle</span><!-- ignored -->last",
+            encoding_rs::UTF_8,
+        )
+        .unwrap();
+        let paragraph = tree.descendants_any("p").next().unwrap();
+        assert_eq!(paragraph.text(), "beforeaftermiddlelast");
+        assert_eq!(paragraph.children.len(), 3);
+        assert!(matches!(&paragraph.children[0], Node::Text(text) if text == "beforeafter"));
+    }
+
+    #[test]
+    fn dropping_a_wide_dom_releases_its_nodes_without_a_recursive_sibling_chain() {
+        let sink = test_sink();
+        let parent = sink.get_document();
+        let mut last = Weak::new();
+        for _ in 0..32768 {
+            let child = test_element(&sink, "div");
+            last = Rc::downgrade(&child);
+            sink.append(&parent, NodeOrText::AppendNode(child));
+        }
+        let document = sink.finish();
+        assert!(last.upgrade().is_some());
+        drop(document);
+        assert!(last.upgrade().is_none());
+    }
+
+    #[test]
+    fn inserting_and_detaching_wide_siblings_does_not_walk_the_parent() {
+        let sink = test_sink();
+        let parent = sink.get_document();
+        let children: Vec<_> = (0..4096).map(|_| sink.node(Kind::Document)).collect();
+        for child in &children {
+            sink.append(&parent, NodeOrText::AppendNode(Rc::clone(child)));
+        }
+        SIBLING_STEPS.with(|steps| steps.set(0));
+        for _ in 0..1024 {
+            let child = sink.node(Kind::Document);
+            sink.append_before_sibling(&children[2048], NodeOrText::AppendNode(Rc::clone(&child)));
+            sink.remove_from_parent(&child);
+        }
+        // Foster parenting and adoption repair must not repeatedly scan or
+        // shift all the siblings preceding/following their insertion point.
+        let steps = SIBLING_STEPS.with(Cell::get);
+        assert!(steps <= 1024 * 4, "wide sibling mutation took {steps} sibling steps");
+        assert!(sink.failure.get().is_none());
     }
 
     #[test]
