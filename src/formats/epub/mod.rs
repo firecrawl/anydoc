@@ -265,4 +265,56 @@ mod tests {
             .collect::<String>();
         assert_eq!(text, "chapter text", "sixty-four itemrefs naming one part");
     }
+
+    #[test]
+    fn a_title_page_with_a_bare_ampersand_is_still_read() {
+        // A chapter that is not well-formed XML used to be dropped whole, so
+        // a title page reading "Tom & Jerry" vanished and the book appeared
+        // to start at the following chapter.
+        let parts = [
+            (
+                "META-INF/container.xml",
+                r#"<?xml version="1.0"?>
+                <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                <rootfiles><rootfile full-path="c.opf"
+                media-type="application/oebps-package+xml"/></rootfiles></container>"#,
+            ),
+            (
+                "c.opf",
+                r#"<?xml version="1.0"?>
+                <package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/>
+                <manifest>
+                <item id="tp" href="title.xhtml" media-type="application/xhtml+xml"/>
+                <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+                </manifest>
+                <spine><itemref idref="tp"/><itemref idref="c1"/></spine></package>"#,
+            ),
+            (
+                "title.xhtml",
+                r#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">
+                <body><p>Tom & Jerry (1940)</p></body></html>"#,
+            ),
+            (
+                "ch1.xhtml",
+                r#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">
+                <body><p>chapter one</p></body></html>"#,
+            ),
+        ];
+        let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, body) in &parts {
+            w.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(body.as_bytes()).unwrap();
+        }
+
+        let doc = parse(&w.finish().unwrap().into_inner()).unwrap();
+        let text = doc
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(inlines) => Some(crate::model::inlines_to_plain_text(inlines)),
+                _ => None,
+            })
+            .collect::<String>();
+        assert_eq!(text, "Tom & Jerry (1940)chapter one", "the title page opens the book");
+    }
 }
