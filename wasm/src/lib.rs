@@ -69,6 +69,9 @@ impl From<anydoc::Format> for Format {
             anydoc::Format::Ods => Format::Ods,
             anydoc::Format::Odp => Format::Odp,
             anydoc::Format::Csv => Format::Csv,
+            other => unreachable!(
+                "anydoc added format {other:?}; the wasm bindings ship in lockstep with the core crate"
+            ),
         }
     }
 }
