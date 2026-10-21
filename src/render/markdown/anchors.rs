@@ -9,6 +9,7 @@
 
 use crate::model::{Block, Document, Inline, LinkTarget, inlines_to_plain_text};
 use std::collections::{HashMap, HashSet};
+use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 
 pub(crate) struct AnchorMap {
     resolved: HashMap<String, Resolved>,
@@ -185,7 +186,10 @@ fn gfm_slug(text: &str) -> String {
         .filter_map(|c| match c {
             ' ' => Some('-'),
             '-' => Some(c),
-            c if c.is_alphanumeric() || is_combining_mark(c) || is_connector_punctuation(c) => {
+            c if (c.is_alphanumeric() && c.general_category() != GeneralCategory::OtherNumber)
+                || is_combining_mark(c)
+                || is_connector_punctuation(c) =>
+            {
                 Some(c)
             }
             _ => None,
@@ -208,7 +212,9 @@ fn is_combining_mark(c: char) -> bool {
             | 0x1AB0..=0x1AFF
             | 0x1DC0..=0x1DFF
             | 0x20D0..=0x20FF
+            | 0xFE00..=0xFE0F
             | 0xFE20..=0xFE2F
+            | 0xE0100..=0xE01EF
     )
 }
 
@@ -253,6 +259,9 @@ mod tests {
         assert_eq!(gfm_slug("combining n\u{0303} tilde"), "combining-n\u{0303}-tilde");
         assert_eq!(gfm_slug("देवनागरी क्षि"), "देवनागरी-क्षि");
         assert_eq!(gfm_slug("日本語の見出し"), "日本語の見出し");
+        assert_eq!(gfm_slug("❤️ Love"), "️-love");
+        assert_eq!(gfm_slug("2️⃣ Second"), "2️⃣-second");
+        assert_eq!(gfm_slug("x² formula ½"), "x-formula-");
     }
 
     #[test]
