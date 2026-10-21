@@ -200,6 +200,10 @@ impl<'a> Iterator for DescendantNodes<'a> {
 /// nodes. Encoding comes from the BOM or XML declaration; the part is
 /// transcoded to UTF-8 before parsing so namespace resolution sees one
 /// consistent encoding.
+///
+/// Unclosed or mismatched elements are recovered while keeping available
+/// text. Empty start-tag names and extra raw `<` bytes swallowed by tag
+/// events are rejected to avoid silently discarding content.
 pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
     let utf8 = to_utf8(bytes);
     let mut reader = NsReader::from_reader(utf8.as_ref());
@@ -234,15 +238,22 @@ pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
                 let elem = start_to_element(&e, &reader, &mut interner);
                 attach(&mut stack, &mut root, Node::Elem(elem));
             }
-            Event::End(end) => match stack.pop() {
-                Some(elem) => {
-                    if elem.local.as_bytes() != end.local_name().as_ref() {
-                        recovered = true;
-                    }
-                    attach(&mut stack, &mut root, Node::Elem(elem));
+            Event::End(end) => {
+                if end.name().as_ref().contains(&b'<') {
+                    return Err(ConvertError::malformed(
+                        "unparseable xml: invalid end-tag delimiter",
+                    ));
                 }
-                None => recovered = true,
-            },
+                match stack.pop() {
+                    Some(elem) => {
+                        if elem.local.as_bytes() != end.local_name().as_ref() {
+                            recovered = true;
+                        }
+                        attach(&mut stack, &mut root, Node::Elem(elem));
+                    }
+                    None => recovered = true,
+                }
+            }
             Event::Text(e) => {
                 let text = match e.decode() {
                     Ok(t) => t.into_owned(),
@@ -628,11 +639,27 @@ mod tests {
     }
 
     #[test]
+    fn bare_less_than_in_end_tag_is_not_silently_recovered() {
+        for xml in ["<r>Pump A </ pump B</r>", "<r>Pump A </pump B</r>"] {
+            assert!(
+                matches!(parse_xml(xml.as_bytes()), Err(ConvertError::Malformed { .. })),
+                "{xml}"
+            );
+        }
+    }
+
+    #[test]
     fn unclosed_elements_recovered() {
         let root = parse_xml(b"<a><b>text").unwrap();
         let a = root.child_elems().next().unwrap();
         assert_eq!(a.local, "a");
         assert_eq!(a.text(), "text");
+    }
+
+    #[test]
+    fn mismatched_elements_keep_all_text() {
+        let root = parse_xml(b"<a>before<b>inside</a>after").unwrap();
+        assert_eq!(root.text(), "beforeinsideafter");
     }
 
     #[test]

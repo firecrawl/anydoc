@@ -145,7 +145,11 @@ mod tests {
 
     #[test]
     fn bare_less_than_returns_an_error_instead_of_truncated_markdown() {
-        for paragraph in ["Pump A < pump B in flow rate.", "< First paragraph."] {
+        for paragraph in [
+            "Pump A < pump B in flow rate.",
+            "< First paragraph.",
+            "Pump A </ pump B in flow rate.",
+        ] {
             let document = format!(
                 r#"<w:document {W}><w:body>
                 <w:p><w:r><w:t>Before.</w:t></w:r></w:p>
