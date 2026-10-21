@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+1. First numbered paragraph.
+2. Second numbered paragraph.
+
+Heading break
+
+9. Ninth numbered paragraph.
