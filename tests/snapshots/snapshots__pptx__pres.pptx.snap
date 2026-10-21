@@ -2,6 +2,8 @@
 source: tests/snapshots.rs
 expression: output
 ---
+<a id="slide-1"></a>
+
 Deck Title Slide
 
 - Top level point
@@ -11,6 +13,8 @@ Deck Title Slide
 - Second point with emphasis
 
 > Speaker note for the intro slide.
+
+<a id="slide-2"></a>
 
 Numbers Slide
 

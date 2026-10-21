@@ -16,7 +16,7 @@ mod shared;
 
 pub use error::ConvertError;
 
-use render::markdown::document_to_markdown;
+use render::markdown::{MarkdownOptions, document_to_markdown_with_options};
 
 use std::path::Path;
 
@@ -123,7 +123,10 @@ pub fn to_markdown_bytes(
     if format == Format::Pdf {
         return formats::pdf::to_markdown(bytes);
     }
-    Ok(document_to_markdown(&to_document(bytes, format)?))
+    let options = MarkdownOptions {
+        render_unlinked_slide_anchors: matches!(format, Format::Ppt | Format::Pptx),
+    };
+    Ok(document_to_markdown_with_options(&to_document(bytes, format)?, options))
 }
 
 /// Parse an in-memory document into the document model. Pass a [`Format`] to

@@ -2,6 +2,10 @@
 source: tests/snapshots.rs
 expression: output
 ---
+<a id="slide-1"></a>
+
 - **Alpha master body text**
+
+<a id="slide-2"></a>
 
 *Beta master body text*

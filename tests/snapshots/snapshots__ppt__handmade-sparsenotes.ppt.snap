@@ -2,7 +2,11 @@
 source: tests/snapshots.rs
 expression: output
 ---
+<a id="slide-1"></a>
+
 First slide text
+
+<a id="slide-2"></a>
 
 Second slide text
 
