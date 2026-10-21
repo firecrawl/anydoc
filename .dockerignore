@@ -1,0 +1,32 @@
+# Build artifacts — keep these out of the build context (they bloat it and can
+# leak local toolchain state). The broad **/ patterns cover the binding worktrees
+# (node/target, python/target, wasm/target) in addition to the root target/.
+target/
+**/target/
+
+# Node
+node_modules/
+**/node_modules/
+
+# Git
+.git/
+.gitignore
+
+# Non-redistributable / large corpora and binding build outputs
+bench/
+fuzz/target/
+python/dist/
+wasm/pkg/
+
+# Local agent / scratch state
+.claude/
+.zcode/
+thoughts/
+
+# Release archives
+*.tar.gz
+
+# CI / editor noise
+.editorconfig
+
+# Keep tests/fixtures/ — the CI smoke test converts one of these.
