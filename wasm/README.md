@@ -30,7 +30,7 @@ const document = toDocument(bytes);
 formatFromBytes(bytes); // 'docx', or undefined when nothing matches
 ```
 
-The package is built with `wasm-pack --target web`: it loads with a plain `<script type="module">` and with bundlers that handle the `new URL(..., import.meta.url)` asset pattern (Vite, webpack 5, Rollup). In Node, pass the module bytes to `initSync` instead of calling `init` (see [`test.mjs`](wasm/test.mjs)).
+The package is built with `wasm-pack --target web`: it loads with a plain `<script type="module">` and with bundlers that handle the `new URL(..., import.meta.url)` asset pattern (Vite, webpack 5, Rollup). In Node, pass the module bytes to `initSync` instead of calling `init` (see [`test.mjs`](test.mjs)).
 
 Calls are synchronous: wasm runs single-threaded on the calling thread, so convert on a worker if the main thread must stay responsive.
 
