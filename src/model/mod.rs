@@ -19,10 +19,7 @@ pub use inline::{Inline, checkbox_text, inlines_are_empty, inlines_to_plain_text
 pub use link::{AnchorId, ImageSource, LinkTarget};
 pub use list::{List, ListItem, MarkerKind};
 pub use style::Style;
-pub use table::{Cell, CellSlot, Table, TableKind};
-
-/// Frontends build grids; consumers read them off [`Table::grid`].
-pub(crate) use table::GridBuilder;
+pub use table::{Cell, CellSlot, GridBuilder, Table, TableKind};
 
 /// A parsed document: its body, its notes, and the bytes of everything it
 /// embedded.
