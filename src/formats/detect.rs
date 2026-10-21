@@ -14,6 +14,8 @@
 //!   type of the part the package-level officeDocument relationship
 //!   designates as the main document (with the main part's mandated root
 //!   element as the authority when content types are stale or generic).
+//! - Standalone HTML: a leading HTML doctype or root element, so exports that
+//!   use a misleading `.doc` extension are still routed to the HTML frontend.
 //!
 //! Plain-text formats (CSV) carry no signature and are never detected;
 //! callers fall back to the file extension. Detection never errors: any
@@ -44,7 +46,31 @@ pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Format> {
     if bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-") {
         return Some(Format::Pdf);
     }
+    if looks_like_html(bytes) {
+        return Some(Format::Html);
+    }
     None
+}
+
+/// Detect the two HTML forms used by standalone exports without classifying
+/// arbitrary text that happens to contain an HTML tag. The extension remains
+/// the fallback for less conventional HTML prologs.
+fn looks_like_html(bytes: &[u8]) -> bool {
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
+    let mut head = head.trim_start_matches('\u{feff}').trim_start();
+    if let Some(rest) = head.strip_prefix("<?xml")
+        && let Some(end) = rest.find("?>")
+    {
+        head = rest[end + 2..].trim_start();
+    }
+    let lower = head.to_ascii_lowercase();
+    if let Some(rest) = lower.strip_prefix("<!doctype") {
+        let rest = rest.trim_start();
+        return rest
+            .strip_prefix("html")
+            .is_some_and(|tail| tail.is_empty() || tail.starts_with(['>', ' ', '\t', '\r', '\n']));
+    }
+    lower.strip_prefix("<html").is_some_and(|rest| rest.starts_with(['>', ' ', '\t', '\r', '\n']))
 }
 
 /// Classify an OLE compound file by its mandated content stream. Encrypted
@@ -238,6 +264,20 @@ mod tests {
         assert_eq!(from_bytes(b"{\\rtf1\\ansi hi}"), Some(Format::Rtf));
         assert_eq!(from_bytes(b"a,b,c\n1,2,3\n"), None);
         assert_eq!(from_bytes(b""), None);
+    }
+
+    #[test]
+    fn standalone_html_is_detected_without_an_extension() {
+        assert_eq!(
+            from_bytes(b"<!DOCTYPE html><html><body>text</body></html>"),
+            Some(Format::Html)
+        );
+        assert_eq!(from_bytes(b"<HTML><BODY>text</BODY></HTML>"), Some(Format::Html));
+        assert_eq!(
+            from_bytes(b"<?xml version=\"1.0\"?><html><body>text</body></html>"),
+            Some(Format::Html)
+        );
+        assert_eq!(from_bytes(b"plain text mentioning <html> here"), None);
     }
 
     #[test]
