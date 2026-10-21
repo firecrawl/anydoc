@@ -75,6 +75,35 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
     }
 
     let multi_sheet = sheets.len() > 1;
+    // Internal hyperlinks are rendered only when their target anchor exists.
+    // Resolve cell locations across the visible workbook before building any
+    // sheet tables so links to later sheets work too.
+    let mut anchors_by_sheet: HashMap<String, HashMap<(u32, u32), Vec<String>>> = HashMap::new();
+    for (source_name, part) in &sheets {
+        let worksheet = pkg.optional_xml_part(part)?;
+        let Some(worksheet) = worksheet.as_ref().and_then(|r| r.find(ns::SML, "worksheet")) else {
+            continue;
+        };
+        for link in worksheet
+            .first_descendant(ns::SML, "hyperlinks")
+            .into_iter()
+            .flat_map(|links| links.find_all(ns::SML, "hyperlink"))
+        {
+            let Some(location) = link.attr_unqualified("location") else {
+                continue;
+            };
+            let Some((target_sheet, at)) = cell_location_target(source_name, location) else {
+                continue;
+            };
+            anchors_by_sheet
+                .entry(target_sheet.to_lowercase())
+                .or_default()
+                .entry(at)
+                .or_default()
+                .push(location.to_string());
+        }
+    }
+
     let mut doc = Document::default();
     let mut failed = 0usize;
     // One budget for the workbook, so sheets cannot multiply the cap.
@@ -89,6 +118,7 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
         let sheet_rels = read_rels(pkg, &rels_part_for(part))?;
         let mut content = read_sheet(worksheet, &shared, &styles, date1904, &sheet_rels);
         content.checkboxes = read_vml_checkboxes(pkg, part)?;
+        content.anchors = anchors_by_sheet.remove(&name.to_lowercase()).unwrap_or_default();
         let Some(table) = build_table(content, &mut slots)? else {
             continue;
         };
@@ -243,6 +273,8 @@ pub(super) struct SheetContent {
     pub(super) cells: HashMap<(u32, u32), String>,
     /// Hyperlinks attached to individual worksheet cells.
     pub(super) hyperlinks: HashMap<(u32, u32), LinkTarget>,
+    /// Internal links from workbook sheets that target these cells.
+    pub(super) anchors: HashMap<(u32, u32), Vec<String>>,
     /// Form control checkboxes by the cell they are anchored in.
     pub(super) checkboxes: Checkboxes,
     pub(super) hidden_rows: HashSet<u32>,
@@ -447,6 +479,16 @@ pub(super) fn build_table(
     }
     for (at, text) in sheet.cells.drain() {
         cells.insert(at, vec![Inline::plain(text)]);
+    }
+    for (at, ids) in sheet.anchors.drain() {
+        if at.0 < MAX_ROWS
+            && at.1 < MAX_COLS
+            && let Some(content) = cells.get_mut(&at)
+        {
+            let mut anchored: Vec<Inline> = ids.into_iter().map(Inline::Anchor).collect();
+            anchored.append(content);
+            *content = anchored;
+        }
     }
     for (&at, target) in &sheet.hyperlinks {
         if let Some(content) = cells.get_mut(&at) {
@@ -711,6 +753,26 @@ fn parse_ref(r: &str) -> Option<(u32, u32)> {
     Some((row - 1, col - 1))
 }
 
+/// Resolve a worksheet location to a visible workbook sheet and cell. A
+/// location without a sheet name refers to the source sheet; quoted sheet
+/// names may escape apostrophes by doubling them.
+fn cell_location_target(source_sheet: &str, location: &str) -> Option<(String, (u32, u32))> {
+    let (sheet, cell) = match location.rsplit_once('!') {
+        Some((sheet, cell)) => {
+            let sheet = sheet.trim();
+            let sheet = sheet
+                .strip_prefix('\'')
+                .and_then(|s| s.strip_suffix('\''))
+                .unwrap_or(sheet)
+                .replace("''", "'");
+            (sheet, cell)
+        }
+        None => (source_sheet.to_string(), location),
+    };
+    let cell = cell.replace('$', "");
+    Some((sheet, parse_ref(&cell)?))
+}
+
 /// A merge reference (`F1:O3`, or a single cell) as an inclusive normalized
 /// region.
 fn parse_region(r: &str) -> Option<(u32, u32, u32, u32)> {
@@ -931,6 +993,31 @@ mod tests {
         };
         assert_eq!(link_at(0), &LinkTarget::External("https://docs.example.test/".into()));
         assert_eq!(link_at(1), &LinkTarget::Anchor("Sheet2!A1".into()));
+    }
+
+    #[test]
+    fn sheet_location_hyperlinks_render_with_a_target_anchor() {
+        let wb = Wb {
+            sheets: vec![
+                (
+                    "Sheet1",
+                    "",
+                    r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Jump</t></is></c></row></sheetData><hyperlinks><hyperlink ref="A1" location="Sheet2!B2"/></hyperlinks>"#,
+                ),
+                (
+                    "Sheet2",
+                    "",
+                    r#"<sheetData><row r="2"><c r="B2" t="inlineStr"><is><t>Target</t></is></c></row></sheetData>"#,
+                ),
+            ],
+            ..Wb::default()
+        };
+
+        let doc = parse(&wb.build()).unwrap();
+        let markdown = crate::render::markdown::document_to_markdown(&doc);
+
+        assert!(markdown.contains("[Jump](#sheet2-b2)"), "{markdown}");
+        assert!(markdown.contains("<a id=\"sheet2-b2\"></a>"), "{markdown}");
     }
 
     #[test]
