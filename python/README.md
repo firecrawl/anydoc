@@ -77,7 +77,7 @@ except (anydoc.EncryptedError, anydoc.UnsupportedError) as error:
 | `NeedsOcrError`      | Scanned or image-only pages of a PDF, listed in `pages`             |
 | `MalformedError`     | Structurally unusable: no meaningful content could be extracted     |
 | `EncryptedError`     | Encrypted or password-protected                                     |
-| `ResourceLimitError` | Crossed a fixed safety limit (decompression, nesting, node count)   |
+| `ResourceLimitError` | Crossed a fixed safety limit or encountered a recoverable allocation failure   |
 | `MissingPartError`   | A part required for any meaningful output is absent                 |
 | `HostedError`        | `ocr="hosted"` could not get the document through Firecrawl Parse   |
 | `OSError`            | The file could not be read, from `to_markdown` only                 |
