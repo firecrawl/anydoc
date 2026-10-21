@@ -459,6 +459,105 @@ fn url_controls_cannot_split_the_document() {
 }
 
 #[test]
+fn url_entities_remain_literal_in_links_and_images() {
+    for (source, escaped) in [
+        ("?q=&copy;", "?q=&amp;copy;"),
+        ("?q=&amp;", "?q=&amp;amp;"),
+        ("#&#35;section", "#&amp;#35;section"),
+        ("#&#x23;section", "#&amp;#x23;section"),
+        ("#&#X23;section", "#&amp;#X23;section"),
+        ("?a=1&b=2", "?a=1&b=2"),
+        ("?q=%26copy%3B", "?q=%26copy%3B"),
+        ("?q=&copy", "?q=&copy"),
+        ("?q=café&", "?q=café&"),
+    ] {
+        let url = format!("https://e.test/{source}");
+        let md = doc(vec![
+            Block::Paragraph(vec![Inline::Link {
+                content: vec![Inline::plain("link")],
+                target: LinkTarget::External(url.clone()),
+            }]),
+            Block::Paragraph(vec![Inline::Image {
+                alt: "image".into(),
+                source: ImageSource::External(url),
+            }]),
+        ]);
+        assert_eq!(
+            md,
+            format!("[link](https://e.test/{escaped})\n\n![image](https://e.test/{escaped})\n"),
+            "source: {source}"
+        );
+    }
+}
+
+#[test]
+fn url_backslashes_cannot_escape_destination_syntax() {
+    for (source, escaped) in
+        [(r"a\*b", "a%5C*b"), (r"a\", "a%5C"), (r"a\\b", "a%5C%5Cb"), ("a%5Cb", "a%5Cb")]
+    {
+        let md = doc(vec![
+            Block::Paragraph(vec![Inline::Link {
+                content: vec![Inline::plain("link")],
+                target: LinkTarget::Relative(source.into()),
+            }]),
+            Block::Paragraph(vec![Inline::Image {
+                alt: "image".into(),
+                source: ImageSource::External(format!("https://e.test/{source}")),
+            }]),
+        ]);
+        assert_eq!(
+            md,
+            format!("[link]({escaped})\n\n![image](https://e.test/{escaped})\n"),
+            "source: {source}"
+        );
+    }
+}
+
+#[test]
+fn url_escaping_applies_inside_angle_brackets() {
+    let source = r"chapter(2).xhtml?q=&copy;\";
+    let md = doc(vec![
+        Block::Paragraph(vec![Inline::Link {
+            content: vec![Inline::plain("next")],
+            target: LinkTarget::Relative(source.into()),
+        }]),
+        Block::Paragraph(vec![Inline::Image {
+            alt: "image".into(),
+            source: ImageSource::External(format!("https://e.test/{source}")),
+        }]),
+    ]);
+    assert_eq!(
+        md,
+        "[next](<chapter(2).xhtml?q=&amp;copy;%5C>)\n\n\
+         ![image](<https://e.test/chapter(2).xhtml?q=&amp;copy;%5C>)\n"
+    );
+}
+
+#[test]
+fn url_entities_in_table_cells_keep_the_label_and_destination() {
+    let url = "https://e.test/?q=&copy;|preview";
+    let md = doc(vec![table_from(
+        vec![vec![
+            Cell::from_inlines(vec![Inline::Link {
+                content: Vec::new(),
+                target: LinkTarget::External(url.into()),
+            }]),
+            Cell::from_inlines(vec![Inline::Image {
+                alt: "image".into(),
+                source: ImageSource::External(url.into()),
+            }]),
+        ]],
+        0,
+    )]);
+    assert_eq!(
+        md,
+        "|  |  |\n| --- | --- |\n\
+         | [https://e.test/?q=&amp;copy;\\|preview](https://e.test/?q=&amp;copy;%7Cpreview) \
+         | ![image](https://e.test/?q=&amp;copy;%7Cpreview) |\n"
+    );
+}
+
+#[test]
 fn nested_list() {
     let md = doc(vec![Block::List(List {
         marker: MarkerKind::Bullet,
