@@ -376,11 +376,22 @@ impl Extractor {
     /// Iterative container walk over an explicit stack with fixed depth and
     /// record-count bounds — nesting or record counts beyond any real
     /// presentation are attack shapes and hard-fail.
+    ///
+    /// Every descent must push onto `stack`. Nothing in here may call `walk`
+    /// again: the depth bound reads `stack.len()`, so a re-entrant call would
+    /// start a fresh stack, reset the bound to 1 and leave nesting unbounded
+    /// all the way to a stack overflow.
     fn walk(&mut self, data: &[u8]) -> Result<(), ConvertError> {
-        let mut stack: Vec<(&[u8], usize)> = vec![(data, 0)];
-        while let Some((buf, pos)) = stack.last_mut() {
+        // The flag marks a recovery-mode notes container: its segment closes
+        // when the container is exhausted, which is where the recursive call
+        // used to return to.
+        let mut stack: Vec<(&[u8], usize, bool)> = vec![(data, 0, false)];
+        while let Some((buf, pos, _)) = stack.last_mut() {
             let Some((ver_inst, rec_type, body)) = record_at(buf, *pos) else {
-                stack.pop();
+                if let Some((.., true)) = stack.pop() {
+                    self.end_segment(None);
+                    self.current_is_notes = false;
+                }
                 continue;
             };
             *pos += 8 + body.len();
@@ -402,11 +413,10 @@ impl Extractor {
                         .and_then(|(.., atom)| get_u32(atom, 0))
                         .is_some_and(|id| id & 0x8000_0000 != 0);
                     if !master {
+                        Self::check_depth(stack.len())?;
                         self.end_segment(None);
                         self.current_is_notes = true;
-                        self.walk(body)?;
-                        self.end_segment(None);
-                        self.current_is_notes = false;
+                        stack.push((body, 0, true));
                     }
                 }
                 // Notes, master, and handout containers are walked via their
@@ -415,15 +425,22 @@ impl Extractor {
                 // Only instance 0 of SlideListWithText holds slide text here.
                 0x0FF0 if ver_inst >> 4 != 0 => {}
                 _ => {
-                    if stack.len() >= limits::MAX_RECORD_DEPTH {
-                        return Err(ConvertError::ResourceLimit {
-                            limit: "max_record_depth",
-                            detail: format!("record nesting exceeds {}", limits::MAX_RECORD_DEPTH),
-                        });
-                    }
-                    stack.push((body, 0));
+                    Self::check_depth(stack.len())?;
+                    stack.push((body, 0, false));
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// Hard-fail a descent that would take container nesting past
+    /// [`limits::MAX_RECORD_DEPTH`].
+    fn check_depth(depth: usize) -> Result<(), ConvertError> {
+        if depth >= limits::MAX_RECORD_DEPTH {
+            return Err(ConvertError::ResourceLimit {
+                limit: "max_record_depth",
+                detail: format!("record nesting exceeds {}", limits::MAX_RECORD_DEPTH),
+            });
         }
         Ok(())
     }
@@ -632,5 +649,57 @@ impl Extractor {
                 self.current.push(Block::Paragraph(inlines));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// `depth` NotesContainers (0x03F0), each holding the next. No NotesAtom
+    /// child, so none of them reads as the notes master.
+    fn nested_notes(depth: usize) -> Vec<u8> {
+        let mut buf: Vec<u8> = Vec::new();
+        for _ in 0..depth {
+            let mut outer = Vec::with_capacity(buf.len() + 8);
+            outer.extend_from_slice(&0x000Fu16.to_le_bytes()); // container
+            outer.extend_from_slice(&0x03F0u16.to_le_bytes()); // NotesContainer
+            outer.extend_from_slice(&(buf.len() as u32).to_le_bytes());
+            outer.extend_from_slice(&buf);
+            buf = outer;
+        }
+        buf
+    }
+
+    /// An OLE2 file carrying just the record stream. With no usable Current
+    /// User stream the persist directory cannot resolve, which is what puts
+    /// the extractor on the recovery path.
+    fn ppt_of(stream: &[u8]) -> Vec<u8> {
+        let mut ole = cfb::CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+        ole.create_stream("PowerPoint Document").unwrap().write_all(stream).unwrap();
+        ole.into_inner().into_inner()
+    }
+
+    /// Recovery descends into NotesContainers. That descent used to be a
+    /// recursive `walk` call, which started a fresh stack and so reset the
+    /// depth bound to 1 at every level — nesting was then bounded only by
+    /// `MAX_RECORDS` (16M), long past a stack overflow. It must hard-fail on
+    /// the shared depth bound instead.
+    #[test]
+    fn nested_notes_in_recovery_hit_the_depth_bound() {
+        let bytes = ppt_of(&nested_notes(limits::MAX_RECORD_DEPTH + 8));
+        let err = parse(&bytes).unwrap_err();
+        assert!(
+            matches!(&err, ConvertError::ResourceLimit { limit: "max_record_depth", .. }),
+            "expected max_record_depth, got {err:?}"
+        );
+    }
+
+    /// The same shape far past the bound stays an error rather than a crash.
+    #[test]
+    fn deeply_nested_notes_do_not_overflow_the_stack() {
+        let bytes = ppt_of(&nested_notes(200_000));
+        assert!(matches!(parse(&bytes), Err(ConvertError::ResourceLimit { .. })));
     }
 }

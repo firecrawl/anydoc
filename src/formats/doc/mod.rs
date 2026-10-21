@@ -447,6 +447,13 @@ fn parse_fkps(
     }
     let n = (plc.len() - 4) / 8;
     for i in 0..n {
+        // Nothing stops every entry pointing at the same page, so `n` does
+        // not bound the run count: without this a few megabytes of table
+        // stream expand into tens of gigabytes of `Run`.
+        if runs.len() >= limits::MAX_DOC_RUNS {
+            log::debug!("doc: formatting-run budget reached; later runs are ignored");
+            break;
+        }
         let Some(pn_raw) = get_u32(plc, (n + 1) * 4 + i * 4) else {
             continue;
         };
