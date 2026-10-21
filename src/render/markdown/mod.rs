@@ -157,6 +157,12 @@ fn render_blocks(blocks: &[Block], rc: &Ctx) -> String {
     parts.join("\n\n")
 }
 
+/// Whether a single-cell table's lone cell holds a nested table.
+fn wraps_table(t: &crate::model::Table) -> bool {
+    let crate::model::CellSlot::Origin(cell) = &t.grid[0][0] else { return false };
+    cell.blocks.iter().any(|b| matches!(b, Block::Table(_)))
+}
+
 fn render_block(block: &Block, rc: &Ctx) -> Option<String> {
     match block {
         Block::Heading { level, content, .. } => {
@@ -175,7 +181,13 @@ fn render_block(block: &Block, rc: &Ctx) -> Option<String> {
         }
         Block::List(list) => render_list(list, rc),
         // Trivial layout tables are scaffolding; render their content directly.
-        Block::Table(t) if t.kind == TableKind::Layout && t.is_single_cell() => {
+        // A single-cell table wrapping a nested table is the same scaffolding
+        // shape (Word forms often wrap their whole body in one): flattening
+        // would collapse the inner grid into `a / b` runs, so unwrap the
+        // wrapper and let the nested table render as a real one.
+        Block::Table(t)
+            if t.is_single_cell() && (t.kind == TableKind::Layout || wraps_table(t)) =>
+        {
             let crate::model::CellSlot::Origin(cell) = &t.grid[0][0] else { unreachable!() };
             let inner = render_blocks(&cell.blocks, rc);
             if inner.is_empty() { None } else { Some(inner) }
