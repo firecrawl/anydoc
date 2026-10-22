@@ -342,6 +342,9 @@ jobs:
         if: runner.os != 'Linux'
         with:
           python-version: '3.13'
+      - name: Bootstrap pip
+        if: runner.os != 'Linux'
+        run: python -m pip install --no-cache-dir -r .github/pip-bootstrap.txt
       - uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
@@ -424,16 +427,24 @@ jobs:
       contents: read
       id-token: write # PyPI trusted publishing
     steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'workflow_dispatch'
       - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: dist
           merge-multiple: true
+      - uses: actions/setup-python@v6
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          python-version: '3.13'
       - name: Check distributions (dry run)
         if: github.event_name == 'workflow_dispatch'
         run: |
           ls -l dist
-          pipx run twine check dist/*
+          python -m pip install --no-cache-dir -r .github/pip-bootstrap.txt
+          python -m pip install twine
+          python -m twine check dist/*
       - name: Publish
         if: github.event_name == 'push'
         uses: pypa/gh-action-pypi-publish@release/v1

@@ -90,6 +90,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+      - run: python -m pip install --no-cache-dir -r .github/pip-bootstrap.txt
       - run: pip install maturin
       - run: maturin build --release --locked --manifest-path python/Cargo.toml --out dist
       - run: pip install --no-index --find-links dist firecrawl-anydoc
