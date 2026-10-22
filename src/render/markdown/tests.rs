@@ -50,7 +50,12 @@ fn math_renders_in_dollar_delimiters_and_text_dollars_are_escaped() {
 
 #[test]
 fn math_in_a_table_cell_escapes_pipes() {
-    let cell = |inlines| Cell { blocks: vec![Block::Paragraph(inlines)], col_span: 1, row_span: 1 };
+    let cell = |inlines| Cell {
+        blocks: vec![Block::Paragraph(inlines)],
+        col_span: 1,
+        row_span: 1,
+        source: None,
+    };
     let md = doc(vec![table_from(
         vec![vec![cell(vec![Inline::plain("abs")]), cell(vec![Inline::Math("|x|".into())])]],
         0,

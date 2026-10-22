@@ -215,6 +215,9 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<document::List>()?;
     m.add_class::<document::ListItem>()?;
     m.add_class::<document::Note>()?;
+    m.add_class::<document::SpreadsheetCoordinate>()?;
+    m.add_class::<document::SpreadsheetRange>()?;
+    m.add_class::<document::SpreadsheetSource>()?;
     m.add_class::<document::Style>()?;
     m.add_class::<document::Table>()?;
     m.add("ConvertError", m.py().get_type::<ConvertError>())?;

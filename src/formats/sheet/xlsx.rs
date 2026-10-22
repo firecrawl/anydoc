@@ -7,7 +7,10 @@ use super::controls::{Checkboxes, cell_inlines, read_vml_checkboxes};
 use super::numfmt::{DateParts, NumberFormat, Rendered, builtin_code};
 use super::{format_duration_days, format_float, format_time_of_day};
 use crate::error::ConvertError;
-use crate::model::{Block, Cell, Document, GridBuilder, Inline, Table, TableKind};
+use crate::model::{
+    Block, Cell, Document, GridBuilder, Inline, SpreadsheetRange, SpreadsheetSource, Table,
+    TableKind,
+};
 use crate::package::limits;
 use crate::package::relationships::{Relationships, read_rels, rel_type, rels_part_for};
 use crate::package::xml::{Element, ns};
@@ -48,11 +51,12 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
 
     // Visible sheets in workbook order; hidden and veryHidden sheets are
     // omitted entirely, heading included.
-    let mut sheets: Vec<(String, String)> = Vec::new();
-    for sheet in workbook
+    let mut sheets: Vec<(u32, String, String)> = Vec::new();
+    for (sheet_index, sheet) in workbook
         .first_descendant(ns::SML, "sheets")
         .into_iter()
         .flat_map(|s| s.find_all(ns::SML, "sheet"))
+        .enumerate()
     {
         if matches!(sheet.attr_unqualified("state"), Some("hidden" | "veryHidden")) {
             continue;
@@ -65,7 +69,7 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
             continue;
         };
         match path::resolve(wb_part, target) {
-            Ok(t) => sheets.push((name, t.path)),
+            Ok(t) => sheets.push((sheet_index as u32, name, t.path)),
             Err(e) => log::warn!("skipping sheet {name:?} with unresolvable target: {e}"),
         }
     }
@@ -75,7 +79,7 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
     let mut failed = 0usize;
     // One budget for the workbook, so sheets cannot multiply the cap.
     let mut slots = 0u64;
-    for (name, part) in &sheets {
+    for (sheet_index, name, part) in &sheets {
         let worksheet = pkg.optional_xml_part(part)?;
         let Some(worksheet) = worksheet.as_ref().and_then(|r| r.find(ns::SML, "worksheet")) else {
             log::warn!("skipping unreadable sheet {name:?}");
@@ -84,7 +88,7 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
         };
         let mut content = read_sheet(worksheet, &shared, &styles, date1904);
         content.checkboxes = read_vml_checkboxes(pkg, part)?;
-        let Some(table) = build_table(content, &mut slots)? else {
+        let Some(table) = build_table(content, *sheet_index, name, &mut slots)? else {
             continue;
         };
         if multi_sheet {
@@ -390,6 +394,8 @@ pub(super) fn format_as_text(fmt: &CellFormat, text: &str) -> String {
 /// the surviving rows and columns.
 pub(super) fn build_table(
     mut sheet: SheetContent,
+    sheet_index: u32,
+    sheet_name: &str,
     slots: &mut u64,
 ) -> Result<Option<Table>, ConvertError> {
     // Hidden coordinates as sorted lists: lookups and first-visible scans
@@ -478,13 +484,21 @@ pub(super) fn build_table(
         let b = map.partition_point(|&x| x <= hi);
         (a, b - a)
     };
-    let mut origins: HashMap<(usize, usize), (u32, u32)> = HashMap::new();
+    let mut origins: HashMap<(usize, usize), MergeOrigin> = HashMap::new();
     let mut covered: HashSet<(usize, usize)> = HashSet::new();
     let mut expansion = 0u64;
     for &(mr1, mc1, mr2, mc2) in &sheet.merges {
         let (r0, rn) = visible_span(&row_map, mr1, mr2);
         let (c0, cn) = visible_span(&col_map, mc1, mc2);
+        if rn == 0 || cn == 0 {
+            continue;
+        }
+        let source = SpreadsheetRange::new(mr1, mc1, mr2, mc2);
         if rn * cn <= 1 {
+            // A merge can collapse to one visible slot when its other rows or
+            // columns are hidden. It no longer needs covered markers, but the
+            // origin still represents the complete source merge rectangle.
+            origins.insert((r0, c0), MergeOrigin { col_span: 1, row_span: 1, source });
             continue;
         }
         expansion = expansion.saturating_add((rn as u64) * (cn as u64) - 1);
@@ -494,7 +508,7 @@ pub(super) fn build_table(
                 detail: "merge region expansion exceeds the content budget".into(),
             });
         }
-        origins.insert((r0, c0), (cn as u32, rn as u32));
+        origins.insert((r0, c0), MergeOrigin { col_span: cn as u32, row_span: rn as u32, source });
         for r in r0..r0 + rn {
             for c in c0..c0 + cn {
                 if (r, c) != (r0, c0) {
@@ -514,16 +528,21 @@ pub(super) fn build_table(
                 builder.covered();
                 continue;
             }
-            let cell = match cells.remove(&(row, col)) {
+            let mut cell = match cells.remove(&(row, col)) {
                 Some(inlines) => Cell::from_inlines(inlines),
                 None => Cell::default(),
             };
             match origins.get(&(ri, ci)) {
-                Some(&(col_span, row_span)) => {
-                    builder.place(Cell::spanning(cell.blocks, col_span, row_span))?
+                Some(origin) => {
+                    cell.col_span = origin.col_span;
+                    cell.row_span = origin.row_span;
+                    cell.source = Some(origin.source);
                 }
-                None => builder.place(cell)?,
+                None => {
+                    cell.source = Some(SpreadsheetRange::cell(row, col));
+                }
             }
+            builder.place(cell)?;
         }
     }
     // A spreadsheet marks no header row, so the shape of the data decides.
@@ -532,7 +551,19 @@ pub(super) fn build_table(
         return Ok(None);
     }
     table.header_rows = resolve_header_rows(&table, 0);
+    table.source = Some(SpreadsheetSource {
+        sheet_index,
+        sheet_name: sheet_name.to_string(),
+        range: SpreadsheetRange::new(r1, c1, r2, c2),
+    });
     Ok(Some(table))
+}
+
+#[derive(Clone, Copy)]
+struct MergeOrigin {
+    col_span: u32,
+    row_span: u32,
+    source: SpreadsheetRange,
 }
 
 /// Flatten inclusive ranges into a sorted, deduplicated coordinate list.
@@ -689,7 +720,7 @@ fn bool_attr(v: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CellSlot, inlines_to_plain_text};
+    use crate::model::{CellSlot, SpreadsheetRange, inlines_to_plain_text};
     use std::io::Write;
 
     const SML: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -952,7 +983,67 @@ mod tests {
         };
         let doc = parse(&wb.build()).unwrap();
         assert_eq!(doc.blocks.len(), 1, "hidden sheet must add no heading and no table");
-        assert_eq!(texts(first_table(&doc)), vec![vec!["a", "c"], vec!["d", ""]]);
+        let table = first_table(&doc);
+        assert_eq!(texts(table), vec![vec!["a", "c"], vec!["d", ""]]);
+        let CellSlot::Origin(cell) = &table.grid[0][0] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(0, 0)));
+        let CellSlot::Origin(cell) = &table.grid[0][1] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(0, 2)));
+        let CellSlot::Origin(cell) = &table.grid[1][0] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(2, 0)));
+        let CellSlot::Origin(cell) = &table.grid[1][1] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(2, 2)));
+    }
+
+    #[test]
+    fn source_coordinates_keep_workbook_order_and_sparse_extents() {
+        let first = r#"<sheetData><row r="3"><c r="C3" t="inlineStr"><is><t>value</t></is></c></row></sheetData>"#;
+        let hidden = r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>hidden</t></is></c></row></sheetData>"#;
+        let third = r#"<sheetData><row r="11"><c r="D11" t="inlineStr"><is><t>d</t></is></c></row><row r="12"><c r="E12" t="inlineStr"><is><t>e</t></is></c></row></sheetData>"#;
+        let wb = Wb {
+            sheets: vec![
+                ("Data Sheet", "", first),
+                ("Hidden", "hidden", hidden),
+                ("Report", "", third),
+            ],
+            ..Wb::default()
+        };
+        let doc = parse(&wb.build()).unwrap();
+        let tables: Vec<&Table> = doc
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Table(table) => Some(table),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tables.len(), 2);
+
+        let first_source = tables[0].source.as_ref().expect("spreadsheet source");
+        assert_eq!(first_source.sheet_index, 0);
+        assert_eq!(first_source.sheet_name, "Data Sheet");
+        assert_eq!(first_source.range, SpreadsheetRange::cell(2, 2));
+        let CellSlot::Origin(cell) = &tables[0].grid[0][0] else {
+            panic!("expected C3 origin");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(2, 2)));
+
+        let third_source = tables[1].source.as_ref().expect("spreadsheet source");
+        assert_eq!(third_source.sheet_index, 2, "hidden sheet must not renumber provenance");
+        assert_eq!(third_source.sheet_name, "Report");
+        assert_eq!(third_source.range, SpreadsheetRange::new(10, 3, 11, 4));
+        let CellSlot::Origin(cell) = &tables[1].grid[0][0] else {
+            panic!("expected D11 origin");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(10, 3)));
+        let CellSlot::Origin(cell) = &tables[1].grid[0][1] else {
+            panic!("expected generated E11 padding");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(10, 4)));
+        let CellSlot::Origin(cell) = &tables[1].grid[1][1] else {
+            panic!("expected E12 origin");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(11, 4)));
     }
 
     #[test]
@@ -968,7 +1059,31 @@ mod tests {
             panic!("expected the merge origin at (0,0)");
         };
         assert_eq!((cell.col_span, cell.row_span), (2, 1));
+        assert_eq!(cell.source, Some(SpreadsheetRange::new(0, 0, 0, 2)));
         assert_eq!(table.grid[0].len(), 3);
+    }
+
+    #[test]
+    fn collapsed_merges_keep_their_original_source_range() {
+        // Both the second column and second row are hidden, so A1:B2
+        // normalizes to a single visible slot. Provenance must still identify
+        // the complete source merge rather than degrading to A1:A1.
+        let wb = one_sheet(
+            r#"<cols><col min="2" max="2" hidden="1"/></cols><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>merged</t></is></c></row><row r="2" hidden="1"/></sheetData><mergeCells count="1"><mergeCell ref="A1:B2"/></mergeCells>"#,
+        );
+        let doc = parse(&wb.build()).unwrap();
+        let table = first_table(&doc);
+        assert_eq!(table.grid.len(), 1);
+        assert_eq!(table.grid[0].len(), 1);
+        assert_eq!(
+            table.source.as_ref().expect("spreadsheet source").range,
+            SpreadsheetRange::new(0, 0, 1, 1)
+        );
+        let CellSlot::Origin(cell) = &table.grid[0][0] else {
+            panic!("expected the collapsed merge origin");
+        };
+        assert_eq!((cell.col_span, cell.row_span), (1, 1));
+        assert_eq!(cell.source, Some(SpreadsheetRange::new(0, 0, 1, 1)));
     }
 
     #[test]
@@ -984,6 +1099,7 @@ mod tests {
             panic!("expected the merge origin at (0,0)");
         };
         assert_eq!(cell.row_span, 2);
+        assert_eq!(cell.source, Some(SpreadsheetRange::new(0, 0, 2, 0)));
         assert_eq!(texts(table)[0][0], "kept");
     }
 

@@ -118,7 +118,9 @@ mod tests {
     fn quoted_fields_keep_padding() {
         let doc = parse(b"a,b\n\"  padded  \",x\n").unwrap();
         let Block::Table(t) = &doc.blocks[0] else { panic!() };
+        assert!(t.source.is_none());
         let crate::model::CellSlot::Origin(cell) = &t.grid[1][0] else { panic!() };
+        assert!(cell.source.is_none());
         let Block::Paragraph(inlines) = &cell.blocks[0] else { panic!() };
         let crate::model::Inline::Text { text, .. } = &inlines[0] else { panic!() };
         assert_eq!(text, "  padded  ");
