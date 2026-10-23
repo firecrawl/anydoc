@@ -24,6 +24,8 @@ const CSV = await readFile(fixture('csv/sheet.csv'))
 const PDF = await readFile(fixture('pdf/text.pdf'))
 const ENCRYPTED = await readFile(fixture('malformed/encrypted--errors.odt'))
 const MIXED = await readFile(fixture('pdf/handmade-mixed.pdf'))
+const CHM = await readFile(fixture('chm/handmade-book.chm'))
+const CHM_COMPRESSED = await readFile(fixture('chm/handmade-compressed.chm'))
 
 test('toMarkdownBytes converts in memory', () => {
   const markdown = toMarkdownBytes(RICH, 'docx')
@@ -59,6 +61,31 @@ test('toDocument carries embedded assets as Uint8Arrays', () => {
   assert.equal(image.id, document.assets.indexOf(image))
 })
 
+test('chm converts through the bytes and document APIs', () => {
+  const markdown = toMarkdownBytes(CHM)
+  assert.equal(toMarkdownBytes(CHM, 'chm'), markdown)
+  assert.equal(toMarkdownBytes(CHM_COMPRESSED), markdown)
+  for (const title of ['使用指南', '命令参考', '补充说明']) assert.ok(markdown.includes(title))
+  assert.match(markdown, /配置路由器/)
+  assert.match(markdown, /\| 命令 \| 说明 \|/)
+  assert.match(markdown, /show version/)
+  assert.match(markdown, /\[命令语法\]\(#[^)]+\)/)
+
+  const document = toDocument(CHM, 'chm')
+  assert.deepEqual(toDocument(CHM), document)
+  assert.equal(document.blocks.filter((block) => block.kind === 'heading' && block.level === 1).length, 3)
+  assert.ok(document.blocks.some((block) => block.kind === 'table'))
+  assert.equal(document.assets.length, 1)
+  assert.equal(document.assets[0].mediaType, 'image/png')
+  assert.ok(document.assets[0].data instanceof Uint8Array)
+  assert.ok(document.assets[0].data.length > 0)
+})
+
+test('chm SpanInfo streams Huffman frames across dictionary resets', async () => {
+  const bytes = await readFile(fixture('chm/handmade-huffman-spaninfo.chm'))
+  assert.equal(toMarkdownBytes(bytes).trim(), 'A'.repeat(65536) + 'B'.repeat(65536))
+})
+
 test('format detection reads content, extension, and path', () => {
   assert.equal(formatFromBytes(RICH), 'docx')
   // CSV carries no signature: only the extension names it.
@@ -67,6 +94,9 @@ test('format detection reads content, extension, and path', () => {
   assert.equal(formatFromExtension('xls'), 'xlsx')
   assert.equal(formatFromPath('/tmp/report.odt'), 'odt')
   assert.equal(formatFromPath('/tmp/report.unknown'), undefined)
+  assert.equal(formatFromBytes(CHM), 'chm')
+  assert.equal(formatFromExtension('.CHM'), 'chm')
+  assert.equal(formatFromPath('/tmp/help.chm'), 'chm')
 })
 
 // `code` is what callers branch on, so every kind of failure is pinned here.

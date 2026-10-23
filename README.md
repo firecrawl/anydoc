@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://skills.sh/b/firecrawl/anydoc)](https://skills.sh/firecrawl/anydoc)
 
-Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
+Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CHM, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
 
 Built by [Firecrawl](https://firecrawl.dev) to turn any office document into LLM-ready Markdown in single-digit milliseconds, with one consistent output no matter which format goes in. It powers [Firecrawl Parse](https://firecrawl.dev/parse), so if you'd rather not run it yourself, the hosted API gives you the same conversion plus our OCR models for the scanned pages anydoc can't read on its own.
 
@@ -166,8 +166,19 @@ Only documents that need OCR leave the machine, and the whole document goes, sin
 | OpenDocument     | `.odt`, `.ods`, `.odp`                                     |
 | Rich Text Format | `.rtf`                                                     |
 | EPUB             | `.epub`                                                    |
+| Compiled HTML Help | `.chm`                                                   |
 | CSV              | `.csv`                                                     |
 | PDF              | `.pdf`                                                     |
+
+CHM topics are read in `.hhc` table-of-contents order, with the hierarchy
+preserved as a nested list. Unlisted HTML topics are appended in stable path
+order; the same fallback applies when the TOC is missing, unreadable, or binary.
+Legacy HTML uses BOM/charset declarations, then the book's Windows language
+encoding (including GBK/Big5). Topic links, HTML bases, and stylesheet encodings
+are resolved locally. LZX supports 4/8-byte reset tables and sequential SpanInfo
+streams; the private decoder adaptation and its MIT notice are under
+`src/formats/chm/lzx/`. Embedded images remain available on `Document.assets`,
+as with the other formats.
 
 ## Benchmark
 
@@ -209,7 +220,7 @@ Speed is one warm conversion per document on a Ryzen 9 9950X3D (Windows 11, 64 G
 
 ## Format detection
 
-The format is read from the file content, using the marker its specification designates: the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types. CSV has no such marker, so the extension or an explicit format names it instead.
+The format is read from the file content, using the marker its specification designates: the CHM `ITSF` signature, the PDF header, the RTF open group, OLE stream names, the ZIP package mimetype and content types. CSV has no such marker, so the extension or an explicit format names it instead.
 
 ```rust
 Format::from_bytes(&bytes); // Some(Format::Docx), or None when nothing matches
@@ -261,7 +272,7 @@ document bytes
   ├─► format detection      → content markers, not the extension
   │
   ├─► format parser          → one per format (doc, docx, ppt, pptx, xls,
-  │                            xlsx, odt/ods/odp, rtf, epub, csv)
+  │                            xlsx, odt/ods/odp, rtf, epub, chm, csv)
   │         │
   │         └─► Document     → shared model: blocks, inlines, tables,
   │                            footnotes, assets
@@ -283,6 +294,13 @@ wasm-pack build wasm --release --target web --scope firecrawl && node --test was
 ```
 
 A committed fixture corpus under `tests/fixtures/` is snapshot-tested, `tests/robustness.rs` mutation-tests every fixture, and `fuzz/` carries cargo-fuzz targets per format. The speed and quality benchmark lives in [`bench/`](bench/README.md).
+
+The small CHM fixtures can be rebuilt with `python3 tests/fixture-src/chm.py`.
+To run the local ZXR10 manual regression without adding the manual to the repo:
+
+```bash
+ANYDOC_CHM_SAMPLE=/path/to/manual.chm cargo test --test chm local_chm_manual -- --ignored --nocapture
+```
 
 Releases are tagged `v<version>`, which publishes the crate, the npm package, and the PyPI wheels from [`.github/workflows/release.yml`](.github/workflows/release.yml). The version lives in three places, bumped together for a release:
 

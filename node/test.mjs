@@ -25,6 +25,7 @@ const RICH = fixture('docx/handmade-rich.docx')
 const CSV = fixture('csv/sheet.csv')
 const ENCRYPTED = fixture('malformed/encrypted--errors.odt')
 const MIXED = fixture('pdf/handmade-mixed.pdf')
+const CHM = fixture('chm/handmade-book.chm')
 
 test('toMarkdown detects the format from the file content', async () => {
   const markdown = await toMarkdown(OUTLINE)
@@ -61,6 +62,32 @@ test('toDocument carries embedded assets as buffers', async () => {
   assert.equal(image.id, document.assets.indexOf(image))
 })
 
+test('chm converts through the file, bytes, and document APIs', async () => {
+  const bytes = await readFile(CHM)
+  const markdown = await toMarkdownBytes(bytes)
+  assert.equal(await toMarkdown(CHM), markdown)
+  assert.equal(await toMarkdownBytes(bytes, 'chm'), markdown)
+  for (const title of ['使用指南', '命令参考', '补充说明']) assert.ok(markdown.includes(title))
+  assert.match(markdown, /配置路由器/)
+  assert.match(markdown, /\| 命令 \| 说明 \|/)
+  assert.match(markdown, /show version/)
+  assert.match(markdown, /\[命令语法\]\(#[^)]+\)/)
+
+  const document = await toDocument(bytes, 'chm')
+  assert.deepEqual(await toDocument(bytes), document)
+  assert.equal(document.blocks.filter((block) => block.kind === 'heading' && block.level === 1).length, 3)
+  assert.ok(document.blocks.some((block) => block.kind === 'table'))
+  assert.equal(document.assets.length, 1)
+  assert.equal(document.assets[0].mediaType, 'image/png')
+  assert.ok(Buffer.isBuffer(document.assets[0].data))
+  assert.ok(document.assets[0].data.length > 0)
+})
+
+test('chm SpanInfo streams Huffman frames across dictionary resets', async () => {
+  const bytes = await readFile(fixture('chm/handmade-huffman-spaninfo.chm'))
+  assert.equal((await toMarkdownBytes(bytes)).trim(), 'A'.repeat(65536) + 'B'.repeat(65536))
+})
+
 test('format detection reads content, extension, and path', async () => {
   assert.equal(formatFromBytes(await readFile(RICH)), 'docx')
   // CSV carries no signature: only the extension names it.
@@ -69,6 +96,9 @@ test('format detection reads content, extension, and path', async () => {
   assert.equal(formatFromExtension('xls'), 'xlsx')
   assert.equal(formatFromPath('/tmp/report.odt'), 'odt')
   assert.equal(formatFromPath('/tmp/report.unknown'), null)
+  assert.equal(formatFromBytes(await readFile(CHM)), 'chm')
+  assert.equal(formatFromExtension('.CHM'), 'chm')
+  assert.equal(formatFromPath('/tmp/help.chm'), 'chm')
 })
 
 // `code` is what callers branch on, so every kind of failure is pinned here.
@@ -219,6 +249,24 @@ test('cli reads stdin with an explicit format', async () => {
   child.child.stdin.end(await readFile(CSV))
   const { stdout } = await child
   assert.match(stdout, /\| --- \|/)
+})
+
+test('cli converts chm files and stdin with detected or explicit format', async () => {
+  const bytes = await readFile(CHM)
+  const expected = await toMarkdownBytes(bytes)
+  for (const args of [[CHM], [CHM, '--format', 'chm']]) {
+    const { code, stdout, stderr } = await runCli(args)
+    assert.equal(code, undefined)
+    assert.equal(stdout, expected)
+    assert.equal(stderr, '')
+  }
+  for (const args of [['-'], ['-', '--format', 'chm']]) {
+    const child = promisify(execFile)(process.execPath, [CLI, ...args])
+    child.child.stdin.end(bytes)
+    const { stdout, stderr } = await child
+    assert.equal(stdout, expected)
+    assert.equal(stderr, '')
+  }
 })
 
 test('cli exits 1 when the document cannot be converted', async () => {

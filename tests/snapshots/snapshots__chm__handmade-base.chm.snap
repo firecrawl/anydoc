@@ -1,0 +1,31 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Base target
+
+# Base external
+
+[Link external](https://example.invalid/shared/target.htm#dest)![Image external](https://example.invalid/shared/dot.png)
+
+HIDDEN-external
+
+[Fragment external](https://example.invalid/shared/#self)
+
+# Base relative
+
+[Link relative](#base-target)Image relative
+
+[Fragment relative](#self)
+
+# Base root
+
+[Link root](#base-target)Image root
+
+[Fragment root](#self)
+
+# Base same-book
+
+[Link same-book](#base-target)Image same-book
+
+[Fragment same-book](#self)

@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# CSS declared encoding
+
+VISIBLE-CHARSET
+
+# Page encoded CSS path
+
+VISIBLE-PATH

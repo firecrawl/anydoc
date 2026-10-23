@@ -20,6 +20,7 @@ CSV = FIXTURES / "csv" / "sheet.csv"
 ENCRYPTED = FIXTURES / "malformed" / "encrypted--errors.odt"
 ZIPBOMB = FIXTURES / "abuse" / "zipbomb--errors.docx"
 MIXED = FIXTURES / "pdf" / "handmade-mixed.pdf"
+CHM = FIXTURES / "chm" / "handmade-book.chm"
 
 HOSTED_MARKDOWN = "# Read by the hosted parser\n"
 
@@ -101,6 +102,31 @@ class AnydocTest(unittest.TestCase):
         self.assertGreater(len(image.data), 0)
         self.assertEqual(image.id, document.assets.index(image))
 
+    def test_chm_converts_through_the_file_bytes_and_document_apis(self):
+        data = CHM.read_bytes()
+        markdown = anydoc.to_markdown_bytes(data)
+        self.assertEqual(anydoc.to_markdown(CHM), markdown)
+        self.assertEqual(anydoc.to_markdown_bytes(data, "chm"), markdown)
+        for title in ("使用指南", "命令参考", "补充说明"):
+            self.assertIn(title, markdown)
+        self.assertIn("配置路由器", markdown)
+        self.assertIn("| 命令 | 说明 |", markdown)
+        self.assertIn("show version", markdown)
+        self.assertRegex(markdown, r"\[命令语法\]\(#[^)]+\)")
+
+        document = anydoc.to_document(data, "chm")
+        self.assertEqual(len(anydoc.to_document(data).blocks), len(document.blocks))
+        self.assertEqual(sum(block.kind == "heading" and block.level == 1 for block in document.blocks), 3)
+        self.assertTrue(any(block.kind == "table" for block in document.blocks))
+        self.assertEqual(len(document.assets), 1)
+        self.assertEqual(document.assets[0].media_type, "image/png")
+        self.assertIsInstance(document.assets[0].data, bytes)
+        self.assertGreater(len(document.assets[0].data), 0)
+
+    def test_chm_spaninfo_streams_huffman_frames_across_dictionary_resets(self):
+        data = CHM.with_name("handmade-huffman-spaninfo.chm").read_bytes()
+        self.assertEqual(anydoc.to_markdown_bytes(data).strip(), "A" * 65536 + "B" * 65536)
+
     def test_format_detection_reads_content_extension_and_path(self):
         self.assertEqual(anydoc.format_from_bytes(RICH.read_bytes()), "docx")
         # CSV carries no signature: only the extension names it.
@@ -109,6 +135,9 @@ class AnydocTest(unittest.TestCase):
         self.assertEqual(anydoc.format_from_extension("xls"), "xlsx")
         self.assertEqual(anydoc.format_from_path("report.odt"), "odt")
         self.assertIsNone(anydoc.format_from_path("report.unknown"))
+        self.assertEqual(anydoc.format_from_bytes(CHM.read_bytes()), "chm")
+        self.assertEqual(anydoc.format_from_extension(".CHM"), "chm")
+        self.assertEqual(anydoc.format_from_path("help.chm"), "chm")
 
     def test_conversion_errors_raise_the_subclass_that_names_the_failure(self):
         with self.assertRaises(anydoc.MalformedError) as caught:

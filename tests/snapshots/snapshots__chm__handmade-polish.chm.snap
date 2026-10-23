@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Command manual
+
+## Składnia
+
+Zażółć gęślą jaźń.

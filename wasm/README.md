@@ -4,6 +4,8 @@ WebAssembly bindings for [anydoc](../README.md), plus the source of the demo pag
 
 The API mirrors the Rust library, minus the path-based `to_markdown`: wasm has no filesystem, so conversion always starts from bytes.
 
+CHM (`.chm`) files are detected by their ITSF header and parse into the shared document model, including embedded assets.
+
 ```bash
 npm install @firecrawl/anydoc-wasm
 ```

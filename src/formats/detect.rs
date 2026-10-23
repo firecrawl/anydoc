@@ -3,6 +3,7 @@
 //! Identifies the format from what each specification designates as the
 //! container's identity, never from heuristics over document content:
 //!
+//! - CHM: the `ITSF` container signature.
 //! - PDF: the `%PDF-` header (ISO 32000; implementations accept leading
 //!   junk, bounded here at 1024 bytes).
 //! - RTF: the `{\rtf` group that must open every RTF file.
@@ -32,6 +33,9 @@ const MANIFEST_NS: &str = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0";
 const SPREADSHEET_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
 pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Format> {
+    if bytes.starts_with(b"ITSF") {
+        return Some(Format::Chm);
+    }
     if bytes.starts_with(b"{\\rtf") {
         return Some(Format::Rtf);
     }
