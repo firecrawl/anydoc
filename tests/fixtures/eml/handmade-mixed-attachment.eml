@@ -1,0 +1,23 @@
+From: sender@example.com
+Subject: With attachment
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: multipart/alternative; boundary="inner"
+
+--inner
+Content-Type: text/plain
+
+Body inside a nested alternative.
+--inner
+Content-Type: text/html
+
+<p>Body inside a nested alternative.</p>
+--inner--
+--outer
+Content-Type: application/pdf; name="report.pdf"
+Content-Disposition: attachment; filename="report.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK
+--outer--

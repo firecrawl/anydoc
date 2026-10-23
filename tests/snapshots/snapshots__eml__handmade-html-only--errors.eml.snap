@@ -1,0 +1,5 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+ERROR: unsupported input: email body is text/html only; no text/plain alternative

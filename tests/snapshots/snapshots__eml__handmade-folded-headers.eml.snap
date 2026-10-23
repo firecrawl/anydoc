@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# A subject that continues onto a second line and a third
+
+**From:** sender@example.com\
+**To:** one@example.com, two@example.com
+
+Short body.
