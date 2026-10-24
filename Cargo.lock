@@ -100,6 +100,7 @@ dependencies = [
  "pdf-inspector",
  "quick-xml",
  "sha2 0.11.0",
+ "unicode-properties",
  "zip",
 ]
 
