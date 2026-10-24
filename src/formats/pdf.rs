@@ -9,6 +9,7 @@
 //! [pdf-inspector]: https://github.com/firecrawl/pdf-inspector
 
 use crate::error::ConvertError;
+use crate::shared::text::expand_ligatures;
 use pdf_inspector::PdfError;
 
 pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
@@ -28,7 +29,8 @@ pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
         log::warn!("broken font encodings detected; extracted text may be garbled");
     }
     match result.markdown {
-        Some(mut markdown) if !markdown.trim().is_empty() => {
+        Some(markdown) if !markdown.trim().is_empty() => {
+            let mut markdown = expand_ligatures(&markdown);
             if !markdown.ends_with('\n') {
                 markdown.push('\n');
             }
