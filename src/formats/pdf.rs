@@ -9,29 +9,8 @@
 //! [pdf-inspector]: https://github.com/firecrawl/pdf-inspector
 
 use crate::error::ConvertError;
+use crate::shared::text::expand_ligatures;
 use pdf_inspector::PdfError;
-
-/// Expand typographic ligatures to their constituent ASCII letters.
-/// Applied to PDF output because the PDF extraction path bypasses the
-/// shared `clean_text` normalizer.
-fn expand_ligatures(text: &str) -> String {
-    if !text.contains('\u{fb00}'..='\u{fb06}') {
-        return text.to_string();
-    }
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        match c {
-            '\u{fb00}' => out.push_str("ff"),
-            '\u{fb01}' => out.push_str("fi"),
-            '\u{fb02}' => out.push_str("fl"),
-            '\u{fb03}' => out.push_str("ffi"),
-            '\u{fb04}' => out.push_str("ffl"),
-            '\u{fb05}' | '\u{fb06}' => out.push_str("st"),
-            c => out.push(c),
-        }
-    }
-    out
-}
 
 pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
     let result = pdf_inspector::process_pdf_mem(bytes).map_err(map_error)?;
