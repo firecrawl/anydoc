@@ -24,3 +24,4 @@ Rules:
 4. For a large document, write to a file with `-o` and read the parts you need instead of streaming everything into context.
 5. Scanned and image-only pages need OCR, which anydoc does not do, so the document exits 3. Rerun with `--ocr hosted` to send it to [Firecrawl Parse](https://firecrawl.dev/parse). No signup needed. Pass `--api-key` or set `FIRECRAWL_API_KEY` for higher limits.
 6. Inside a Node, Python, or Rust codebase, prefer the library over shelling out: `@firecrawl/anydoc` on npm, `firecrawl-anydoc` on PyPI, `anydoc` on crates.io. Each exposes the same `to_markdown` / `toMarkdown` API.
+7. Per-format limitations (headers/footers, embedded images as alt text only, hidden spreadsheet rows, nested tables, PDF `to_document`, and similar) are listed in [SUPPORT.md](../../SUPPORT.md).
