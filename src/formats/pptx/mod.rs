@@ -316,7 +316,7 @@ impl SlideCtx<'_, '_> {
     /// part. Failures degrade (log + `None`) per the unified policy;
     /// resource-limit errors always propagate.
     fn rel_part(&self, rel_id: &str) -> Result<Option<RelTarget>, ConvertError> {
-        rel_target_bytes(self.pkg, self.rels, self.base_part, rel_id)
+        rel_target_bytes(&mut self.pkg.borrow_mut(), self.rels, self.base_part, rel_id)
     }
 }
 
@@ -361,13 +361,17 @@ fn parse_shapes(
                 // External-mode targets (`r:link`) become external image
                 // sources; embedded targets are retained as assets.
                 let source = match rid {
-                    Some(rid) => crate::shared::assets::rel_image_source(
-                        ctx.pkg,
-                        ctx.rels,
-                        ctx.base_part,
-                        ctx.assets,
-                        rid,
-                    )?,
+                    Some(rid) => {
+                        let mut pkg = ctx.pkg.borrow_mut();
+                        let mut assets = ctx.assets.borrow_mut();
+                        crate::shared::assets::rel_image_source(
+                            &mut pkg,
+                            ctx.rels,
+                            ctx.base_part,
+                            &mut assets,
+                            rid,
+                        )?
+                    }
                     None => None,
                 };
                 if source.is_some() || !descr.trim().is_empty() {
