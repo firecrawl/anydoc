@@ -138,6 +138,17 @@ impl<'a> Package<'a> {
     }
 }
 
+/// True when `bytes` are an OLE compound container carrying an OOXML
+/// encrypted package — the same shape [`probe_ole`] classifies as
+/// [`ConvertError::Encrypted`].
+pub fn is_encrypted_ooxml(bytes: &[u8]) -> bool {
+    const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+    bytes.starts_with(&OLE_MAGIC)
+        && cfb::CompoundFile::open(Cursor::new(bytes))
+            .map(|file| file.exists("EncryptionInfo") || file.exists("EncryptedPackage"))
+            .unwrap_or(false)
+}
+
 /// A zip-open failure on OOXML input may actually be an OLE compound file:
 /// an encrypted package, or a legacy binary document with the wrong
 /// extension.

@@ -98,10 +98,24 @@ pub fn format_from_path(path: &str) -> Option<Format> {
 /// detected from the content, which signature-less formats (CSV) have to name
 /// explicitly.
 ///
+/// Optional trailing `password` decrypts a password-protected OOXML package
+/// (`.docx`/`.xlsx`/`.pptx`) first. A wrong password throws the same
+/// `encrypted` error as no password at all. When a format is omitted, pass
+/// `undefined` for it: `toMarkdownBytes(bytes, undefined, password)`.
+///
 /// Throws an `Error` carrying a `ConvertErrorCode` on `code`.
 #[wasm_bindgen(js_name = toMarkdownBytes)]
-pub fn to_markdown_bytes(bytes: &[u8], format: Option<Format>) -> Result<String, JsValue> {
-    anydoc::to_markdown_bytes(bytes, format.map(anydoc::Format::from)).map_err(convert_error)
+pub fn to_markdown_bytes(
+    bytes: &[u8],
+    format: Option<Format>,
+    password: Option<String>,
+) -> Result<String, JsValue> {
+    anydoc::to_markdown_bytes_with_password(
+        bytes,
+        format.map(anydoc::Format::from),
+        password.as_deref(),
+    )
+    .map_err(convert_error)
 }
 
 /// Parse an in-memory document into the document model, which also carries

@@ -23,6 +23,11 @@ const markdown = toMarkdownBytes(bytes);
 // Or name it, which signature-less formats (CSV) need:
 const fromCsv = toMarkdownBytes(bytes, 'csv');
 
+// Optional password for encrypted OOXML (.docx/.xlsx/.pptx). When the
+// format is omitted, pass undefined for it:
+const unlocked = toMarkdownBytes(bytes, undefined, 'secret');
+const unlockedDocx = toMarkdownBytes(bytes, 'docx', 'secret');
+
 // Or stop at the document model, which also carries embedded assets:
 const document = toDocument(bytes);
 

@@ -7,6 +7,7 @@ pub fn fixture_root() -> PathBuf {
 }
 
 /// Recursively collect every file under `dir`, sorted for determinism.
+#[allow(dead_code)] // not every integration-test binary walks the corpus
 pub fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
     entries.sort();
