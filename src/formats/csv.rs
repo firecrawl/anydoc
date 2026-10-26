@@ -10,12 +10,21 @@
 
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, Inline, Table, TableKind};
+use crate::package::materialization::MaterializationBudget;
 use crate::shared::header::resolve_header_rows;
 use crate::shared::text::clean_text;
 use csv::ReaderBuilder;
 use std::borrow::Cow;
 
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
+    parse_with_budget(bytes, MaterializationBudget::default())
+}
+
+fn parse_with_budget(
+    bytes: &[u8],
+    mut budget: MaterializationBudget,
+) -> Result<Document, ConvertError> {
+    budget.check_input(bytes.len())?;
     let text = decode(bytes);
     let delimiter = sniff_delimiter(&text);
 
@@ -34,8 +43,13 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
                 continue;
             }
         };
-        let cells: Vec<Cell> =
-            record.iter().map(|f| Cell::from_inlines(vec![Inline::plain(clean_text(f))])).collect();
+        let mut cells = Vec::new();
+        for field in &record {
+            budget.charge_cell()?;
+            budget.charge_text(field.len())?;
+            budget.charge_text_run()?;
+            cells.push(Cell::from_inlines(vec![Inline::plain(clean_text(field))]));
+        }
         rows.push(cells);
     }
 
@@ -149,5 +163,26 @@ mod tests {
         }
         let doc = parse(&bytes).unwrap();
         assert!(!doc.blocks.is_empty());
+    }
+
+    fn resource_limit_name(error: ConvertError) -> &'static str {
+        match error {
+            ConvertError::ResourceLimit { limit, .. } => limit,
+            other => panic!("expected resource limit, got {other}"),
+        }
+    }
+
+    #[test]
+    fn cell_materialization_is_bounded() {
+        let budget = MaterializationBudget::with_limits(1024, 1024, 3, 10);
+        let error = parse_with_budget(b"a,b\nc,d\n", budget).unwrap_err();
+        assert_eq!(resource_limit_name(error), "max_materialized_cells");
+    }
+
+    #[test]
+    fn copied_text_materialization_is_bounded() {
+        let budget = MaterializationBudget::with_limits(1024, 5, 10, 10);
+        let error = parse_with_budget(b"abcdef\n", budget).unwrap_err();
+        assert_eq!(resource_limit_name(error), "max_materialized_text_bytes");
     }
 }
