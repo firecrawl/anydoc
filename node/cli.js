@@ -28,6 +28,9 @@ Options:
   --ocr <mode>           What to do with a PDF whose pages need OCR:
                          reject (default) exits 3; hosted sends the
                          document to Firecrawl Parse
+  --parse-mode <mode>    Firecrawl Parse PDF mode for --ocr hosted: auto
+                         (default) falls back to OCR, fast extracts text
+                         only, ocr OCRs every page
   --api-key <key>        Firecrawl API key for --ocr hosted, else
                          FIRECRAWL_API_KEY, else keyless
   --api-url <url>        Firecrawl API URL for --ocr hosted, else
@@ -56,6 +59,7 @@ Examples:
 `
 
 const OCR_MODES = ['reject', 'hosted']
+const PARSE_MODES = ['auto', 'fast', 'ocr']
 
 const USAGE_ERROR = 2
 const CONVERSION_ERROR = 1
@@ -73,6 +77,7 @@ function parseArgs(argv) {
     format: null,
     password: process.env.ANYDOC_PASSWORD || null,
     ocr: null,
+    parseMode: null,
     apiKey: null,
     apiUrl: null,
   }
@@ -130,6 +135,12 @@ function parseArgs(argv) {
           fail(USAGE_ERROR, `invalid --ocr '${args.ocr}'; expected one of: ${OCR_MODES.join(', ')}`)
         }
         break
+      case '--parse-mode':
+        args.parseMode = value()
+        if (!PARSE_MODES.includes(args.parseMode)) {
+          fail(USAGE_ERROR, `invalid --parse-mode '${args.parseMode}'; expected one of: ${PARSE_MODES.join(', ')}`)
+        }
+        break
       case '--api-key':
         args.apiKey = value()
         break
@@ -180,6 +191,7 @@ async function main() {
 
   const options = {
     ocr: args.ocr ?? undefined,
+    parseMode: args.parseMode ?? undefined,
     apiKey: args.apiKey ?? undefined,
     apiUrl: args.apiUrl ?? undefined,
     password: args.password ?? undefined,

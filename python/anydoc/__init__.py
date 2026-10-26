@@ -7,7 +7,7 @@ import urllib.request
 import uuid
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from anydoc._anydoc import (
     Asset,
@@ -51,6 +51,11 @@ Ocr = Literal["reject", "hosted"]
 Firecrawl Parse instead, keyless unless a key is given. Documents anydoc
 converts itself never leave the machine."""
 
+ParseMode = Literal["auto", "fast", "ocr"]
+"""Firecrawl Parse PDF mode for `ocr="hosted"`. `auto` (the default) extracts
+text and falls back to OCR, `fast` extracts text only, `ocr` OCRs every
+page."""
+
 
 class HostedError(ConvertError):
     """`ocr="hosted"` could not get the document through Firecrawl Parse."""
@@ -60,6 +65,7 @@ def to_markdown(
     path: "str | os.PathLike[str]",
     *,
     ocr: Ocr = "reject",
+    parse_mode: ParseMode = "auto",
     api_key: "str | None" = None,
     api_url: "str | None" = None,
 ) -> str:
@@ -67,16 +73,18 @@ def to_markdown(
     file content; the extension is the fallback for signature-less formats
     (CSV) and unrecognizable containers.
 
-    For `ocr="hosted"`, `api_key` falls back to `FIRECRAWL_API_KEY`, then
-    keyless; `api_url` to `FIRECRAWL_API_URL`, then
-    `https://api.firecrawl.dev`."""
+    For `ocr="hosted"`, `parse_mode` picks the Parse PDF mode, and any other
+    value raises `HostedError` before anything is sent; `api_key` falls back
+    to `FIRECRAWL_API_KEY`, then keyless; `api_url` to `FIRECRAWL_API_URL`,
+    then `https://api.firecrawl.dev`."""
+    _check_parse_mode(parse_mode)
     try:
         return _to_markdown(path)
     except NeedsOcrError:
         if ocr != "hosted":
             raise
     path = Path(path)
-    return _parse_hosted(path.read_bytes(), path.name, api_key, api_url)
+    return _parse_hosted(path.read_bytes(), path.name, parse_mode, api_key, api_url)
 
 
 def to_markdown_bytes(
@@ -84,33 +92,43 @@ def to_markdown_bytes(
     format: "Format | None" = None,
     *,
     ocr: Ocr = "reject",
+    parse_mode: ParseMode = "auto",
     api_key: "str | None" = None,
     api_url: "str | None" = None,
 ) -> str:
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
-    name explicitly. `ocr`, `api_key` and `api_url` are as for
-    `to_markdown`."""
+    name explicitly. `ocr`, `parse_mode`, `api_key` and `api_url` are as
+    for `to_markdown`."""
+    _check_parse_mode(parse_mode)
     try:
         return _to_markdown_bytes(data, format)
     except NeedsOcrError:
         if ocr != "hosted":
             raise
-    return _parse_hosted(bytes(data), "document.pdf", api_key, api_url)
+    return _parse_hosted(bytes(data), "document.pdf", parse_mode, api_key, api_url)
 
 
 _API_URL = "https://api.firecrawl.dev"
 _TIMEOUT_SECONDS = 300
 
 
+def _check_parse_mode(parse_mode: str) -> None:
+    if parse_mode not in get_args(ParseMode):
+        expected = ", ".join(get_args(ParseMode))
+        raise HostedError(f"invalid parse_mode {parse_mode!r}; expected one of: {expected}")
+
+
 # The whole document goes, not only the pages that need OCR: Parse has no
 # page selection.
-def _parse_hosted(data: bytes, filename: str, api_key: "str | None", api_url: "str | None") -> str:
+def _parse_hosted(
+    data: bytes, filename: str, parse_mode: str, api_key: "str | None", api_url: "str | None"
+) -> str:
     if api_key is None:
         api_key = os.environ.get("FIRECRAWL_API_KEY")
     api_url = api_url or os.environ.get("FIRECRAWL_API_URL") or _API_URL
     url = api_url.rstrip("/") + "/v2/parse"
-    options = {"parsers": [{"type": "pdf", "mode": "auto"}], "origin": f"anydoc@{_version()}"}
+    options = {"parsers": [{"type": "pdf", "mode": parse_mode}], "origin": f"anydoc@{_version()}"}
     boundary = uuid.uuid4().hex
     request = urllib.request.Request(
         url,
@@ -200,6 +218,7 @@ __all__ = [
     "NeedsOcrError",
     "Note",
     "Ocr",
+    "ParseMode",
     "ResourceLimitError",
     "Style",
     "Table",

@@ -106,6 +106,11 @@ pub fn to_markdown(path: String) -> AsyncTask<MarkdownFileTask> {
 /// detected from the content, which signature-less formats (CSV) have to name
 /// explicitly.
 ///
+/// With a non-null `password`, decrypts a password-protected OOXML package
+/// (`.docx`/`.xlsx`/`.pptx`) before converting; a wrong password rejects with
+/// the same encrypted error as no password at all. Legacy binary formats
+/// (`.doc`, `.ppt`, `.xls`) are not supported encrypted.
+///
 /// Rejects with an `Error` carrying a `ConvertErrorCode` on `code`.
 #[napi(ts_return_type = "Promise<string>")]
 pub fn to_markdown_bytes(

@@ -52,6 +52,12 @@ anydoc converts locally and does not do OCR, so a PDF with scanned or image-only
 markdown = anydoc.to_markdown("scan.pdf", ocr="hosted")
 ```
 
+`parse_mode` picks the Parse PDF mode: `"auto"` (the default) extracts text and falls back to OCR, `"fast"` extracts text only, `"ocr"` OCRs every page. Any other value raises `HostedError` before anything is sent.
+
+```python
+markdown = anydoc.to_markdown("scan.pdf", ocr="hosted", parse_mode="ocr")
+```
+
 ## Errors
 
 A conversion raises only when no complete Markdown could come out of the file. The exception type names what went wrong:

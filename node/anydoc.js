@@ -8,18 +8,21 @@ const { version } = require('./package.json')
 
 const API_URL = 'https://api.firecrawl.dev'
 const TIMEOUT_MS = 300_000
+const PARSE_MODES = ['auto', 'fast', 'ocr']
 
 /**
  * Convert a document file to Markdown. `options.ocr` decides what happens to
  * a PDF whose pages need OCR: `'reject'` (the default) rejects with
- * `needsOcr`, `'hosted'` sends the document to Firecrawl Parse instead.
- * `options.password` decrypts a password-protected OOXML package first.
+ * `needsOcr`, `'hosted'` sends the document to Firecrawl Parse instead, in
+ * `options.parseMode` (`'auto'` by default). `options.password` decrypts a
+ * password-protected OOXML package first.
  */
 async function toMarkdown(path, options) {
-  // Password only reaches the byte-level native entry point.
+  // A password only reaches the byte-level native entry point.
   if (options?.password) {
     return toMarkdownBytes(await readFile(path), native.formatFromPath(path), options)
   }
+  checkParseMode(options)
   try {
     return await native.toMarkdown(path)
   } catch (error) {
@@ -34,6 +37,7 @@ async function toMarkdown(path, options) {
  */
 async function toMarkdownBytes(bytes, format, passwordOrOptions) {
   const { password, options } = splitPasswordOptions(passwordOrOptions)
+  checkParseMode(options)
   try {
     return await native.toMarkdownBytes(bytes, format, password)
   } catch (error) {
@@ -43,15 +47,19 @@ async function toMarkdownBytes(bytes, format, passwordOrOptions) {
 }
 
 function splitPasswordOptions(passwordOrOptions) {
-  if (
-    passwordOrOptions == null ||
-    typeof passwordOrOptions === 'string'
-  ) {
+  if (passwordOrOptions == null || typeof passwordOrOptions === 'string') {
     return { password: passwordOrOptions ?? null, options: undefined }
   }
   return {
     password: passwordOrOptions.password ?? null,
     options: passwordOrOptions,
+  }
+}
+
+function checkParseMode(options) {
+  const mode = options?.parseMode
+  if (mode !== undefined && !PARSE_MODES.includes(mode)) {
+    throw hostedError(`invalid parseMode '${mode}'; expected one of: ${PARSE_MODES.join(', ')}`)
   }
 }
 
@@ -65,7 +73,7 @@ async function parseHosted(bytes, filename, options) {
   const apiKey = options.apiKey ?? process.env.FIRECRAWL_API_KEY
   const apiUrl = options.apiUrl ?? process.env.FIRECRAWL_API_URL ?? API_URL
   const url = `${apiUrl.replace(/\/$/, '')}/v2/parse`
-  const parse = { parsers: [{ type: 'pdf', mode: 'auto' }], origin: `anydoc@${version}` }
+  const parse = { parsers: [{ type: 'pdf', mode: options.parseMode ?? 'auto' }], origin: `anydoc@${version}` }
   const body = new FormData()
   body.append('options', JSON.stringify(parse))
   body.append('file', new Blob([bytes], { type: 'application/pdf' }), filename)
