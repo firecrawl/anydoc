@@ -9,6 +9,7 @@ mod odf;
 pub mod pdf;
 mod ppt;
 mod pptx;
+mod rst;
 mod rtf;
 mod sheet;
 
@@ -20,6 +21,7 @@ pub fn parse(bytes: &[u8], format: Format) -> Result<Document, ConvertError> {
     match format {
         Format::Excel => sheet::parse(bytes),
         Format::Csv => csv::parse(bytes),
+        Format::Rst => rst::parse(bytes),
         Format::Docx => docx::parse(bytes),
         Format::Odt | Format::Ods | Format::Odp => odf::parse(bytes),
         Format::Pptx => pptx::parse(bytes),
