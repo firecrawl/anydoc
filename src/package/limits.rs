@@ -40,5 +40,23 @@ pub const MAX_ASSET_TOTAL_BYTES: usize = 128 * 1024 * 1024;
 /// Maximum nesting depth of binary record containers (legacy PPT stream).
 pub const MAX_RECORD_DEPTH: usize = 64;
 
+/// Maximum formatting runs retained from one legacy `.doc` FKP stream. The
+/// page numbers in the PLC are attacker-controlled and may all alias a single
+/// page, so the entry count on its own does not bound how many runs they
+/// yield. Past the cap formatting degrades; text extraction is unaffected.
+pub const MAX_DOC_RUNS: usize = 1_000_000;
+
+/// Maximum RTF group nesting depth. Real documents nest a few dozen groups;
+/// every open group retains a character-state snapshot, and inside a math
+/// zone it also opens an element, so unbounded nesting amplifies memory and
+/// deepens a tree that is walked and dropped recursively.
+pub const MAX_RTF_GROUP_DEPTH: usize = 1024;
+
+/// Maximum bytes of a spreadsheet number-format code. Real format codes run
+/// to a few dozen characters; the parser expands each one into several live
+/// vectors, so an unbounded `formatCode` attribute amplifies a small archive
+/// entry into gigabytes.
+pub const MAX_NUMBER_FORMAT_BYTES: usize = 4096;
+
 /// Maximum total binary records visited in one legacy record stream.
 pub const MAX_RECORDS: u64 = 16_000_000;

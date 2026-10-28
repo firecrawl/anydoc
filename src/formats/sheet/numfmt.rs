@@ -8,6 +8,7 @@
 //! return `None` and the caller falls back to General: approximating a
 //! format silently would be worse than not applying it.
 
+use crate::package::limits;
 use std::cmp::Ordering;
 
 /// Implied format codes for built-in numFmtIds. Ids 5-8 are absent
@@ -181,6 +182,13 @@ impl NumberFormat {
         // An empty code is not the `;;;` idiom for hiding a value, it is a
         // format that says nothing, so the caller falls back to General.
         if code.is_empty() {
+            return None;
+        }
+        // Nothing upstream bounds a `formatCode` attribute, and parsing one
+        // materializes several vectors per character. Real codes are a few
+        // dozen bytes; past the cap, fall back to General rather than let a
+        // compressed archive entry amplify into gigabytes.
+        if code.len() > limits::MAX_NUMBER_FORMAT_BYTES {
             return None;
         }
         let parts = split_sections(code)?;
