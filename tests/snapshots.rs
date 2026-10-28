@@ -127,6 +127,27 @@ fn scanned_pages_are_reported_not_dropped() {
     }
 }
 
+/// A document that classifies as text-based overall, but has one page whose
+/// font pdf-inspector cannot decode, still converts: the other pages are not
+/// discarded just because one page is confirmed to need OCR (#162).
+#[test]
+fn partial_ocr_document_keeps_its_readable_pages() {
+    let path = fixture_root().join("pdf/handmade-partial-ocr.pdf");
+    let bytes = std::fs::read(&path).unwrap();
+    let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Pdf)
+        .unwrap_or_else(|e| panic!("expected the readable pages to convert, got {e:#}"));
+    // The fixture is 7 identical readable pages plus 1 undecodable page; each
+    // readable page becomes its own blank-line-delimited block. A substring
+    // check alone would still pass with pages missing, since every readable
+    // page repeats the same sentence — count blocks instead so a dropped page
+    // fails the test.
+    let page_blocks = markdown
+        .split("\n\n")
+        .filter(|block| block.contains("substantial born digital text"))
+        .count();
+    assert_eq!(page_blocks, 7, "expected all 7 readable pages in the output, got {page_blocks}");
+}
+
 /// Embedded object payloads land in `Document::assets` with their identity
 /// and media type (the Markdown output shows only the alt text).
 #[test]

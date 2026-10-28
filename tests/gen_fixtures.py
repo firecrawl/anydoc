@@ -2238,6 +2238,79 @@ def ocr_pdfs():
     (OUT / "pdf" / "handmade-mixed.pdf").write_bytes(handmade_pdf([TEXT_PAGE, IMAGE_PAGE]))
 
 
+# A PDF whose pages carry their own /Resources, so a single page can use a
+# font none of the others do: an Identity-H Type0 font with no ToUnicode and
+# no DescendantFonts, which pdf-inspector cannot decode. Every other page
+# uses plain Helvetica.
+def handmade_pdf_own_resources(pages):
+    n = len(pages)
+    HELVETICA = 3
+    IDENTITY_H_NO_TOUNICODE = 4
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        HELVETICA: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        IDENTITY_H_NO_TOUNICODE: b"<< /Type /Font /Subtype /Type0 /BaseFont /XYZABC+Custom"
+                                  b" /Encoding /Identity-H >>",
+    }
+    next_obj = 5
+    kids = []
+    for content, uses_identity_h in pages:
+        page, stream = next_obj, next_obj + 1
+        next_obj += 2
+        font = IDENTITY_H_NO_TOUNICODE if uses_identity_h else HELVETICA
+        font_name = b"F2" if uses_identity_h else b"F1"
+        objs[page] = (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"
+                      b" /Resources << /Font << /%b %d 0 R >> >>"
+                      b" /Contents %d 0 R >>" % (font_name, font, stream))
+        objs[stream] = b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream"
+        kids.append(page)
+    objs[2] = b"<< /Type /Pages /Kids [" + b" ".join(b"%d 0 R" % k for k in kids) + b"] /Count %d >>" % n
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for num in sorted(objs):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % num + objs[num] + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    for off in offsets:
+        out += b"%010d 00000 n \n" % off
+    out += (b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n"
+            % (len(objs) + 1, xref))
+    return bytes(out)
+
+
+def dense_text_page():
+    ops = []
+    y = 760
+    sentence = (b"This document contains substantial born digital text with many "
+                b"distinct words describing real world business content.")
+    for i in range(20):
+        ops.append(b"BT /F1 9 Tf 60 %d Td (%s %d) Tj ET" % (y, sentence, i))
+        y -= 26
+    return (b"\n".join(ops), False)
+
+
+def undecodable_font_page():
+    # Uses only the Identity-H font with no ToUnicode CMap and no
+    # DescendantFonts to fall back on: pdf-inspector cannot decode this page,
+    # regardless of how much of it there is.
+    ops = []
+    y = 750
+    for i in range(15):
+        ops.append(b"BT /F2 10 Tf 72 %d Td <0001000200030004000500060007> Tj ET" % y)
+        y -= 24
+    return (b"\n".join(ops), True)
+
+
+def partial_ocr_pdf():
+    """A document classified text-based overall, where one page's font cannot
+    be decoded: the readable pages must still convert (#162), naming the one
+    that needs OCR rather than discarding the whole document."""
+    pages = [dense_text_page() for _ in range(7)]
+    pages.insert(3, undecodable_font_page())
+    (OUT / "pdf" / "handmade-partial-ocr.pdf").write_bytes(handmade_pdf_own_resources(pages))
+
+
 def main():
     skip_office = "--skip-office" in sys.argv
     for sub in ["odt", "docx", "doc", "rtf", "ods", "xlsx", "xls", "csv",
@@ -2292,6 +2365,7 @@ def main():
     math_docx()
     math_pptx()
     ocr_pdfs()
+    partial_ocr_pdf()
     math_odt()
     math_epub()
     math_rtf()
