@@ -276,7 +276,7 @@ mod tests {
                 r#"<text:list text:style-name="L2" text:continue-numbering="true">"#,
             );
         let md = crate::document_to_markdown(&parse(&odt_with_content(&styled)).unwrap());
-        assert!(md.contains("Payment"), "{md}");
+        assert!(md.contains("1. Payment"), "{md}");
         assert!(!md.contains("3. Payment"), "{md}");
     }
 
