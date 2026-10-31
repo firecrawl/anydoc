@@ -831,7 +831,7 @@ impl<'a> Parser<'a> {
             // boundary they carry is not.
             "line" | "lbr" | "page" | "column" => {
                 self.flush_pending();
-                if !self.state.suppress {
+                if !self.state.suppress && !self.state.deleted {
                     self.inlines.push(Inline::LineBreak);
                 }
             }
@@ -1055,6 +1055,10 @@ impl<'a> Parser<'a> {
         let Some(math) = self.dest.math.take() else {
             return;
         };
+        // Runs after the group closes: the state is the enclosing one.
+        if self.state.deleted {
+            return;
+        }
         let (lines, display) = math.finish();
         for (i, tex) in lines.into_iter().enumerate() {
             if i > 0 {
@@ -1082,6 +1086,9 @@ impl<'a> Parser<'a> {
         let Some(pict) = self.dest.pict.take() else {
             return Ok(());
         };
+        if self.state.deleted {
+            return Ok(());
+        }
         let Some((media_type, extension)) = pict.format else {
             log::debug!("skipping picture in an unsupported format");
             return Ok(());
@@ -1356,6 +1363,7 @@ mod tests {
         for src in [
             r"{\rtf1 The parties agreed {\deleted\revauthdel1 OLDTERM }{\revised\revauth1 NEWTERM }terms.\par}",
             r"{\rtf1 The parties agreed \deleted OLDTERM \deleted0 NEWTERM terms.\par}",
+            r"{\rtf1 The parties agreed {\deleted OLD\line TERM {\pict\pngblip 89504e470d0a1a0a}}NEWTERM terms.\par}",
         ] {
             let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
             assert_eq!(markdown, "The parties agreed NEWTERM terms.\n", "source: {src}");
