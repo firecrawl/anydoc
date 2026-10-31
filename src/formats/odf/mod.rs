@@ -262,6 +262,22 @@ mod tests {
         let md = crate::document_to_markdown(&parse(&odt_with_content(content)).unwrap());
         assert!(md.contains("1.2. Duty B"), "{md}");
         assert!(md.contains("2.1. Payment"), "{md}");
+
+        // The same when each sublist names its own list style.
+        let styled = content
+            .replace(
+                "</text:list-style></office:automatic-styles>",
+                r#"</text:list-style><text:list-style style:name="L2">
+              <text:list-level-style-number text:level="2" style:num-format="1" style:num-suffix="."/>
+            </text:list-style></office:automatic-styles>"#,
+            )
+            .replace(
+                r#"<text:list text:continue-numbering="true">"#,
+                r#"<text:list text:style-name="L2" text:continue-numbering="true">"#,
+            );
+        let md = crate::document_to_markdown(&parse(&odt_with_content(&styled)).unwrap());
+        assert!(md.contains("Payment"), "{md}");
+        assert!(!md.contains("3. Payment"), "{md}");
     }
 
     #[test]
