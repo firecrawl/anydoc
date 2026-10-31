@@ -198,8 +198,8 @@ fn parse_list(
         if !header {
             // A new item at this level restarts the levels below it, so a
             // `continue-numbering` sublist under it starts afresh.
-            let style = style_name.unwrap_or("");
-            ctx.list_counters.borrow_mut().retain(|(s, d), _| s != style || *d <= depth);
+            // Every style: a sublist may name its own list style.
+            ctx.list_counters.borrow_mut().retain(|(_, d), _| *d <= depth);
         }
         let mut chain = ancestors.to_vec();
         chain.push(number);
