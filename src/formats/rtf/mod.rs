@@ -811,9 +811,11 @@ impl<'a> Parser<'a> {
                 self.flush_pending();
                 if self.state.note.is_some() {
                     self.inlines.push(Inline::LineBreak);
-                } else if self.state.deleted && inlines_are_empty(&self.inlines) {
-                    // A wholly deleted paragraph leaves nothing, not even
-                    // a blank line of a code block.
+                } else if self.state.deleted {
+                    // A deleted paragraph mark joins this paragraph to the
+                    // next, as accepting the revision does; a wholly deleted
+                    // paragraph leaves nothing, not even its list marker.
+                    self.dest.listtext = None;
                 } else if !self.state.suppress {
                     self.end_paragraph()?;
                 }
@@ -1371,6 +1373,18 @@ mod tests {
             let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
             assert_eq!(markdown, "The parties agreed NEWTERM terms.\n", "source: {src}");
         }
+    }
+
+    #[test]
+    fn deleted_paragraph_mark_joins_the_paragraphs_and_drops_its_list_marker() {
+        let src = r"{\rtf1 Kept{\deleted\par} text.\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(markdown, "Kept text.\n");
+
+        let src = r"{\rtf1 \pard{\listtext 1.\tab}one\par {\deleted{\listtext 2.\tab}two\par}\pard plain\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert!(!markdown.contains("two") && !markdown.contains("2."), "{markdown}");
+        assert!(markdown.contains("plain"), "{markdown}");
     }
 
     #[test]
