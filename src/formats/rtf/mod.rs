@@ -77,6 +77,9 @@ struct CharState {
     /// Emphasis the paragraph style itself carries, subtracted from headings.
     style_base: Style,
     suppress: bool,
+    /// Inside a `\deleted` revision: text a viewer shows struck out as
+    /// removed, not part of the document's current text.
+    deleted: bool,
     capture: Capture,
     note: Option<NoteKind>,
 }
@@ -96,6 +99,7 @@ impl Default for CharState {
             block: None,
             style_base: Style::PLAIN,
             suppress: false,
+            deleted: false,
             capture: Capture::None,
             note: None,
         }
@@ -781,6 +785,10 @@ impl<'a> Parser<'a> {
             "b" => self.set_style(|s| s.bold = on),
             "i" => self.set_style(|s| s.italic = on),
             "strike" | "striked" => self.set_style(|s| s.strike = on),
+            "deleted" => {
+                self.flush_pending();
+                self.state.deleted = on;
+            }
             "plain" => {
                 self.flush_pending();
                 let font = self.state.font;
@@ -1151,7 +1159,7 @@ impl<'a> Parser<'a> {
                 }
             }
             Capture::None => {
-                if !self.state.suppress {
+                if !self.state.suppress && !self.state.deleted {
                     self.inlines.push(Inline::Text { text, style: self.state.style });
                 }
             }
@@ -1340,6 +1348,18 @@ mod tests {
         let Block::List(list) = &doc.blocks[0] else { panic!("{:?}", doc.blocks) };
         assert_eq!(list.items[0].marker_label.as_deref(), Some("1."));
         assert_eq!(list.items[1].marker_label.as_deref(), Some("2."));
+    }
+
+    #[test]
+    fn deleted_revision_text_is_omitted() {
+        // #202: a tracked deletion is removed text; the insertion stays.
+        for src in [
+            r"{\rtf1 The parties agreed {\deleted\revauthdel1 OLDTERM }{\revised\revauth1 NEWTERM }terms.\par}",
+            r"{\rtf1 The parties agreed \deleted OLDTERM \deleted0 NEWTERM terms.\par}",
+        ] {
+            let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+            assert_eq!(markdown, "The parties agreed NEWTERM terms.\n", "source: {src}");
+        }
     }
 
     #[test]
