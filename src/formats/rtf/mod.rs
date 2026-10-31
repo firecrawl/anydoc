@@ -811,6 +811,9 @@ impl<'a> Parser<'a> {
                 self.flush_pending();
                 if self.state.note.is_some() {
                     self.inlines.push(Inline::LineBreak);
+                } else if self.state.deleted && inlines_are_empty(&self.inlines) {
+                    // A wholly deleted paragraph leaves nothing, not even
+                    // a blank line of a code block.
                 } else if !self.state.suppress {
                     self.end_paragraph()?;
                 }
@@ -1368,6 +1371,13 @@ mod tests {
             let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
             assert_eq!(markdown, "The parties agreed NEWTERM terms.\n", "source: {src}");
         }
+    }
+
+    #[test]
+    fn deleted_paragraph_leaves_no_blank_line_in_a_code_block() {
+        let src = r"{\rtf1{\stylesheet{\s1 Source Code;}}\pard\s1 a = 1\par {\deleted b = 2\par}c = 3\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(markdown, "```\na = 1\nc = 3\n```\n");
     }
 
     #[test]
