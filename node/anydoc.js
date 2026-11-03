@@ -8,13 +8,16 @@ const { version } = require('./package.json')
 
 const API_URL = 'https://api.firecrawl.dev'
 const TIMEOUT_MS = 300_000
+const PARSE_MODES = ['auto', 'fast', 'ocr']
 
 /**
  * Convert a document file to Markdown. `options.ocr` decides what happens to
  * a PDF whose pages need OCR: `'reject'` (the default) rejects with
- * `needsOcr`, `'hosted'` sends the document to Firecrawl Parse instead.
+ * `needsOcr`, `'hosted'` sends the document to Firecrawl Parse instead, in
+ * `options.parseMode` (`'auto'` by default).
  */
 async function toMarkdown(path, options) {
+  checkParseMode(options)
   try {
     return await native.toMarkdown(path)
   } catch (error) {
@@ -25,11 +28,19 @@ async function toMarkdown(path, options) {
 
 /** `toMarkdown` for bytes; `options` as there. */
 async function toMarkdownBytes(bytes, format, options) {
+  checkParseMode(options)
   try {
     return await native.toMarkdownBytes(bytes, format)
   } catch (error) {
     if (!sendsToHosted(error, options)) throw error
     return parseHosted(bytes, 'document.pdf', options)
+  }
+}
+
+function checkParseMode(options) {
+  const mode = options?.parseMode
+  if (mode !== undefined && !PARSE_MODES.includes(mode)) {
+    throw hostedError(`invalid parseMode '${mode}'; expected one of: ${PARSE_MODES.join(', ')}`)
   }
 }
 
@@ -43,7 +54,7 @@ async function parseHosted(bytes, filename, options) {
   const apiKey = options.apiKey ?? process.env.FIRECRAWL_API_KEY
   const apiUrl = options.apiUrl ?? process.env.FIRECRAWL_API_URL ?? API_URL
   const url = `${apiUrl.replace(/\/$/, '')}/v2/parse`
-  const parse = { parsers: [{ type: 'pdf', mode: 'auto' }], origin: `anydoc@${version}` }
+  const parse = { parsers: [{ type: 'pdf', mode: options.parseMode ?? 'auto' }], origin: `anydoc@${version}` }
   const body = new FormData()
   body.append('options', JSON.stringify(parse))
   body.append('file', new Blob([bytes], { type: 'application/pdf' }), filename)
