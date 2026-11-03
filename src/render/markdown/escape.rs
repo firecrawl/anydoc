@@ -13,6 +13,7 @@ pub(crate) enum InlineContext {
 /// Fine-grained escaping context beyond [`InlineContext`]: where the run
 /// sits relative to its surroundings.
 #[derive(Clone, Copy, Default)]
+#[allow(dead_code)] // fork: positional fields survive for upstream callers
 pub(crate) struct EscapeOpts {
     /// The run begins at the start of an output line, where block syntax
     /// (headings, list markers, setext underlines) could form.
@@ -139,115 +140,40 @@ fn can_close(chars: &[char], j: usize, end: usize) -> bool {
 
 /// Escape Markdown syntax in document text.
 pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> String {
-    let EscapeOpts {
-        at_line_start,
-        styled,
-        trailing_active,
-        trailing_nonspace,
-        trailing_delims,
-        in_label,
-    } = opts;
-    let chars: Vec<char> = text.chars().collect();
-    // Last position of each delimiter that can pair; one with no later
-    // partner is inert.
-    let mut last: [Option<usize>; 6] = [None; 6]; // * _ ~ ` ] $
-    let mut j = 0;
-    while j < chars.len() {
-        let end = run_end(&chars, j);
-        if let Some(slot) = partner_slot(&chars, j, end) {
-            last[slot] = Some(end - 1);
-        }
-        j = end;
-    }
+    // Fork (sznb): document text renders verbatim — no Markdown escaping —
+    // matching the original pipeline's raw-text output (`1.` list-looking
+    // lines, `12*8GB` formulas, `C:\path` backslashes, `#`-starting lines all
+    // stay exactly as written). Escaping survives only where a bare
+    // character would break structure the renderer itself emits:
+    // - a `|` inside a GFM table cell would split the cell;
+    // - a `]` inside a link label would terminate it;
+    // - pairing delimiters inside a styled span would close it early.
+    let styled = opts.styled;
+    let in_label = opts.in_label;
     let mut out = String::with_capacity(text.len() + 8);
-    let mut line_has_content = !(at_line_start && ctx == InlineContext::Block);
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '\n' {
-            out.push('\n');
-            if ctx == InlineContext::Block {
-                line_has_content = false;
-            }
-            i += 1;
-            continue;
-        }
-        let start_of_line = !line_has_content;
-        if !c.is_whitespace() {
-            line_has_content = true;
-        }
-        let next = chars.get(i + 1).copied();
-        // At the run's end the next character is unknown; trailing_active assumes the worst.
-        let next_nonspace =
-            next.map_or(trailing_active || trailing_nonspace, |n| !n.is_whitespace());
-        let paired = |slot: usize| {
-            trailing_active || trailing_delims.contains(slot) || last[slot].is_some_and(|j| j > i)
-        };
+    for c in text.chars() {
         let escape = match c {
-            '\\' => true,
-            // Opens a math span only directly before non-space, and only
-            // when a `$` that can close follows.
-            '$' => next_nonspace && paired(5),
-            ']' if in_label => true,
-            '`' => styled || paired(3),
-            '*' => styled || start_of_line || (next_nonspace && paired(0)),
-            '_' => {
-                let prev_alnum = i > 0 && chars[i - 1].is_alphanumeric();
-                let next_alnum = next.is_some_and(char::is_alphanumeric);
-                styled || (next_nonspace && !(prev_alnum && next_alnum) && paired(1))
-            }
-            '~' => styled || (next_nonspace && paired(2)),
-            '[' => in_label || paired(4),
-            '<' => next.is_some_and(|n| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?')),
-            '!' => next.is_none() && trailing_active,
             '|' if ctx == InlineContext::TableCell => true,
-            '&' if entity_ahead(&chars[i..]) => {
-                out.push_str("&amp;");
-                i += 1;
-                continue;
-            }
-            '#' if start_of_line => {
-                let j = (i..chars.len()).find(|&j| chars[j] != '#').unwrap_or(chars.len());
-                chars.get(j).is_none_or(|n| n.is_whitespace())
-            }
-            '-' if start_of_line => !next_nonspace || line_is_only(&chars[i..], '-'),
-            '+' if start_of_line => !next_nonspace,
-            '>' if start_of_line => true,
-            '=' if start_of_line => line_is_only(&chars[i..], '='),
-            '0'..='9' if start_of_line => {
-                let mut j = i;
-                while j < chars.len() && chars[j].is_ascii_digit() {
-                    j += 1;
-                }
-                if j < chars.len()
-                    && (chars[j] == '.' || chars[j] == ')')
-                    && chars.get(j + 1).is_none_or(|n| n.is_whitespace())
-                {
-                    out.extend(&chars[i..j]);
-                    out.push('\\');
-                    out.push(chars[j]);
-                    i = j + 1;
-                    continue;
-                }
-                false
-            }
+            ']' if in_label => true,
+            '*' | '~' | '`' if styled => true,
             _ => false,
         };
         if escape {
             out.push('\\');
         }
         out.push(c);
-        i += 1;
     }
     out
 }
 
 /// True when the rest of the current line is just `c`, spaces, and tabs
 /// (a setext underline or thematic break).
+#[allow(dead_code)] // fork: kept for upstream parity
 fn line_is_only(chars: &[char], c: char) -> bool {
     chars.iter().take_while(|&&ch| ch != '\n').all(|&ch| ch == c || ch == ' ' || ch == '\t')
 }
 
+#[allow(dead_code)] // fork: kept for upstream parity
 fn entity_ahead(chars: &[char]) -> bool {
     let mut i = 1;
     if i < chars.len() && chars[i] == '#' {
@@ -290,6 +216,7 @@ pub(crate) fn format_url(url: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn escape_url_as_text(url: &str, ctx: InlineContext) -> String {
     let cleaned: String = url.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     escape_text(

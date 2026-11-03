@@ -2,7 +2,7 @@
 
 mod anchors;
 mod escape;
-mod inline;
+pub(crate) mod inline;
 mod table;
 
 #[cfg(test)]
@@ -29,17 +29,27 @@ pub(crate) fn escape_marker_label(label: &str, ctx: InlineContext) -> String {
 }
 
 /// Footnote id -> rendered number, shared by all render functions.
-type NoteNumbers = HashMap<String, usize>;
+pub(crate) type NoteNumbers = HashMap<String, usize>;
 
 /// Immutable render context threaded through every render function.
 pub(crate) struct Ctx {
-    nums: NoteNumbers,
+    pub(crate) nums: NoteNumbers,
     anchors: AnchorMap,
+    /// Fork (sznb): tables render as HTML `<table>` (true, default) or as
+    /// GFM pipe tables (false) — the conversion service's `table_as_html`
+    /// parameter reaches the fork through this flag.
+    pub(crate) html_tables: bool,
 }
 
-pub fn document_to_markdown(doc: &Document) -> String {
-    let rc = Ctx { nums: number_notes(doc), anchors: resolve_anchors(doc) };
-    let mut parts: Vec<String> = doc.blocks.iter().filter_map(|b| render_block(b, &rc)).collect();
+/// Fork (sznb): render with the table form selected by `html_tables`
+/// (`true` = HTML tables, the historical default).
+pub fn document_to_markdown_opts(doc: &Document, html_tables: bool) -> String {
+    let rc = Ctx { nums: number_notes(doc), anchors: resolve_anchors(doc), html_tables };
+    let mut parts: Vec<(bool, String)> = doc
+        .blocks
+        .iter()
+        .filter_map(|b| render_block(b, &rc).map(|s| (block_needs_blank(b), s)))
+        .collect();
     let mut rendered_defs: HashSet<usize> = HashSet::new();
     let mut ordered: Vec<(&Note, usize)> =
         doc.notes.iter().filter_map(|n| rc.nums.get(&n.id).map(|&num| (n, num))).collect();
@@ -64,18 +74,59 @@ pub fn document_to_markdown(doc: &Document) -> String {
                 s.push_str(line);
             }
         }
-        parts.push(s);
+        parts.push((true, s));
     }
-    let mut out = parts.join("\n\n");
-    if !out.is_empty() {
-        out.push('\n');
+    let out = join_block_parts(&parts);
+    if out.is_empty() {
+        return out;
+    }
+    // Fork (sznb): trailing blank paragraphs collapse, one final newline.
+    let trimmed = out.trim_end_matches('\n');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    format!("{trimmed}\n")
+}
+
+/// Fork (sznb): block separation follows the original pipeline's line
+/// layout — paragraphs, headings, lists and quotes join with a single
+/// newline (no blank line), while tables, code blocks, math and rules keep
+/// a blank line around them so the emitted structures still parse.
+fn block_needs_blank(b: &Block) -> bool {
+    matches!(b, Block::Table(_) | Block::CodeBlock { .. } | Block::Math(_) | Block::Rule)
+}
+
+fn join_block_parts(parts: &[(bool, String)]) -> String {
+    let mut out = String::new();
+    let mut prev_blank = true;
+    for (blank, s) in parts {
+        if s.is_empty() {
+            // Fork (sznb): a blank paragraph renders as one blank line;
+            // consecutive ones fold, leading ones drop.
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+                prev_blank = false;
+            }
+            continue;
+        }
+        if !out.is_empty() {
+            // A blank paragraph just emitted a line break; the structural
+            // blank of a table/code block is then already satisfied.
+            if out.ends_with('\n') {
+                out.push('\n');
+            } else {
+                out.push_str(if *blank || prev_blank { "\n\n" } else { "\n" });
+            }
+        }
+        out.push_str(s);
+        prev_blank = *blank;
     }
     out
 }
 
 /// Number notes in first-reference order; unreferenced notes follow at the
 /// end. The first note wins a duplicated id.
-fn number_notes(doc: &Document) -> NoteNumbers {
+pub(crate) fn number_notes(doc: &Document) -> NoteNumbers {
     let mut valid: HashMap<&str, &Note> = HashMap::new();
     for note in &doc.notes {
         if !note.blocks.iter().all(block_is_blank) {
@@ -153,8 +204,11 @@ fn collect_note_refs(
 }
 
 fn render_blocks(blocks: &[Block], rc: &Ctx) -> String {
-    let parts: Vec<String> = blocks.iter().filter_map(|b| render_block(b, rc)).collect();
-    parts.join("\n\n")
+    let parts: Vec<(bool, String)> = blocks
+        .iter()
+        .filter_map(|b| render_block(b, rc).map(|s| (block_needs_blank(b), s)))
+        .collect();
+    join_block_parts(&parts)
 }
 
 fn render_block(block: &Block, rc: &Ctx) -> Option<String> {
@@ -171,7 +225,9 @@ fn render_block(block: &Block, rc: &Ctx) -> Option<String> {
         Block::Paragraph(inlines) => {
             let text = render_inlines(inlines, InlineContext::Block, rc);
             let trimmed = trim_paragraph(&text);
-            if trimmed.is_empty() { None } else { Some(trimmed) }
+            // Fork (sznb): an empty paragraph renders as a blank line (the
+            // original pipeline keeps the source's spacer paragraphs).
+            if trimmed.is_empty() { Some(String::new()) } else { Some(trimmed) }
         }
         Block::List(list) => render_list(list, rc),
         // Trivial layout tables are scaffolding; render their content directly.
@@ -227,17 +283,18 @@ fn render_list(list: &List, rc: &Ctx) -> Option<String> {
     let mut rendered_items: Vec<String> = Vec::new();
     let mut loose = false;
     for (i, item) in list.items.iter().enumerate() {
-        // GFM has decimal ordered lists only, so Roman/alphabetic levels
-        // render as bullets carrying the source marker as literal text
-        // (`- iv. …`) — the source marker semantics stay visible. Items with
-        // an explicit label (composite number text) render it the same way.
+        // Fork (sznb): the source marker renders as-is, without stacking a
+        // `- ` bullet in front. GFM ordered lists only parse `1.` decimals,
+        // so `1、` / `iv.` / composite labels stay literal text lines that
+        // mirror the source — the Chinese-official-document corpus reads
+        // best without the doubled prefix (`- 1、 …`).
         let marker = match (&item.marker_label, list.marker) {
             (Some(label), _) => {
-                format!("- {} ", escape_marker_label(label, InlineContext::Block))
+                format!("{} ", escape_marker_label(label, InlineContext::Block))
             }
             (None, MarkerKind::Bullet) => "- ".to_string(),
             (None, MarkerKind::Decimal) => format!("{}. ", list.start.saturating_add(i as u64)),
-            (None, kind) => format!("- {} ", kind.label(list.start.saturating_add(i as u64))),
+            (None, kind) => format!("{} ", kind.label(list.start.saturating_add(i as u64))),
         };
         let body = render_blocks(&item.blocks, rc);
         if item.blocks.len() > 1 {
@@ -262,31 +319,21 @@ fn render_list(list: &List, rc: &Ctx) -> Option<String> {
     Some(rendered_items.join(sep))
 }
 
-/// Trim paragraph lines, keeping hard-break backslashes intact.
+/// Trim paragraph lines. Fork (sznb): in-paragraph line breaks render as
+/// bare newlines (no `\` hard-break marker), so every line simply trims its
+/// edges and the paragraph keeps its interior newlines.
 fn trim_paragraph(text: &str) -> String {
     let lines: Vec<&str> = text
         .lines()
         .map(|l| {
-            let t = l.trim_start();
-            let t = if ends_with_hard_break(t) { t } else { t.trim_end() };
-            if t.trim_end_matches('\\').trim().is_empty() { "" } else { t }
+            let t = l.trim();
+            if t.is_empty() { "" } else { t }
         })
         .collect();
     let start = lines.iter().position(|l| !l.is_empty());
     let end = lines.iter().rposition(|l| !l.is_empty());
     match (start, end) {
-        (Some(s), Some(e)) => {
-            let mut out = lines[s..=e].join("\n");
-            if ends_with_hard_break(&out) {
-                out.pop();
-                out.truncate(out.trim_end().len());
-            }
-            out
-        }
+        (Some(s), Some(e)) => lines[s..=e].join("\n"),
         _ => String::new(),
     }
-}
-
-fn ends_with_hard_break(line: &str) -> bool {
-    line.chars().rev().take_while(|&c| c == '\\').count() % 2 == 1
 }

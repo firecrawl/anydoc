@@ -130,7 +130,11 @@ fn render_inlines_mode(inlines: &[Inline], ctx: InlineContext, in_label: bool, r
                 }
             }
             Norm::LineBreak => match ctx {
-                InlineContext::Block => out.push_str("\\\n"),
+                // Fork (sznb): a plain newline, no `\` hard-break marker —
+                // matching the original pipeline's line-break form (LibreOffice
+                // emits a bare newline; V2's concatenation reads the same
+                // once Markdown renders the in-paragraph newline as a space).
+                InlineContext::Block => out.push('\n'),
                 InlineContext::Heading => out.push(' '),
                 InlineContext::TableCell => out.push('\n'),
             },
@@ -154,29 +158,19 @@ fn render_link(
     rc: &Ctx,
     out: &mut String,
 ) {
-    let label = render_inlines_mode(content, ctx, true, rc);
-    let url = match target {
-        LinkTarget::External(url) | LinkTarget::Relative(url) => url.clone(),
-        LinkTarget::Anchor(id) => match rc.anchors.fragment(id) {
-            Some(fragment) => format!("#{fragment}"),
-            None => {
-                // Target exists nowhere in the document: degrade to plain text.
-                log::debug!("unresolved internal link target: {id}");
-                out.push_str(&render_inlines_mode(content, ctx, false, rc));
-                return;
-            }
-        },
-    };
-    // Emptiness is tested on the trimmed label, but the rendered label keeps
-    // its source-significant edge spaces.
+    // Fork (sznb): every link renders as plain text — internal anchors and
+    // external http(s) alike. The conversion corpus is official documents
+    // whose TOC entries, cross references and titled hyperlinks read as plain
+    // text downstream (the original pipeline drops the href entirely); a
+    // label that is itself the URL keeps the URL visible as text.
+    let label = render_inlines_mode(content, ctx, false, rc);
     if label.trim().is_empty() {
-        if matches!(target, LinkTarget::Anchor(_)) {
-            return;
+        if let LinkTarget::External(url) | LinkTarget::Relative(url) = target {
+            out.push_str(url);
         }
-        let _ = write!(out, "[{}]({})", escape_url_as_text(&url, ctx), format_url(&url));
-    } else {
-        let _ = write!(out, "[{}]({})", label, format_url(&url));
+        return;
     }
+    out.push_str(&label);
 }
 
 fn render_image(
@@ -339,9 +333,8 @@ fn render_text_run(
             if style.strike {
                 open.push_str("~~");
             }
-            if style.bold {
-                open.push_str("**");
-            }
+            // Fork (sznb): bold runs render without `**` delimiters — the
+            // conversion service downstream wants emphasis-free Markdown.
             if style.italic {
                 open.push('*');
             }
@@ -406,4 +399,30 @@ pub(crate) fn push_code_span(text: &str, ctx: InlineContext, out: &mut String) {
         _ => text,
     };
     let _ = write!(out, "{fence}{pad}{text}{pad}{fence}");
+}
+
+/// Fork (sznb): inline content as plain text — no Markdown syntax. Links
+/// contribute their label text; images and anchors contribute nothing; note
+/// references render as their `[^n]` number via the shared numbering. Used
+/// by the HTML table renderer and the plain-text serializer.
+pub(crate) fn inlines_to_plain(
+    inlines: &[Inline],
+    nums: &crate::render::markdown::NoteNumbers,
+    out: &mut String,
+) {
+    for inline in inlines {
+        match inline {
+            Inline::Text { text, .. } => out.push_str(text),
+            Inline::Link { content, .. } => inlines_to_plain(content, nums, out),
+            Inline::Image { .. } | Inline::Anchor(_) => {}
+            Inline::NoteRef(id) => {
+                if let Some(n) = nums.get(id) {
+                    let _ = write!(out, "[^{n}]");
+                }
+            }
+            Inline::LineBreak => out.push('\n'),
+            Inline::Math(tex) => out.push_str(tex),
+            Inline::Checkbox(checked) => out.push_str(if *checked { "[x] " } else { "[ ] " }),
+        }
+    }
 }
