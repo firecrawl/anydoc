@@ -1,7 +1,9 @@
 //! Content-based format detection.
 //!
-//! Identifies the format from what each specification designates as the
-//! container's identity, never from heuristics over document content:
+//! Identifies the format primarily from what each specification designates as
+//! the container's identity. Standalone HTML is the one intentional content
+//! heuristic: after an optional BOM/leading whitespace, a leading HTML5
+//! `<!DOCTYPE ... html>` or `<html>` marker identifies `Format::Html`.
 //!
 //! - PDF: the `%PDF-` header (ISO 32000; implementations accept leading
 //!   junk, bounded here at 1024 bytes).
@@ -41,10 +43,115 @@ pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Format> {
     if bytes.starts_with(b"PK\x03\x04") {
         return detect_zip(bytes);
     }
+    if looks_like_html(bytes) {
+        return Some(Format::Html);
+    }
     if bytes[..bytes.len().min(1024)].windows(5).any(|w| w == b"%PDF-") {
         return Some(Format::Pdf);
     }
     None
+}
+
+fn looks_like_html(bytes: &[u8]) -> bool {
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return looks_like_utf16_html(rest, true);
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return looks_like_utf16_html(rest, false);
+    }
+    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    looks_like_ascii_html(bytes)
+}
+
+fn looks_like_utf16_html(bytes: &[u8], little_endian: bool) -> bool {
+    let (pairs, _) = bytes.as_chunks::<2>();
+    let mut index = 0;
+    while pairs.get(index).is_some_and(|pair| {
+        utf16_ascii_unit(*pair, little_endian).is_some_and(|b| b.is_ascii_whitespace())
+    }) {
+        index += 1;
+    }
+
+    if utf16_html_prefix(pairs, index, little_endian, b"<html") {
+        return true;
+    }
+
+    const DOCTYPE: &[u8] = b"<!doctype";
+    if !utf16_prefix_eq_ignore_ascii_case(pairs, index, little_endian, DOCTYPE) {
+        return false;
+    }
+    index += DOCTYPE.len();
+    if !pairs.get(index).is_some_and(|pair| {
+        utf16_ascii_unit(*pair, little_endian).is_some_and(|b| b.is_ascii_whitespace())
+    }) {
+        return false;
+    }
+    while pairs.get(index).is_some_and(|pair| {
+        utf16_ascii_unit(*pair, little_endian).is_some_and(|b| b.is_ascii_whitespace())
+    }) {
+        index += 1;
+    }
+    utf16_html_prefix(pairs, index, little_endian, b"html")
+}
+
+fn utf16_ascii_unit(pair: [u8; 2], little_endian: bool) -> Option<u8> {
+    let unit = if little_endian { u16::from_le_bytes(pair) } else { u16::from_be_bytes(pair) };
+    (unit <= 0x7F).then_some(unit as u8)
+}
+
+fn utf16_prefix_eq_ignore_ascii_case(
+    pairs: &[[u8; 2]],
+    start: usize,
+    little_endian: bool,
+    prefix: &[u8],
+) -> bool {
+    let Some(slice) = pairs.get(start..start + prefix.len()) else {
+        return false;
+    };
+    slice.iter().zip(prefix).all(|(pair, expected)| {
+        utf16_ascii_unit(*pair, little_endian)
+            .is_some_and(|byte| byte.eq_ignore_ascii_case(expected))
+    })
+}
+
+fn utf16_html_prefix(pairs: &[[u8; 2]], start: usize, little_endian: bool, prefix: &[u8]) -> bool {
+    utf16_prefix_eq_ignore_ascii_case(pairs, start, little_endian, prefix)
+        && pairs.get(start + prefix.len()).is_none_or(|pair| {
+            utf16_ascii_unit(*pair, little_endian)
+                .is_some_and(|b| b.is_ascii_whitespace() || matches!(b, b'>' | b'/'))
+        })
+}
+
+fn looks_like_ascii_html(bytes: &[u8]) -> bool {
+    let bytes = bytes.trim_ascii_start();
+    html_doctype_prefix(bytes) || html_prefix(bytes, b"<html")
+}
+
+fn html_doctype_prefix(bytes: &[u8]) -> bool {
+    const DOCTYPE: &[u8] = b"<!doctype";
+    let Some(head) = bytes.get(..DOCTYPE.len()) else {
+        return false;
+    };
+    if !head.eq_ignore_ascii_case(DOCTYPE) {
+        return false;
+    }
+    let Some(rest) = bytes.get(DOCTYPE.len()..) else {
+        return false;
+    };
+    if !rest.first().is_some_and(u8::is_ascii_whitespace) {
+        return false;
+    }
+    html_prefix(rest.trim_ascii_start(), b"html")
+}
+
+fn html_prefix(bytes: &[u8], prefix: &[u8]) -> bool {
+    let Some(head) = bytes.get(..prefix.len()) else {
+        return false;
+    };
+    head.eq_ignore_ascii_case(prefix)
+        && bytes
+            .get(prefix.len())
+            .is_none_or(|b| b.is_ascii_whitespace() || matches!(b, b'>' | b'/'))
 }
 
 /// Classify an OLE compound file by its mandated content stream. Encrypted
@@ -236,6 +343,8 @@ mod tests {
         junk.extend_from_slice(b"%PDF-1.4");
         assert_eq!(from_bytes(&junk), Some(Format::Pdf));
         assert_eq!(from_bytes(b"{\\rtf1\\ansi hi}"), Some(Format::Rtf));
+        assert_eq!(from_bytes(b"<!DOCTYPE html><html></html>"), Some(Format::Html));
+        assert_eq!(from_bytes(b"\xEF\xBB\xBF  <HTML><body>x</body></HTML>"), Some(Format::Html));
         assert_eq!(from_bytes(b"a,b,c\n1,2,3\n"), None);
         assert_eq!(from_bytes(b""), None);
     }

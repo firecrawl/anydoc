@@ -46,6 +46,8 @@ pub enum Format {
     Rtf,
     /// EPUB 2 and 3 (`.epub`).
     Epub,
+    /// Standalone HTML5 (`.html`, `.htm`). JavaScript is not executed.
+    Html,
     /// Excel workbooks: `.xlsx`, `.xlsm`, binary `.xlsb`, and legacy
     /// OLE-based `.xls`.
     Excel,
@@ -80,6 +82,7 @@ impl Format {
             "ppt" | "pps" | "pot" => Format::Ppt,
             "rtf" => Format::Rtf,
             "epub" => Format::Epub,
+            "html" | "htm" => Format::Html,
             "xlsx" | "xlsm" | "xlsb" | "xls" => Format::Excel,
             "ods" => Format::Ods,
             "odp" => Format::Odp,

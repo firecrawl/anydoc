@@ -128,6 +128,7 @@ export declare const enum Format {
   pptx = 'pptx',
   rtf = 'rtf',
   epub = 'epub',
+  html = 'html',
   xlsx = 'xlsx',
   ods = 'ods',
   odp = 'odp',

@@ -85,6 +85,7 @@ fn fixtures_detect_from_content() {
         ("doc", Some(Format::Doc)),
         ("docx", Some(Format::Docx)),
         ("epub", Some(Format::Epub)),
+        ("html", Some(Format::Html)),
         ("odp", Some(Format::Odp)),
         ("ods", Some(Format::Ods)),
         ("odt", Some(Format::Odt)),

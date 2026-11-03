@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Fixture Document
+
+Plain paragraph with **bold**, *italic*, and [example](https://example.com/page).
+
+## Unicode
+
+café Ł music 𝄞 family 👨‍👩‍👧.
+
+**Styled bold paragraph.**
