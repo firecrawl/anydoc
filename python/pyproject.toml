@@ -5,7 +5,7 @@ build-backend = "maturin"
 # The distribution installs as `firecrawl-anydoc` (the bare `anydoc` name on
 # PyPI is held by an unrelated package) and imports as `anydoc`.
 [project]
-name = "firecrawl-anydoc"
+name = "firecrawl-anydoc-sznb"
 description = "Convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown"
 readme = "README.md"
 license = "MIT"
@@ -27,4 +27,4 @@ Repository = "https://github.com/firecrawl/anydoc"
 Issues = "https://github.com/firecrawl/anydoc/issues"
 
 [tool.maturin]
-module-name = "anydoc._anydoc"
+module-name = "anydoc_sznb._anydoc"

@@ -66,10 +66,23 @@ def to_markdown(path: str | os.PathLike[str]) -> str:
     file content; the extension is the fallback for signature-less formats
     (CSV) and unrecognizable containers."""
 
-def to_markdown_bytes(data: bytes | bytearray, format: Format | None = None) -> str:
+def to_markdown_bytes(
+    data: bytes | bytearray, format: Format | None = None, *, html_tables: bool = True
+) -> str:
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
-    name explicitly."""
+    name explicitly.
+
+    Fork (sznb): `html_tables` selects the table form — HTML `<table>` with
+    merged-cell colspan/rowspan (default) or GFM pipe tables."""
+
+def to_text_bytes(data: bytes | bytearray, format: Format | None = None) -> str:
+    """Convert an in-memory document to plain text (no Markdown syntax;
+    tables render as tab-joined rows carrying merged content once). Format
+    handling as for `to_markdown_bytes`.
+
+    Unsupported for `pdf`: PDF conversion produces Markdown directly and has
+    no document-model form."""
 
 def to_document(data: bytes | bytearray, format: Format | None = None) -> Document:
     """Parse an in-memory document into the document model, which also
@@ -159,7 +172,7 @@ class ImageSource:
 
 @final
 class List:
-    marker: Literal["bullet", "decimal", "lower_alpha", "upper_alpha", "lower_roman", "upper_roman"]
+    marker: Literal["bullet", "decimal", "lower_alpha", "upper_alpha", "lower_roman", "upper_roman", "chinese_counting", "chinese_legal"]
     """The marker family the list uses in the source document."""
     start: int
     """Ordinal the first item counts from."""

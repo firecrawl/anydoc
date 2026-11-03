@@ -9,7 +9,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Literal
 
-from anydoc._anydoc import (
+from anydoc_sznb._anydoc import (
     Asset,
     Block,
     Cell,
@@ -35,8 +35,9 @@ from anydoc._anydoc import (
     format_from_path,
     to_document,
 )
-from anydoc._anydoc import to_markdown as _to_markdown
-from anydoc._anydoc import to_markdown_bytes as _to_markdown_bytes
+from anydoc_sznb._anydoc import to_markdown as _to_markdown
+from anydoc_sznb._anydoc import to_markdown_bytes as _to_markdown_bytes
+from anydoc_sznb._anydoc import to_text_bytes
 
 Format = Literal[
     "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "xlsx", "ods", "odp", "csv"
@@ -83,16 +84,21 @@ def to_markdown_bytes(
     data: "bytes | bytearray",
     format: "Format | None" = None,
     *,
+    html_tables: bool = True,
     ocr: Ocr = "reject",
     api_key: "str | None" = None,
     api_url: "str | None" = None,
 ) -> str:
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
-    name explicitly. `ocr`, `api_key` and `api_url` are as for
-    `to_markdown`."""
+    name explicitly.
+
+    Fork (sznb): `html_tables` selects the table form — `True` (default)
+    renders HTML `<table>` carrying merged-cell colspan/rowspan; `False`
+    renders GFM pipe tables (no span syntax). `ocr`, `api_key` and
+    `api_url` are as for `to_markdown`."""
     try:
-        return _to_markdown_bytes(data, format)
+        return _to_markdown_bytes(data, format, html_tables=html_tables)
     except NeedsOcrError:
         if ocr != "hosted":
             raise
@@ -210,4 +216,5 @@ __all__ = [
     "to_document",
     "to_markdown",
     "to_markdown_bytes",
+    "to_text_bytes",
 ]
