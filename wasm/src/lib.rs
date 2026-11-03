@@ -20,8 +20,9 @@ pub enum Format {
     Docx = "docx",
     Odt = "odt",
     /// Converted with pdf-inspector, which emits Markdown directly:
-    /// `toDocument` is unsupported for PDFs. Scanned or image-only PDFs
-    /// (needing OCR) error as unsupported.
+    /// `toDocument` is unsupported for PDFs. Scanned or image-only pages
+    /// need OCR, which anydoc does not do: the document throws `needsOcr`
+    /// naming them.
     Pdf = "pdf",
     Ppt = "ppt",
     Pptx = "pptx",
@@ -119,11 +120,21 @@ pub fn to_document(bytes: &[u8], format: Option<Format>) -> Result<JsValue, JsVa
 }
 
 /// The thrown value: a JS `Error` carrying the crate's message, with the
-/// variant name on `code` for callers to branch on.
+/// variant name on `code` for callers to branch on, and for `needsOcr` the
+/// pages behind it.
 fn convert_error(error: anydoc::ConvertError) -> JsValue {
     let thrown = js_sys::Error::new(&error.to_string());
     // Only fails on a non-object target, which `thrown` is not.
-    let _ =
-        js_sys::Reflect::set(&thrown, &JsValue::from_str("code"), &JsValue::from_str(error.code()));
+    let set = |name: &str, value: JsValue| {
+        let _ = js_sys::Reflect::set(&thrown, &JsValue::from_str(name), &value);
+    };
+    set("code", JsValue::from_str(error.code()));
+    if let anydoc::ConvertError::NeedsOcr { pages, page_count } = &error {
+        set(
+            "pages",
+            pages.iter().map(|&page| JsValue::from(page)).collect::<js_sys::Array>().into(),
+        );
+        set("pageCount", JsValue::from(*page_count));
+    }
     thrown.into()
 }

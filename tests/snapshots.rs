@@ -114,6 +114,19 @@ fn fixtures_detect_from_content() {
     }
 }
 
+/// A PDF with scanned pages is reported, not silently shortened: the error
+/// names the pages that need OCR.
+#[test]
+fn scanned_pages_are_reported_not_dropped() {
+    let mixed = std::fs::read(fixture_root().join("pdf/handmade-mixed.pdf")).unwrap();
+    match anydoc::to_markdown_bytes(&mixed, anydoc::Format::Pdf) {
+        Err(anydoc::ConvertError::NeedsOcr { pages, page_count }) => {
+            assert_eq!((pages, page_count), (vec![2], 2));
+        }
+        other => panic!("expected NeedsOcr, got {other:?}"),
+    }
+}
+
 /// Embedded object payloads land in `Document::assets` with their identity
 /// and media type (the Markdown output shows only the alt text).
 #[test]

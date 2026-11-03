@@ -1,6 +1,6 @@
 //! Typed conversion errors.
 //!
-//! An error means meaningful conversion was impossible: the input was
+//! An error means a complete conversion was impossible: the input was
 //! unreadable or structurally unusable, encrypted, or crossed a fixed
 //! safety/resource limit. Recoverable producer quirks never surface here -
 //! they are recovered or skipped (and logged via the `log` facade) while
@@ -14,6 +14,15 @@ use std::fmt;
 pub enum ConvertError {
     /// The format is unknown or cannot be converted at all.
     Unsupported(String),
+    /// Some pages of a PDF are scanned or image-only and need OCR, which
+    /// anydoc does not do. Nothing is returned for the document, so output
+    /// missing those pages never passes as complete.
+    NeedsOcr {
+        /// 1-indexed pages that need OCR.
+        pages: Vec<u32>,
+        /// Pages in the document.
+        page_count: u32,
+    },
     /// The document is structurally unusable - no meaningful content could be
     /// extracted. `part` names the package part or stream when known.
     Malformed {
@@ -46,6 +55,13 @@ impl fmt::Display for ConvertError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConvertError::Unsupported(what) => write!(f, "unsupported input: {what}"),
+            ConvertError::NeedsOcr { pages, page_count } => match pages.as_slice() {
+                [page] => write!(f, "page {page} of {page_count} needs OCR"),
+                _ if pages.len() as u32 >= *page_count => {
+                    write!(f, "all {page_count} pages need OCR")
+                }
+                _ => write!(f, "pages {} of {page_count} need OCR", page_ranges(pages)),
+            },
             ConvertError::Malformed { part: Some(part), detail } => {
                 write!(f, "malformed document ({part}): {detail}")
             }
@@ -84,6 +100,7 @@ impl ConvertError {
     pub fn code(&self) -> &'static str {
         match self {
             ConvertError::Unsupported(_) => "unsupported",
+            ConvertError::NeedsOcr { .. } => "needsOcr",
             ConvertError::Malformed { .. } => "malformed",
             ConvertError::Encrypted => "encrypted",
             ConvertError::ResourceLimit { .. } => "resourceLimit",
@@ -107,15 +124,39 @@ impl ConvertError {
     }
 }
 
+/// `2, 5-7, 12` from ascending page numbers.
+fn page_ranges(pages: &[u32]) -> String {
+    let mut ranges = Vec::new();
+    let mut pages = pages.iter().copied().peekable();
+    while let Some(start) = pages.next() {
+        let mut end = start;
+        while pages.next_if_eq(&(end + 1)).is_some() {
+            end += 1;
+        }
+        ranges.push(if end > start { format!("{start}-{end}") } else { start.to_string() });
+    }
+    ranges.join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The CLI shows only the message, so it has to name the pages.
+    #[test]
+    fn needs_ocr_names_the_pages() {
+        let scattered = ConvertError::NeedsOcr { pages: vec![2, 5, 6, 7, 12], page_count: 20 };
+        assert_eq!(scattered.to_string(), "pages 2, 5-7, 12 of 20 need OCR");
+        let all = ConvertError::NeedsOcr { pages: vec![1, 2], page_count: 2 };
+        assert_eq!(all.to_string(), "all 2 pages need OCR");
+    }
 
     /// The bindings publish these verbatim as `error.code`, so changing one
     /// breaks every caller that branches on it.
     #[test]
     fn codes_name_every_variant() {
         assert_eq!(ConvertError::Unsupported(String::new()).code(), "unsupported");
+        assert_eq!(ConvertError::NeedsOcr { pages: vec![1], page_count: 1 }.code(), "needsOcr");
         assert_eq!(ConvertError::malformed("").code(), "malformed");
         assert_eq!(ConvertError::malformed_part("word/document.xml", "").code(), "malformed");
         assert_eq!(ConvertError::Encrypted.code(), "encrypted");

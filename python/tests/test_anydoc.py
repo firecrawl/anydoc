@@ -2,8 +2,13 @@
 
 import ast
 import io
+import json
+import os
+import threading
 import unittest
 import zipfile
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import anydoc
@@ -14,6 +19,54 @@ RICH = FIXTURES / "docx" / "handmade-rich.docx"
 CSV = FIXTURES / "csv" / "sheet.csv"
 ENCRYPTED = FIXTURES / "malformed" / "encrypted--errors.odt"
 ZIPBOMB = FIXTURES / "abuse" / "zipbomb--errors.docx"
+MIXED = FIXTURES / "pdf" / "handmade-mixed.pdf"
+
+HOSTED_MARKDOWN = "# Read by the hosted parser\n"
+
+
+@contextmanager
+def hosted_stub(status, body, sent=None):
+    """A stand-in for api.firecrawl.dev that answers every request with one
+    reply and records each hit as (path, whether a PDF came with it), and the
+    Parse options each one sent into `sent`. The block runs keyless, whatever
+    the environment."""
+    hits = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            payload = self.rfile.read(int(self.headers.get("content-length", 0)))
+            hits.append((self.path, b"%PDF-" in payload))
+            if sent is not None:
+                sent.append(parse_options(payload))
+            reply = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    saved = {name: os.environ.pop(name, None) for name in ("FIRECRAWL_API_URL", "FIRECRAWL_API_KEY")}
+    os.environ["FIRECRAWL_API_URL"] = f"http://127.0.0.1:{server.server_port}"
+    try:
+        yield hits
+    finally:
+        server.shutdown()
+        server.server_close()
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def parse_options(payload):
+    options = payload.split(b'name="options"\r\n\r\n', 1)[1]
+    return json.loads(options.split(b"\r\n--", 1)[0])
 
 
 class AnydocTest(unittest.TestCase):
@@ -71,6 +124,11 @@ class AnydocTest(unittest.TestCase):
         with self.assertRaises(anydoc.EncryptedError):
             anydoc.to_markdown_bytes(ENCRYPTED.read_bytes(), "odt")
 
+        # A scanned page is reported, not dropped from the output.
+        with self.assertRaises(anydoc.NeedsOcrError) as caught:
+            anydoc.to_markdown(MIXED)
+        self.assertEqual((caught.exception.pages, caught.exception.page_count), ([2], 2))
+
         with self.assertRaises(anydoc.ResourceLimitError) as caught:
             anydoc.to_markdown_bytes(ZIPBOMB.read_bytes(), "docx")
         self.assertEqual(caught.exception.limit, "max_entry_bytes")
@@ -82,6 +140,45 @@ class AnydocTest(unittest.TestCase):
         with self.assertRaises(anydoc.MissingPartError) as caught:
             anydoc.to_markdown_bytes(package.getvalue(), "docx")
         self.assertEqual(caught.exception.part, "word/document.xml")
+
+    def test_ocr_hosted_sends_a_pdf_with_scanned_pages_to_firecrawl_parse_and_nothing_else(self):
+        reply = {"success": True, "data": {"markdown": HOSTED_MARKDOWN}}
+        with hosted_stub(200, reply) as hits:
+            self.assertEqual(anydoc.to_markdown(MIXED, ocr="hosted"), HOSTED_MARKDOWN)
+            self.assertEqual(hits, [("/v2/parse", True)])
+            self.assertRegex(anydoc.to_markdown(OUTLINE, ocr="hosted"), r"(?m)^# ")
+            self.assertEqual(hits, [("/v2/parse", True)])
+
+    def test_parse_mode_picks_the_parse_pdf_mode_auto_by_default(self):
+        reply = {"success": True, "data": {"markdown": HOSTED_MARKDOWN}}
+        sent = []
+        with hosted_stub(200, reply, sent):
+            anydoc.to_markdown(MIXED, ocr="hosted")
+            anydoc.to_markdown_bytes(MIXED.read_bytes(), "pdf", ocr="hosted", parse_mode="ocr")
+            anydoc.to_markdown(MIXED, ocr="hosted", parse_mode="fast")
+        self.assertEqual(
+            [options["parsers"] for options in sent],
+            [
+                [{"type": "pdf", "mode": "auto"}],
+                [{"type": "pdf", "mode": "ocr"}],
+                [{"type": "pdf", "mode": "fast"}],
+            ],
+        )
+
+    def test_an_invalid_parse_mode_raises_before_anything_is_sent(self):
+        reply = {"success": True, "data": {"markdown": HOSTED_MARKDOWN}}
+        expected = "invalid parse_mode .*expected one of: auto, fast, ocr"
+        with hosted_stub(200, reply) as hits:
+            with self.assertRaisesRegex(anydoc.HostedError, expected):
+                anydoc.to_markdown(OUTLINE, ocr="hosted", parse_mode="OCR")
+            with self.assertRaisesRegex(anydoc.HostedError, expected):
+                anydoc.to_markdown_bytes(MIXED.read_bytes(), ocr="hosted", parse_mode="accurate")
+            self.assertEqual(hits, [])
+
+    def test_the_keyless_limit_says_to_set_an_api_key(self):
+        with hosted_stub(429, {"success": False, "error": "Rate limit exceeded"}):
+            with self.assertRaisesRegex(anydoc.HostedError, "set FIRECRAWL_API_KEY"):
+                anydoc.to_markdown_bytes(MIXED.read_bytes(), ocr="hosted")
 
     def test_unreadable_files_and_bad_arguments_raise_the_python_exception(self):
         with self.assertRaises(FileNotFoundError):
@@ -98,8 +195,9 @@ class AnydocTest(unittest.TestCase):
         }
         exported = {name for name in dir(anydoc._anydoc) if not name.startswith("_")}
         self.assertEqual(stubbed, exported)
-        # __init__.py re-exports the whole module, plus the Format alias.
-        self.assertEqual(set(anydoc.__all__), exported | {"Format"})
+        # __init__.py re-exports the whole module, plus what it adds itself.
+        added = {"Format", "HostedError", "Ocr", "ParseMode"}
+        self.assertEqual(set(anydoc.__all__), exported | added)
 
 
 if __name__ == "__main__":
