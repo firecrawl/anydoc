@@ -265,6 +265,14 @@ fn marker_for_nfc(nfc: u8) -> Option<MarkerKind> {
         3 => Some(MarkerKind::UpperAlpha),
         4 => Some(MarkerKind::LowerAlpha),
         23 => Some(MarkerKind::Bullet),
+        // Fork (sznb): CJK counting codes ([MS-OSHARED] MSONFC) render
+        // 一、二、三 / 壹、贰、叁 instead of degrading to 1、2、3 — WPS-era
+        // government documents use them heavily (0x27 chineseCountingThousand
+        // verified in the wild on real .wps files).
+        0x0A | 0x0B | 0x11 | 0x21 | 0x23 | 0x24 | 0x25 | 0x27 => {
+            Some(MarkerKind::ChineseCounting)
+        }
+        0x10 | 0x22 | 0x26 => Some(MarkerKind::ChineseLegal),
         0xFF => None,
         _ => Some(MarkerKind::Decimal),
     }

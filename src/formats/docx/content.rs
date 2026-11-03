@@ -225,7 +225,16 @@ fn emit_paragraph(kind: ParaKind, pieces: Vec<Piece>, blocks: &mut Vec<Block>, r
         }
         ParaKind::Plain => {
             runs.flush(blocks);
-            blocks.extend(pieces_into_blocks(pieces));
+            let mut out = pieces_into_blocks(pieces);
+            // Fork (sznb): a visually empty paragraph still emits an empty
+            // block — the source uses blank paragraphs as vertical spacing
+            // and the original pipeline renders each as a blank line;
+            // dropping them here lost those line breaks (the renderer folds
+            // consecutive empties and trims trailing ones).
+            if out.is_empty() {
+                out.push(Block::Paragraph(Vec::new()));
+            }
+            blocks.extend(out);
         }
     }
 }
@@ -585,6 +594,21 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
         // object's identity and payload must win over its preview.
         if let Some(ole) = elem.first_descendant(ns::O_VML, "OLEObject") {
             let prog_id = ole.attr(ns::O_VML, "ProgID").unwrap_or("object").to_string();
+            // Fork (sznb): an embedded excel.sheet.8 workbook carries its
+            // chart's data as a BIFF8 stream — extract the worksheets as
+            // tables instead of an "Embedded object" marker line (the data
+            // is the whole point of the chart in these documents).
+            if prog_id.to_ascii_lowercase().starts_with("excel.")
+                && let Some(rel_id) = ole.attr_qualified(ns::R, "id")
+                && let Some((_, bytes)) = self.ctx.rel_part(rel_id)?
+                && let Some(tables) = super::ole::workbook_tables(&bytes)
+            {
+                let blocks: Vec<Block> = tables.into_iter().map(Block::Table).collect();
+                if !blocks.is_empty() {
+                    self.push_blocks(blocks);
+                    return Ok(());
+                }
+            }
             let alt = if descr.trim().is_empty() {
                 format!("Embedded object: {prog_id}")
             } else {

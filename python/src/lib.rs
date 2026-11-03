@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 mod document;
 
 create_exception!(
-    anydoc,
+    anydoc_sznb,
     ConvertError,
     PyException,
     "A complete conversion was impossible. Catch this to handle every kind of \
@@ -18,14 +18,14 @@ create_exception!(
 );
 
 create_exception!(
-    anydoc,
+    anydoc_sznb,
     UnsupportedError,
     ConvertError,
     "The format is unknown, or cannot be converted at all."
 );
 
 create_exception!(
-    anydoc,
+    anydoc_sznb,
     NeedsOcrError,
     ConvertError,
     "Pages of a PDF are scanned or image-only and need OCR, which anydoc does \
@@ -34,7 +34,7 @@ create_exception!(
 );
 
 create_exception!(
-    anydoc,
+    anydoc_sznb,
     MalformedError,
     ConvertError,
     "The document is structurally unusable: no meaningful content could be \
@@ -43,14 +43,14 @@ create_exception!(
 );
 
 create_exception!(
-    anydoc,
+    anydoc_sznb,
     EncryptedError,
     ConvertError,
     "The document is encrypted or password-protected."
 );
 
 create_exception!(
-    anydoc,
+    anydoc_sznb,
     ResourceLimitError,
     ConvertError,
     "A fixed safety limit was crossed: decompression, nesting depth, node \
@@ -58,7 +58,7 @@ create_exception!(
 );
 
 create_exception!(
-    anydoc,
+    anydoc_sznb,
     MissingPartError,
     ConvertError,
     "A part required for any meaningful output is absent. `part` names it."
@@ -171,10 +171,26 @@ fn to_markdown(py: Python<'_>, path: PathBuf) -> PyResult<String> {
 /// detected from the content, which signature-less formats (CSV) have to name
 /// explicitly.
 #[pyfunction]
-#[pyo3(signature = (data, format=None))]
-fn to_markdown_bytes(py: Python<'_>, data: Vec<u8>, format: Option<&str>) -> PyResult<String> {
+#[pyo3(signature = (data, format=None, *, html_tables=true))]
+fn to_markdown_bytes(
+    py: Python<'_>,
+    data: Vec<u8>,
+    format: Option<&str>,
+    html_tables: bool,
+) -> PyResult<String> {
     let format = format.map(parse_format).transpose()?;
-    py.detach(|| anydoc::to_markdown_bytes(&data, format)).map_err(|e| convert_error(py, e))
+    py.detach(|| anydoc::to_markdown_bytes_opts(&data, format, html_tables))
+        .map_err(|e| convert_error(py, e))
+}
+
+/// Fork (sznb): convert an in-memory document to plain text (no Markdown
+/// syntax; tables render as tab-joined rows). Format handling as for
+/// `to_markdown_bytes`; PDF has no document-model form and is unsupported.
+#[pyfunction]
+#[pyo3(signature = (data, format=None))]
+fn to_text_bytes(py: Python<'_>, data: Vec<u8>, format: Option<&str>) -> PyResult<String> {
+    let format = format.map(parse_format).transpose()?;
+    py.detach(|| anydoc::to_text_bytes(&data, format)).map_err(|e| convert_error(py, e))
 }
 
 /// Parse an in-memory document into the document model, which also carries
@@ -203,6 +219,7 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(format_from_path, m)?)?;
     m.add_function(wrap_pyfunction!(to_markdown, m)?)?;
     m.add_function(wrap_pyfunction!(to_markdown_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(to_text_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(to_document, m)?)?;
     m.add_class::<document::Asset>()?;
     m.add_class::<document::Block>()?;

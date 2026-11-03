@@ -189,6 +189,14 @@ fn parse_level(lvl: &Element) -> LevelDef {
         "upperLetter" => Some(MarkerKind::UpperAlpha),
         "lowerRoman" => Some(MarkerKind::LowerRoman),
         "upperRoman" => Some(MarkerKind::UpperRoman),
+        // Fork (sznb): CJK counting families render 一、二、三 / 壹、贰、叁
+        // instead of degrading to 1、2、3.
+        "chineseCounting" | "chineseCountingThousand" | "ideographDigital"
+        | "japaneseCounting" | "japaneseDigitalTenThousand" | "taiwaneseCounting"
+        | "taiwaneseCountingThousand" | "taiwaneseDigital" => Some(MarkerKind::ChineseCounting),
+        "chineseLegalSimplified" | "ideographLegalTraditional" | "japaneseLegal" => {
+            Some(MarkerKind::ChineseLegal)
+        }
         _ => Some(MarkerKind::Decimal),
     };
     let start = lvl

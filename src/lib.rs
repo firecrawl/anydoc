@@ -16,7 +16,8 @@ mod shared;
 
 pub use error::ConvertError;
 
-use render::markdown::document_to_markdown;
+use render::markdown::document_to_markdown_opts;
+use render::text::document_to_text;
 
 use std::path::Path;
 
@@ -117,13 +118,42 @@ pub fn to_markdown_bytes(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
 ) -> Result<String, ConvertError> {
+    to_markdown_bytes_opts(bytes, format, true)
+}
+
+/// Fork (sznb): like [`to_markdown_bytes`], with the table form selected by
+/// `html_tables` — `true` renders HTML `<table>` carrying merged-cell spans,
+/// `false` renders GFM pipe tables.
+pub fn to_markdown_bytes_opts(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+    html_tables: bool,
+) -> Result<String, ConvertError> {
     let format = resolve_format(bytes, format.into())?;
     // PDFs convert to Markdown directly (pdf-inspector) without passing
-    // through the document model.
+    // through the document model; the table form does not apply.
     if format == Format::Pdf {
         return formats::pdf::to_markdown(bytes);
     }
-    Ok(document_to_markdown(&to_document(bytes, format)?))
+    Ok(document_to_markdown_opts(&to_document(bytes, format)?, html_tables))
+}
+
+/// Fork (sznb): convert an in-memory document to plain text (no Markdown
+/// syntax; tables render as tab-joined rows carrying merged content once).
+///
+/// Unsupported for [`Format::Pdf`]: PDF conversion produces Markdown
+/// directly and has no document-model form; use [`to_markdown_bytes`].
+pub fn to_text_bytes(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+) -> Result<String, ConvertError> {
+    let format = resolve_format(bytes, format.into())?;
+    if format == Format::Pdf {
+        return Err(ConvertError::Unsupported(
+            "pdf has no document-model form; use to_markdown_bytes".into(),
+        ));
+    }
+    Ok(document_to_text(&to_document(bytes, format)?))
 }
 
 /// Parse an in-memory document into the document model. Pass a [`Format`] to

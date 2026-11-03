@@ -10,7 +10,7 @@ use pyo3::types::{PyBytes, PyList};
 
 use anydoc::model;
 
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct Document {
     /// list[Block]
     blocks: Py<PyList>,
@@ -21,7 +21,7 @@ pub struct Document {
     assets: Py<PyList>,
 }
 
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct Block {
     /// heading, paragraph, list, table, block_quote, code_block, rule, or
     /// math.
@@ -86,7 +86,7 @@ fn block(py: Python<'_>, block: model::Block) -> PyResult<Block> {
     })
 }
 
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct Inline {
     /// text, link, image, anchor (a zero-width marker for an internal link
     /// target at this position), note_ref, line_break, or math.
@@ -156,7 +156,7 @@ fn inline(py: Python<'_>, inline: model::Inline) -> PyResult<Inline> {
 }
 
 /// Fully resolved character style.
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct Style {
     bold: bool,
     italic: bool,
@@ -170,7 +170,7 @@ impl From<model::Style> for Style {
     }
 }
 
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct LinkTarget {
     /// external (absolute URL with a scheme), relative (scheme-less relative
     /// reference, preserved as written), or anchor (internal target: a
@@ -191,7 +191,7 @@ impl From<model::LinkTarget> for LinkTarget {
     }
 }
 
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct ImageSource {
     /// external (absolute URL with a scheme), asset (embedded image, carried
     /// in `Document.assets`), or unavailable (no usable source: the image's
@@ -220,7 +220,7 @@ impl From<model::ImageSource> for ImageSource {
     }
 }
 
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct List {
     /// The marker family the list uses in the source document: bullet,
     /// decimal, lower_alpha, upper_alpha, lower_roman, or upper_roman.
@@ -239,12 +239,14 @@ fn list(py: Python<'_>, list: model::List) -> PyResult<List> {
         model::MarkerKind::UpperAlpha => "upper_alpha",
         model::MarkerKind::LowerRoman => "lower_roman",
         model::MarkerKind::UpperRoman => "upper_roman",
+        model::MarkerKind::ChineseCounting => "chinese_counting",
+        model::MarkerKind::ChineseLegal => "chinese_legal",
     };
     let items = list.items.into_iter().map(|item| list_item(py, item));
     Ok(List { marker, start: list.start, items: pylist(py, items)? })
 }
 
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct ListItem {
     /// list[Block]
     blocks: Py<PyList>,
@@ -261,7 +263,7 @@ fn list_item(py: Python<'_>, item: model::ListItem) -> PyResult<ListItem> {
 /// Canonical table grid: every logical grid position appears exactly once.
 /// Content and spans live on the origin slot, and each position a span covers
 /// holds a `covered` slot pointing back at that origin.
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct Table {
     /// list[list[CellSlot]]
     grid: Py<PyList>,
@@ -287,7 +289,7 @@ fn table(py: Python<'_>, table: model::Table) -> PyResult<Table> {
     })
 }
 
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct CellSlot {
     /// origin or covered.
     kind: &'static str,
@@ -316,7 +318,7 @@ fn cell_slot(py: Python<'_>, slot: model::CellSlot) -> PyResult<CellSlot> {
     })
 }
 
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct Cell {
     /// list[Block]
     blocks: Py<PyList>,
@@ -328,7 +330,7 @@ fn cell(py: Python<'_>, cell: model::Cell) -> PyResult<Cell> {
     Ok(Cell { blocks: blocks(py, cell.blocks)?, col_span: cell.col_span, row_span: cell.row_span })
 }
 
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct Note {
     id: String,
     /// footnote or endnote.
@@ -350,7 +352,7 @@ fn note(py: Python<'_>, note: model::Note) -> PyResult<Note> {
 
 /// An embedded binary asset (image, object payload). Bytes are always
 /// retained, so a document stays self-contained.
-#[pyclass(frozen, get_all, module = "anydoc")]
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
 pub struct Asset {
     /// Index into `Document.assets`, as referenced by an image source.
     id: usize,
