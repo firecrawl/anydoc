@@ -10,7 +10,10 @@
 
 use crate::error::ConvertError;
 use crate::formats::odf::text::{Ctx, parse_container};
-use crate::model::{Block, Cell, GridBuilder, Inline, TableKind};
+use crate::model::{
+    Block, Cell, CellSlot, GridBuilder, Inline, SpreadsheetRange, SpreadsheetSource, Table,
+    TableKind,
+};
 use crate::package::limits;
 use crate::package::xml::{Element, ns};
 use crate::shared::header::resolve_header_rows;
@@ -18,6 +21,14 @@ use crate::shared::text::clean_text;
 use std::collections::HashMap;
 
 pub fn parse_table(elem: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError> {
+    parse_table_with_source(elem, ctx, None)
+}
+
+fn parse_table_with_source(
+    elem: &Element,
+    ctx: &Ctx,
+    source: Option<(u32, &str)>,
+) -> Result<Vec<Block>, ConvertError> {
     let mut state = TableState {
         builder: GridBuilder::new(),
         expansion: 0,
@@ -25,14 +36,27 @@ pub fn parse_table(elem: &Element, ctx: &Ctx) -> Result<Vec<Block>, ConvertError
         pending_rows: 0,
         header_rows: 0,
         rows_emitted: 0,
+        next_source_row: 0,
         checkboxes: read_checkboxes(elem),
     };
+    // A spreadsheet merge is real source extent even when its final rows
+    // contain only covered cells. Ordinary ODF tables keep the historical
+    // trailing-covered-row trim, so enable this only for spreadsheet tables.
+    if source.is_some() {
+        state.builder.keep_covered_tail();
+    }
     walk_rows(elem, ctx, &mut state, true)?;
     let mut table = state.builder.finish(TableKind::Data);
     if table.grid.is_empty() {
         return Ok(Vec::new());
     }
     table.header_rows = resolve_header_rows(&table, state.header_rows);
+    if let Some((sheet_index, sheet_name)) = source
+        && let Some(range) = table_source_range(&table)
+    {
+        table.source =
+            Some(SpreadsheetSource { sheet_index, sheet_name: sheet_name.to_string(), range });
+    }
     Ok(vec![Block::Table(table)])
 }
 
@@ -45,6 +69,8 @@ struct TableState {
     pending_rows: u64,
     header_rows: usize,
     rows_emitted: usize,
+    /// Source row of the next row element, including rows buffered as empty.
+    next_source_row: u64,
     /// The sheet's form checkboxes by control id, as the inlines a
     /// `draw:control` in a cell expands to.
     checkboxes: HashMap<String, Vec<Inline>>,
@@ -217,6 +243,8 @@ fn emit_row(
     state: &mut TableState,
     repeat: u64,
 ) -> Result<(), ConvertError> {
+    let source_row = state.next_source_row;
+    state.next_source_row = state.next_source_row.saturating_add(repeat);
     if row_is_empty(row) {
         state.pending_rows = state.pending_rows.saturating_add(repeat);
         return Ok(());
@@ -243,10 +271,11 @@ fn emit_row(
             state.charge_bytes(bytes.saturating_mul(copies))?;
         }
     }
-    for _ in 0..repeat {
+    for row_offset in 0..repeat {
+        let emitted_source_row = source_row.saturating_add(row_offset);
         state.builder.next_row();
         state.rows_emitted += 1;
-        emit_parsed_cells(&cells, state)?;
+        emit_parsed_cells(&cells, state, emitted_source_row)?;
     }
     Ok(())
 }
@@ -289,31 +318,48 @@ fn parse_row_cells(
     Ok(out)
 }
 
-fn emit_parsed_cells(cells: &[RowCell], state: &mut TableState) -> Result<(), ConvertError> {
+fn emit_parsed_cells(
+    cells: &[RowCell],
+    state: &mut TableState,
+    source_row: u64,
+) -> Result<(), ConvertError> {
     let mut pending_cells: u64 = 0;
+    let mut source_col: u64 = 0;
     for cell in cells {
         match cell {
             RowCell::Covered { repeat } => {
-                flush_gap(state, &mut pending_cells)?;
+                let gap_start = source_col.saturating_sub(pending_cells);
+                flush_gap(state, &mut pending_cells, source_row, gap_start)?;
                 // One explicitly written covered position each; a stray one
                 // (no span accounts for it) becomes an empty cell inside
                 // covered().
                 state.charge(*repeat)?;
                 for _ in 0..*repeat {
-                    if !state.builder.covered() {
+                    let source = source_cell(source_row, source_col)?;
+                    if !state.builder.covered_with(Cell { source: Some(source), ..Cell::default() })
+                    {
                         log::debug!("covered table cell without a spanning origin");
                     }
+                    source_col = source_col.saturating_add(1);
                 }
             }
             RowCell::Cell { repeat, col_span, row_span, blocks, .. } => {
                 if blocks.is_empty() && *col_span == 1 && *row_span == 1 {
                     pending_cells = pending_cells.saturating_add(*repeat);
+                    source_col = source_col.saturating_add(*repeat);
                     continue;
                 }
-                flush_gap(state, &mut pending_cells)?;
+                let gap_start = source_col.saturating_sub(pending_cells);
+                flush_gap(state, &mut pending_cells, source_row, gap_start)?;
                 state.charge(repeat.saturating_mul(*col_span as u64))?;
                 for _ in 0..*repeat {
-                    state.builder.place(Cell::spanning(blocks.clone(), *col_span, *row_span))?;
+                    let end_row = source_row.saturating_add(u64::from(*row_span).saturating_sub(1));
+                    let end_col = source_col.saturating_add(u64::from(*col_span).saturating_sub(1));
+                    let source = source_range(source_row, source_col, end_row, end_col)?;
+                    let mut origin = Cell::spanning(blocks.clone(), *col_span, *row_span);
+                    origin.source = Some(source);
+                    state.builder.place(origin)?;
+                    source_col = source_col.saturating_add(u64::from(*col_span));
                 }
             }
         }
@@ -323,16 +369,65 @@ fn emit_parsed_cells(cells: &[RowCell], state: &mut TableState) -> Result<(), Co
 
 /// Materialize a buffered empty-cell run in full so the next cell lands on
 /// its source column. Trailing runs are never flushed and stay elided.
-fn flush_gap(state: &mut TableState, pending: &mut u64) -> Result<(), ConvertError> {
+fn flush_gap(
+    state: &mut TableState,
+    pending: &mut u64,
+    source_row: u64,
+    source_col: u64,
+) -> Result<(), ConvertError> {
     if *pending == 0 {
         return Ok(());
     }
     state.charge(*pending)?;
-    for _ in 0..*pending {
-        state.builder.place(Cell::default())?;
+    for offset in 0..*pending {
+        let source = source_cell(source_row, source_col.saturating_add(offset))?;
+        state.builder.place(Cell { source: Some(source), ..Cell::default() })?;
     }
     *pending = 0;
     Ok(())
+}
+
+fn source_cell(row: u64, column: u64) -> Result<SpreadsheetRange, ConvertError> {
+    source_range(row, column, row, column)
+}
+
+fn source_range(
+    start_row: u64,
+    start_column: u64,
+    end_row: u64,
+    end_column: u64,
+) -> Result<SpreadsheetRange, ConvertError> {
+    let to_u32 = |value: u64, axis: &str| {
+        u32::try_from(value).map_err(|_| ConvertError::ResourceLimit {
+            limit: "spreadsheet_coordinates",
+            detail: format!("{axis} coordinate {value} exceeds the model range"),
+        })
+    };
+    Ok(SpreadsheetRange::new(
+        to_u32(start_row, "row")?,
+        to_u32(start_column, "column")?,
+        to_u32(end_row, "row")?,
+        to_u32(end_column, "column")?,
+    ))
+}
+
+fn table_source_range(table: &Table) -> Option<SpreadsheetRange> {
+    let mut range: Option<SpreadsheetRange> = None;
+    for row in &table.grid {
+        for slot in row {
+            let CellSlot::Origin(cell) = slot else {
+                continue;
+            };
+            let Some(source) = cell.source else {
+                continue;
+            };
+            match &mut range {
+                Some(found) => found.include(source),
+                None => range = Some(source),
+            }
+        }
+    }
+    range
 }
 
 /// A cell's blocks: its text content, or a typed value-attribute fallback
@@ -463,9 +558,9 @@ pub fn parse_spreadsheet(sheet: &Element, ctx: &Ctx) -> Result<Vec<Block>, Conve
     let tables: Vec<&Element> = sheet.child_elems().filter(|e| e.is(ns::TABLE, "table")).collect();
     let multi_sheet = tables.len() > 1;
     let mut blocks = Vec::new();
-    for table in tables {
+    for (sheet_index, table) in tables.into_iter().enumerate() {
         let name = table.attr(ns::TABLE, "name").unwrap_or("");
-        let content = parse_table(table, ctx)?;
+        let content = parse_table_with_source(table, ctx, Some((sheet_index as u32, name)))?;
         if content.is_empty() {
             continue;
         }

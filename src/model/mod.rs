@@ -10,6 +10,7 @@ mod block;
 mod inline;
 mod link;
 mod list;
+mod source;
 mod style;
 mod table;
 
@@ -18,6 +19,7 @@ pub use block::Block;
 pub use inline::{Inline, checkbox_text, inlines_are_empty, inlines_to_plain_text};
 pub use link::{AnchorId, ImageSource, LinkTarget};
 pub use list::{List, ListItem, MarkerKind};
+pub use source::{SpreadsheetCoordinate, SpreadsheetRange, SpreadsheetSource};
 pub use style::Style;
 pub use table::{Cell, CellSlot, Table, TableKind};
 
