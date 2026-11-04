@@ -92,17 +92,15 @@ fn build_lists(entries: Vec<ListEntry>) -> Vec<Block> {
             if sublists.is_empty() {
                 continue;
             }
-            if current.is_none() {
-                // Sub-level content with no parent item yet: host it in an
-                // anonymous item so nesting is preserved.
-                let key = ListKey { instance: u64::MAX, marker: MarkerKind::Bullet };
-                current = Some((
-                    List { marker: MarkerKind::Bullet, start: 1, items: Vec::new() },
-                    key,
-                    0,
-                ));
-            }
-            let (list, _, _) = current.as_mut().unwrap();
+            // Fork (sznb): sub-level content with no parent item yet (a run
+            // that opens below its shallowest level, e.g. `1.1.` items ahead
+            // of the first `六、`) is hoisted as sibling blocks. Upstream
+            // hosted it in an anonymous bullet item, which invented a `- `
+            // marker and an indent the source never shows.
+            let Some((list, _, _)) = current.as_mut() else {
+                out.extend(sublists);
+                continue;
+            };
             if list.items.is_empty() {
                 list.items.push(ListItem::default());
             }
@@ -192,5 +190,23 @@ mod tests {
         let Block::List(l) = &out[0] else { panic!() };
         assert_eq!(l.items.len(), 2);
         assert!(matches!(l.items[0].blocks.last(), Some(Block::List(sub)) if sub.ordered()));
+    }
+
+    #[test]
+    fn orphan_sub_level_is_hoisted_without_an_anonymous_bullet() {
+        // Fork (sznb): deeper entries ahead of the first shallow entry become
+        // sibling lists, not children of an invented `- ` item.
+        let out = lists(vec![
+            entry(1, 1, MarkerKind::Decimal, 1, "deep1"),
+            entry(1, 1, MarkerKind::Decimal, 2, "deep2"),
+            entry(0, 2, MarkerKind::Decimal, 6, "shallow"),
+        ]);
+        assert_eq!(out.len(), 2);
+        let Block::List(first) = &out[0] else { panic!() };
+        assert!(first.ordered());
+        assert_eq!((first.start, first.items.len()), (1, 2));
+        assert!(!first.items.iter().any(|i| matches!(i.blocks.first(), Some(Block::List(_)))));
+        let Block::List(second) = &out[1] else { panic!() };
+        assert_eq!(second.start, 6);
     }
 }

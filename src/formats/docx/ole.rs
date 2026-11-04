@@ -379,7 +379,7 @@ impl SheetBuilder {
             }
             grid.push(row);
         }
-        any.then(|| Table { grid, header_rows: 0, kind: TableKind::Data })
+        any.then(|| Table { grid, header_rows: 0, kind: TableKind::Data, keep_empty_rows: false })
     }
 }
 

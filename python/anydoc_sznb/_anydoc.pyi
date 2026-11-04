@@ -67,22 +67,92 @@ def to_markdown(path: str | os.PathLike[str]) -> str:
     (CSV) and unrecognizable containers."""
 
 def to_markdown_bytes(
-    data: bytes | bytearray, format: Format | None = None, *, html_tables: bool = True
+    data: bytes | bytearray,
+    format: Format | None = None,
+    *,
+    html_tables: bool = True,
+    dedup_cells: bool = True,
+    include_toc: bool = True,
 ) -> str:
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
     name explicitly.
 
     Fork (sznb): `html_tables` selects the table form — HTML `<table>` with
-    merged-cell colspan/rowspan (default) or GFM pipe tables."""
+    merged-cell colspan/rowspan (default) or GFM pipe tables. `dedup_cells`
+    shows merged content once on the origin cell (default) or repeats it in
+    every covered position (spans collapse). `include_toc=False` drops the
+    Word table of contents (`Table of Contents` SDTs and bare `TOC` field
+    results, with the 目录 title before them; docx / doc / wps only)."""
 
-def to_text_bytes(data: bytes | bytearray, format: Format | None = None) -> str:
+def to_text_bytes(
+    data: bytes | bytearray,
+    format: Format | None = None,
+    *,
+    dedup_cells: bool = True,
+    include_toc: bool = True,
+) -> str:
     """Convert an in-memory document to plain text (no Markdown syntax;
-    tables render as tab-joined rows carrying merged content once). Format
-    handling as for `to_markdown_bytes`.
+    tables render as tab-joined rows carrying merged content once, or in
+    every covered cell with `dedup_cells=False`). `include_toc` as for
+    `to_markdown_bytes`. Format handling as for `to_markdown_bytes`.
 
     Unsupported for `pdf`: PDF conversion produces Markdown directly and has
     no document-model form."""
+
+def to_markdown_with_images(
+    data: bytes | bytearray,
+    format: Format | None = None,
+    *,
+    html_tables: bool = True,
+    dedup_cells: bool = True,
+    include_toc: bool = True,
+    min_width: int = 50,
+    min_height: int = 50,
+    placeholder: str = "[IMG::{name}]",
+    name_prefix: str = "img_",
+) -> ImagesResult:
+    """Fork (sznb): `to_markdown_bytes` plus image extraction. Embedded
+    images become placeholder tokens in place (`{name}` = the file name);
+    images under `min_width` x `min_height` pixels are dropped (unknown size
+    is kept); names are `{name_prefix}{sha256[:16]}{ext}`, content-addressed
+    so duplicates collapse. PDF yields its Markdown and no images."""
+
+def to_text_with_images(
+    data: bytes | bytearray,
+    format: Format | None = None,
+    *,
+    dedup_cells: bool = True,
+    include_toc: bool = True,
+    min_width: int = 50,
+    min_height: int = 50,
+    placeholder: str = "[IMG::{name}]",
+    name_prefix: str = "img_",
+) -> ImagesResult:
+    """Fork (sznb): `to_text_bytes` plus image extraction (as for
+    `to_markdown_with_images`). Unsupported for `pdf`."""
+
+@final
+class ExtractedImage:
+    name: str
+    """Content-addressed file name, e.g. `img_3f2a9c0d1b2e4f56.png`."""
+    placeholder: str
+    """The token standing in for the image in the rendered text."""
+    media_type: str
+    width: int | None
+    height: int | None
+    data: bytes
+    occurrences: int
+    """How many places in the document reference it."""
+    origin_part: str
+
+@final
+class ImagesResult:
+    text: str
+    images: list[ExtractedImage]
+    """In order of first appearance."""
+    skipped: int
+    """Image references dropped for being under the size threshold."""
 
 def to_document(data: bytes | bytearray, format: Format | None = None) -> Document:
     """Parse an in-memory document into the document model, which also
@@ -161,12 +231,12 @@ class LinkTarget:
 
 @final
 class ImageSource:
-    kind: Literal["external", "asset", "unavailable"]
+    kind: Literal["external", "asset", "unavailable", "placeholder"]
     """external: absolute URL with a scheme. asset: embedded image, carried
     in `Document.assets`. unavailable: no usable source, only the alt text
-    remains."""
+    remains. placeholder (fork): extracted, `url` holds the token."""
     url: str | None
-    """external."""
+    """external; placeholder: the token."""
     asset_id: int | None
     """asset: index into `Document.assets`."""
 

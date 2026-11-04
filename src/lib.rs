@@ -13,11 +13,13 @@ mod formats;
 mod package;
 mod render;
 mod shared;
+mod transform;
 
 pub use error::ConvertError;
+pub use transform::images::{ExtractedImage, ImageOptions, ImageReport, extract_images};
 
-use render::markdown::document_to_markdown_opts;
-use render::text::document_to_text;
+use render::markdown::document_to_markdown_with;
+use render::text::document_to_text_with;
 
 use std::path::Path;
 
@@ -135,13 +137,45 @@ pub fn to_markdown_bytes_opts(
     format: impl Into<Option<Format>>,
     html_tables: bool,
 ) -> Result<String, ConvertError> {
+    to_markdown_bytes_with(bytes, format, ConvertOptions { html_tables, ..Default::default() })
+}
+
+/// Fork (sznb): output-shaping options — the conversion service's
+/// `table_as_html` / `dedup_table_cells` / `content` parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConvertOptions {
+    /// Markdown tables as HTML `<table>` carrying merged-cell spans (true)
+    /// or GFM pipe tables (false). Plain text ignores it.
+    pub html_tables: bool,
+    /// Merged cells show their content once, on the origin (true), or repeat
+    /// it in every position the merge covers (false; spans collapse).
+    pub dedup_cells: bool,
+    /// Keep the table of contents (true) or drop it (false): Word `Table of
+    /// Contents` SDTs and bare `TOC` field results, with the 目录 title just
+    /// before. Only the Word frontends (docx, doc / wps) carry a TOC.
+    pub include_toc: bool,
+}
+
+impl Default for ConvertOptions {
+    fn default() -> Self {
+        ConvertOptions { html_tables: true, dedup_cells: true, include_toc: true }
+    }
+}
+
+/// Fork (sznb): [`to_markdown_bytes`] with every output-shaping option.
+pub fn to_markdown_bytes_with(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+    opts: ConvertOptions,
+) -> Result<String, ConvertError> {
     let format = resolve_format(bytes, format.into())?;
     // PDFs convert to Markdown directly (pdf-inspector) without passing
-    // through the document model; the table form does not apply.
+    // through the document model; the shaping options do not apply.
     if format == Format::Pdf {
         return formats::pdf::to_markdown(bytes);
     }
-    Ok(document_to_markdown_opts(&to_document(bytes, format)?, html_tables))
+    let doc = formats::parse_with(bytes, format, opts.include_toc)?;
+    Ok(document_to_markdown_with(&doc, opts.html_tables, opts.dedup_cells))
 }
 
 /// Fork (sznb): convert an in-memory document to plain text (no Markdown
@@ -153,13 +187,63 @@ pub fn to_text_bytes(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
 ) -> Result<String, ConvertError> {
+    to_text_bytes_with(bytes, format, ConvertOptions::default())
+}
+
+/// Fork (sznb): [`to_text_bytes`] with `dedup_cells` / `include_toc`
+/// (`html_tables` does not apply to plain text).
+pub fn to_text_bytes_with(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+    opts: ConvertOptions,
+) -> Result<String, ConvertError> {
     let format = resolve_format(bytes, format.into())?;
     if format == Format::Pdf {
         return Err(ConvertError::Unsupported(
             "pdf has no document-model form; use to_markdown_bytes".into(),
         ));
     }
-    Ok(document_to_text(&to_document(bytes, format)?))
+    let doc = formats::parse_with(bytes, format, opts.include_toc)?;
+    Ok(document_to_text_with(&doc, opts.dedup_cells))
+}
+
+/// Fork (sznb): [`to_markdown_bytes_with`] plus image extraction — embedded
+/// images become placeholder tokens in the Markdown (small ones are dropped)
+/// and their payloads come back in the [`ImageReport`]; see
+/// [`extract_images`]. PDFs convert without the document model, so they
+/// yield their Markdown and an empty report.
+pub fn to_markdown_with_images(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+    opts: ConvertOptions,
+    images: &ImageOptions,
+) -> Result<(String, ImageReport), ConvertError> {
+    let format = resolve_format(bytes, format.into())?;
+    if format == Format::Pdf {
+        return Ok((formats::pdf::to_markdown(bytes)?, ImageReport::default()));
+    }
+    let mut doc = formats::parse_with(bytes, format, opts.include_toc)?;
+    let report = extract_images(&mut doc, images);
+    Ok((document_to_markdown_with(&doc, opts.html_tables, opts.dedup_cells), report))
+}
+
+/// Fork (sznb): [`to_text_bytes_with`] plus image extraction (as for
+/// [`to_markdown_with_images`]). Unsupported for [`Format::Pdf`].
+pub fn to_text_with_images(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+    opts: ConvertOptions,
+    images: &ImageOptions,
+) -> Result<(String, ImageReport), ConvertError> {
+    let format = resolve_format(bytes, format.into())?;
+    if format == Format::Pdf {
+        return Err(ConvertError::Unsupported(
+            "pdf has no document-model form; use to_markdown_bytes".into(),
+        ));
+    }
+    let mut doc = formats::parse_with(bytes, format, opts.include_toc)?;
+    let report = extract_images(&mut doc, images);
+    Ok((document_to_text_with(&doc, opts.dedup_cells), report))
 }
 
 /// Parse an in-memory document into the document model. Pass a [`Format`] to

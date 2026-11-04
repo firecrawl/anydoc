@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyList};
 
 mod document;
 
@@ -170,27 +171,161 @@ fn to_markdown(py: Python<'_>, path: PathBuf) -> PyResult<String> {
 /// Convert an in-memory document to Markdown. Without a format, it is
 /// detected from the content, which signature-less formats (CSV) have to name
 /// explicitly.
+///
+/// Fork (sznb) keywords: `html_tables` (HTML `<table>` with spans vs GFM),
+/// `dedup_cells` (merged content once vs repeated in every covered cell),
+/// `include_toc` (keep vs drop the Word table of contents).
 #[pyfunction]
-#[pyo3(signature = (data, format=None, *, html_tables=true))]
+#[pyo3(signature = (data, format=None, *, html_tables=true, dedup_cells=true, include_toc=true))]
 fn to_markdown_bytes(
     py: Python<'_>,
     data: Vec<u8>,
     format: Option<&str>,
     html_tables: bool,
+    dedup_cells: bool,
+    include_toc: bool,
 ) -> PyResult<String> {
     let format = format.map(parse_format).transpose()?;
-    py.detach(|| anydoc::to_markdown_bytes_opts(&data, format, html_tables))
+    let opts = anydoc::ConvertOptions { html_tables, dedup_cells, include_toc };
+    py.detach(|| anydoc::to_markdown_bytes_with(&data, format, opts))
         .map_err(|e| convert_error(py, e))
 }
 
 /// Fork (sznb): convert an in-memory document to plain text (no Markdown
 /// syntax; tables render as tab-joined rows). Format handling as for
 /// `to_markdown_bytes`; PDF has no document-model form and is unsupported.
+/// Fork (sznb) keywords: `dedup_cells`, `include_toc` (as for
+/// `to_markdown_bytes`).
 #[pyfunction]
-#[pyo3(signature = (data, format=None))]
-fn to_text_bytes(py: Python<'_>, data: Vec<u8>, format: Option<&str>) -> PyResult<String> {
+#[pyo3(signature = (data, format=None, *, dedup_cells=true, include_toc=true))]
+fn to_text_bytes(
+    py: Python<'_>,
+    data: Vec<u8>,
+    format: Option<&str>,
+    dedup_cells: bool,
+    include_toc: bool,
+) -> PyResult<String> {
     let format = format.map(parse_format).transpose()?;
-    py.detach(|| anydoc::to_text_bytes(&data, format)).map_err(|e| convert_error(py, e))
+    let opts = anydoc::ConvertOptions { dedup_cells, include_toc, ..Default::default() };
+    py.detach(|| anydoc::to_text_bytes_with(&data, format, opts)).map_err(|e| convert_error(py, e))
+}
+
+/// Fork (sznb): one image extracted by `to_markdown_with_images` /
+/// `to_text_with_images`.
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
+pub struct ExtractedImage {
+    /// Content-addressed file name, e.g. `img_3f2a9c0d1b2e4f56.png`.
+    name: String,
+    /// The token standing in for the image in the rendered text.
+    placeholder: String,
+    /// MIME type (sniffed from the bytes when recognizable).
+    media_type: String,
+    /// Pixel width, `None` when the header gives none.
+    width: Option<u32>,
+    /// Pixel height, `None` when the header gives none.
+    height: Option<u32>,
+    /// The payload, exactly as embedded.
+    data: Py<PyBytes>,
+    /// How many places in the document reference it.
+    occurrences: usize,
+    /// Package part or stream the first copy came from.
+    origin_part: String,
+}
+
+/// Fork (sznb): rendered text plus the images its placeholders name.
+#[pyclass(frozen, get_all, module = "anydoc_sznb")]
+pub struct ImagesResult {
+    /// The Markdown or plain text, placeholders in place.
+    text: String,
+    /// Extracted images, in order of first appearance.
+    images: Py<PyList>,
+    /// Image references dropped for being under the size threshold.
+    skipped: usize,
+}
+
+fn images_result(
+    py: Python<'_>,
+    (text, report): (String, anydoc::ImageReport),
+) -> PyResult<ImagesResult> {
+    let images = report
+        .images
+        .into_iter()
+        .map(|i| {
+            Py::new(
+                py,
+                ExtractedImage {
+                    data: PyBytes::new(py, &i.bytes).unbind(),
+                    name: i.name,
+                    placeholder: i.placeholder,
+                    media_type: i.media_type,
+                    width: i.width,
+                    height: i.height,
+                    occurrences: i.occurrences,
+                    origin_part: i.origin_part,
+                },
+            )
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    let images = PyList::new(py, images)?.unbind();
+    Ok(ImagesResult { text, images, skipped: report.skipped })
+}
+
+/// Fork (sznb): `to_markdown_bytes` plus image extraction. Embedded images
+/// become placeholder tokens (`placeholder`, `{name}` = file name) in place;
+/// images under `min_width` x `min_height` pixels are dropped (size unknown
+/// = kept); names are `{name_prefix}{sha256[:16]}{ext}` (content-addressed,
+/// so duplicates collapse). PDF yields its Markdown and no images.
+#[pyfunction]
+#[pyo3(signature = (data, format=None, *, html_tables=true, dedup_cells=true, include_toc=true,
+    min_width=50, min_height=50, placeholder="[IMG::{name}]".to_string(),
+    name_prefix="img_".to_string()))]
+#[allow(clippy::too_many_arguments)]
+fn to_markdown_with_images(
+    py: Python<'_>,
+    data: Vec<u8>,
+    format: Option<&str>,
+    html_tables: bool,
+    dedup_cells: bool,
+    include_toc: bool,
+    min_width: u32,
+    min_height: u32,
+    placeholder: String,
+    name_prefix: String,
+) -> PyResult<ImagesResult> {
+    let format = format.map(parse_format).transpose()?;
+    let opts = anydoc::ConvertOptions { html_tables, dedup_cells, include_toc };
+    let images = anydoc::ImageOptions { min_width, min_height, placeholder, name_prefix };
+    let out = py
+        .detach(|| anydoc::to_markdown_with_images(&data, format, opts, &images))
+        .map_err(|e| convert_error(py, e))?;
+    images_result(py, out)
+}
+
+/// Fork (sznb): `to_text_bytes` plus image extraction (as for
+/// `to_markdown_with_images`). Unsupported for `pdf`.
+#[pyfunction]
+#[pyo3(signature = (data, format=None, *, dedup_cells=true, include_toc=true,
+    min_width=50, min_height=50, placeholder="[IMG::{name}]".to_string(),
+    name_prefix="img_".to_string()))]
+#[allow(clippy::too_many_arguments)]
+fn to_text_with_images(
+    py: Python<'_>,
+    data: Vec<u8>,
+    format: Option<&str>,
+    dedup_cells: bool,
+    include_toc: bool,
+    min_width: u32,
+    min_height: u32,
+    placeholder: String,
+    name_prefix: String,
+) -> PyResult<ImagesResult> {
+    let format = format.map(parse_format).transpose()?;
+    let opts = anydoc::ConvertOptions { dedup_cells, include_toc, ..Default::default() };
+    let images = anydoc::ImageOptions { min_width, min_height, placeholder, name_prefix };
+    let out = py
+        .detach(|| anydoc::to_text_with_images(&data, format, opts, &images))
+        .map_err(|e| convert_error(py, e))?;
+    images_result(py, out)
 }
 
 /// Parse an in-memory document into the document model, which also carries
@@ -221,6 +356,10 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_markdown_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(to_text_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(to_document, m)?)?;
+    m.add_function(wrap_pyfunction!(to_markdown_with_images, m)?)?;
+    m.add_function(wrap_pyfunction!(to_text_with_images, m)?)?;
+    m.add_class::<ExtractedImage>()?;
+    m.add_class::<ImagesResult>()?;
     m.add_class::<document::Asset>()?;
     m.add_class::<document::Block>()?;
     m.add_class::<document::Cell>()?;

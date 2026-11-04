@@ -196,9 +196,10 @@ pub struct ImageSource {
     /// external (absolute URL with a scheme), asset (embedded image, carried
     /// in `Document.assets`), or unavailable (no usable source: the image's
     /// part is missing or unreadable and it has no URL; only the alt text
-    /// remains).
+    /// remains), or placeholder (fork: extracted by `to_*_with_images`,
+    /// `url` holds the literal token).
     kind: &'static str,
-    /// external.
+    /// external; placeholder: the token.
     url: Option<String>,
     /// asset: index into `Document.assets`.
     asset_id: Option<usize>,
@@ -215,6 +216,10 @@ impl From<model::ImageSource> for ImageSource {
             }
             model::ImageSource::Unavailable => {
                 ImageSource { kind: "unavailable", url: None, asset_id: None }
+            }
+            // Fork (sznb): the placeholder token travels in `url`.
+            model::ImageSource::Placeholder(token) => {
+                ImageSource { kind: "placeholder", url: Some(token), asset_id: None }
             }
         }
     }

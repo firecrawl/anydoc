@@ -64,6 +64,7 @@ fn collect_plain_text(inlines: &[Inline], out: &mut String) {
         match inline {
             Inline::Text { text, .. } => out.push_str(text),
             Inline::Link { content, .. } => collect_plain_text(content, out),
+            Inline::Image { source: ImageSource::Placeholder(token), .. } => out.push_str(token),
             Inline::Image { alt, .. } => out.push_str(alt),
             Inline::Math(tex) => out.push_str(tex),
             Inline::Checkbox(checked) => out.push_str(checkbox_text(*checked)),

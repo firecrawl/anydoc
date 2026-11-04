@@ -13,6 +13,7 @@ pub mod fields;
 pub mod grid;
 pub mod header;
 pub mod html;
+pub mod image_meta;
 pub mod list;
 pub mod math;
 pub mod mc;

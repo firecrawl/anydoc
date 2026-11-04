@@ -17,17 +17,24 @@ use crate::error::ConvertError;
 use crate::model::Document;
 
 pub fn parse(bytes: &[u8], format: Format) -> Result<Document, ConvertError> {
+    parse_with(bytes, format, true)
+}
+
+/// Fork (sznb): parse with the table of contents kept (`include_toc = true`,
+/// the historical behaviour) or dropped. Only the Word frontends (docx, doc /
+/// wps) carry a TOC construct; the flag is inert for every other format.
+pub fn parse_with(bytes: &[u8], format: Format, include_toc: bool) -> Result<Document, ConvertError> {
     match format {
         Format::Excel => sheet::parse(bytes),
         Format::Csv => csv::parse(bytes),
-        Format::Docx => docx::parse(bytes),
+        Format::Docx => docx::parse_with(bytes, include_toc),
         Format::Odt | Format::Ods | Format::Odp => odf::parse(bytes),
         Format::Pptx => pptx::parse(bytes),
         Format::Epub => epub::parse(bytes),
         Format::Rtf => rtf::parse(bytes),
         // RTF files wearing a .doc extension are common in the wild.
         Format::Doc if bytes.starts_with(b"{\\rtf") => rtf::parse(bytes),
-        Format::Doc => doc::parse(bytes),
+        Format::Doc => doc::parse_with(bytes, include_toc),
         Format::Ppt => ppt::parse(bytes),
         // pdf-inspector produces Markdown directly; there is no document
         // model for PDFs. `to_markdown_bytes` routes them to `pdf`.

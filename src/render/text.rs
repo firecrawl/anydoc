@@ -9,8 +9,25 @@ use crate::render::markdown::NoteNumbers;
 use crate::render::markdown::inline::inlines_to_plain;
 use crate::render::markdown::number_notes;
 
-pub fn document_to_text(doc: &Document) -> String {
-    let nums = number_notes(doc);
+/// Fork (sznb): text render context — note numbers plus the merged-cell
+/// handling (`dedup`: content once on the origin vs repeated in every
+/// covered position). Derefs to the note numbers the inline helpers take.
+pub(crate) struct TextCtx {
+    nums: NoteNumbers,
+    dedup: bool,
+}
+
+impl std::ops::Deref for TextCtx {
+    type Target = NoteNumbers;
+    fn deref(&self) -> &NoteNumbers {
+        &self.nums
+    }
+}
+
+/// Fork (sznb): plain text with `dedup_table_cells` selected (`dedup`: merged
+/// content once on the origin, or repeated in every covered position).
+pub fn document_to_text_with(doc: &Document, dedup: bool) -> String {
+    let nums = TextCtx { nums: number_notes(doc), dedup };
     let mut parts: Vec<String> = Vec::new();
     for block in &doc.blocks {
         if let Some(s) = render_block(block, &nums) {
@@ -39,12 +56,12 @@ pub fn document_to_text(doc: &Document) -> String {
     out
 }
 
-fn render_blocks(blocks: &[Block], nums: &NoteNumbers) -> String {
+fn render_blocks(blocks: &[Block], nums: &TextCtx) -> String {
     let parts: Vec<String> = blocks.iter().filter_map(|b| render_block(b, nums)).collect();
     parts.join("\n\n")
 }
 
-fn render_block(block: &Block, nums: &NoteNumbers) -> Option<String> {
+fn render_block(block: &Block, nums: &TextCtx) -> Option<String> {
     match block {
         Block::Heading { content, .. } | Block::Paragraph(content) => {
             let mut s = String::new();
@@ -68,7 +85,7 @@ fn render_block(block: &Block, nums: &NoteNumbers) -> Option<String> {
     }
 }
 
-fn render_list(list: &List, nums: &NoteNumbers) -> Option<String> {
+fn render_list(list: &List, nums: &TextCtx) -> Option<String> {
     if list.items.is_empty() {
         return None;
     }
@@ -88,9 +105,14 @@ fn render_list(list: &List, nums: &NoteNumbers) -> Option<String> {
     if lines.is_empty() { None } else { Some(lines.join("\n")) }
 }
 
-fn render_table_text(table: &crate::model::Table, nums: &NoteNumbers) -> Option<String> {
+fn render_table_text(table: &crate::model::Table, nums: &TextCtx) -> Option<String> {
     if table.grid.is_empty() {
         return None;
+    }
+    // Fork (sznb): dedup_table_cells=false repeats merged content into every
+    // covered position.
+    if !nums.dedup && table.has_spans() {
+        return render_table_text(&table.expanded(), nums);
     }
     let mut rows: Vec<String> = Vec::new();
     let mut nested: Vec<String> = Vec::new();
@@ -128,9 +150,9 @@ fn render_table_text(table: &crate::model::Table, nums: &NoteNumbers) -> Option<
 
 /// Cell content flattened to plain parts (one per paragraph-ish block);
 /// nested tables render into `nested` for independent appending.
-fn cell_plain_parts(cell: &Cell, nums: &NoteNumbers, nested: &mut Vec<String>) -> Vec<String> {
+fn cell_plain_parts(cell: &Cell, nums: &TextCtx, nested: &mut Vec<String>) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
-    fn walk(blocks: &[Block], nums: &NoteNumbers, parts: &mut Vec<String>, nested: &mut Vec<String>) {
+    fn walk(blocks: &[Block], nums: &TextCtx, parts: &mut Vec<String>, nested: &mut Vec<String>) {
         for block in blocks {
             match block {
                 Block::Heading { content, .. } | Block::Paragraph(content) => {

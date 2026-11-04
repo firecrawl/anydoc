@@ -18,7 +18,7 @@ use crate::shared::assets::AssetSink;
 use crate::shared::binary::{get_u16, get_u32, read_ole_stream, utf16le_units};
 use crate::shared::blockstyle::StyledRun;
 use crate::shared::delta::rebase_emphasis;
-use crate::shared::fields::{FieldFrame, field_result};
+use crate::shared::fields::{FieldFrame, TocTracker, drop_toc_title, field_result};
 use crate::shared::grid::{CellProp, GridRow, build_edge_table};
 use crate::shared::list::MarkerKind;
 use crate::shared::list::{ListEntry, ListKey, flush_list};
@@ -28,7 +28,14 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use stsh::Stylesheet;
 
+#[cfg(test)]
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
+    parse_with(bytes, true)
+}
+
+/// Fork (sznb): `include_toc = false` drops the result paragraphs of a `TOC`
+/// field (and the 目录 / Contents title right before it).
+pub fn parse_with(bytes: &[u8], include_toc: bool) -> Result<Document, ConvertError> {
     let cursor = Cursor::new(bytes);
     let mut ole = cfb::CompoundFile::open(cursor)
         .map_err(|e| ConvertError::malformed(format!("not an OLE2 compound file: {e}")))?;
@@ -113,6 +120,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         counters: std::cell::RefCell::new(Counters::default()),
         data,
         assets: std::cell::RefCell::new(AssetSink::new()),
+        skip_toc: !include_toc,
     };
     let blocks = assembler.build_blocks(0, main_end)?;
     let mut notes = Vec::new();
@@ -599,6 +607,8 @@ struct Assembler {
     /// The Data stream, for `sprmCPicLocation` picture payloads.
     data: Vec<u8>,
     assets: std::cell::RefCell<AssetSink>,
+    /// Fork (sznb): drop the table of contents (the service's `content=false`).
+    skip_toc: bool,
 }
 
 /// A paragraph's resolved properties: the style chain's contribution merged
@@ -700,6 +710,7 @@ impl Assembler {
         let mut row: Vec<Vec<Block>> = Vec::new();
         let mut table_rows: Vec<DocRow> = Vec::new();
         let mut para = ParaBuilder::new();
+        let mut toc = TocTracker::default();
 
         let mut i = lo;
         while i < hi.min(self.text.chars.len()) {
@@ -715,6 +726,26 @@ impl Assembler {
                     let pap = self.effective_pap(fc, i);
                     let inlines = std::mem::replace(&mut para, ParaBuilder::new()).finish();
                     let is_cell_mark = c == '\u{7}';
+                    // Fork (sznb): content=false — a TOC field's result
+                    // paragraphs (top level) go, with the title right before.
+                    if self.skip_toc {
+                        let (in_toc, started) = toc.finish_paragraph();
+                        if in_toc && !(pap.effective.in_table.unwrap_or(false) || is_cell_mark) {
+                            Self::flush_table(
+                                &mut blocks,
+                                &mut table_rows,
+                                &mut row,
+                                &mut cell_blocks,
+                            )?;
+                            if started {
+                                styled.flush(&mut blocks);
+                                flush_list(&mut blocks, &mut list_run);
+                                drop_toc_title(&mut blocks);
+                            }
+                            i += 1;
+                            continue;
+                        }
+                    }
                     if pap.effective.in_table.unwrap_or(false) || is_cell_mark {
                         // A table is a hard boundary for top-level list and
                         // styled runs, even while its rows are accumulated.
@@ -771,9 +802,18 @@ impl Assembler {
                     }
                 }
                 '\u{b}' => para.push_inline(Inline::LineBreak),
-                '\u{13}' => para.field_begin(),
-                '\u{14}' => para.field_separate(),
-                '\u{15}' => para.field_end(),
+                '\u{13}' => {
+                    toc.begin();
+                    para.field_begin();
+                }
+                '\u{14}' => {
+                    toc.separate();
+                    para.field_separate();
+                }
+                '\u{15}' => {
+                    toc.end();
+                    para.field_end();
+                }
                 '\t' => {
                     let style = self.char_style(fc, i);
                     para.push_char(' ', style);
@@ -792,6 +832,10 @@ impl Assembler {
                 '\u{2}' | '\u{5}' | '\u{8}' | '\u{1f}' => {}
                 c if c.is_control() => {}
                 c => {
+                    if toc.reading_instr() {
+                        let mut buf = [0u8; 4];
+                        toc.instr_text(c.encode_utf8(&mut buf));
+                    }
                     let style = self.char_style(fc, i);
                     para.push_char(c, style);
                 }
@@ -1007,7 +1051,7 @@ impl Assembler {
             return Ok(());
         }
         let rows = std::mem::take(table_rows).into_iter().map(DocRow::into_grid_row).collect();
-        if let Some(block) = build_edge_table(rows)? {
+        if let Some(block) = build_edge_table(rows, true)? {
             blocks.push(block);
         }
         Ok(())
@@ -1025,6 +1069,10 @@ impl DocRow {
     fn into_grid_row(self) -> GridRow {
         let header = self.tap.as_ref().is_some_and(|t| t.header);
         let tap = self.tap.unwrap_or_default();
+        // Fork (sznb): rgdxaCenter[0] is the row's left edge - indented rows
+        // keep their column offset instead of collapsing to column 0.
+        // Rows without a TAP have no boundaries -> None (column 0).
+        let left = tap.boundaries.first().map(|&b| b as i64);
         let cells = self
             .cells
             .into_iter()
@@ -1045,7 +1093,7 @@ impl DocRow {
                 (blocks, prop)
             })
             .collect();
-        GridRow { cells, header }
+        GridRow { cells, header, left }
     }
 }
 

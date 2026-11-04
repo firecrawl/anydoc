@@ -37,4 +37,9 @@ pub enum ImageSource {
     /// No usable source: the image's part is missing or unreadable and it
     /// has no URL. Only the alt text remains.
     Unavailable,
+    /// Fork (sznb): the image was extracted by
+    /// [`extract_images`](crate::extract_images) and is replaced in place by
+    /// this literal token (e.g. `[IMG::img_0123abcd.png]`), which renderers
+    /// emit verbatim.
+    Placeholder(String),
 }

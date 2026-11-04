@@ -16,6 +16,12 @@ pub struct Table {
     pub header_rows: usize,
     /// Whether the source used this table for data or for layout.
     pub kind: TableKind,
+    /// Fork (sznb): keep trailing all-empty rows instead of eliding them as
+    /// filler. Set by the Word frontends (docx, doc / wps): an authored blank
+    /// row is real structure there (forms leave rows to fill in), and the
+    /// service's V1 converter keeps them too. Spreadsheets keep the trim —
+    /// their used range routinely drags in empty tails.
+    pub keep_empty_rows: bool,
 }
 
 /// What a table is for.
@@ -100,6 +106,44 @@ impl Table {
         table
     }
 
+    /// Fork (sznb): the service's `dedup_table_cells=false` form — every
+    /// position a span covers repeats its origin's content and all spans
+    /// collapse to 1, so each grid position renders on its own (GFM, HTML and
+    /// plain text alike). Nested tables stay on the origin only: copying them
+    /// would duplicate whole tables. The result is span-less, so the
+    /// exactly-once invariant holds trivially.
+    pub fn expanded(&self) -> Table {
+        let grid = self
+            .grid
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|slot| match slot {
+                        CellSlot::Origin(c) => CellSlot::Origin(Cell::new(c.blocks.clone())),
+                        CellSlot::Covered { origin_row, origin_col } => {
+                            let blocks = match self.grid.get(*origin_row).and_then(|r| r.get(*origin_col)) {
+                                Some(CellSlot::Origin(o)) => o
+                                    .blocks
+                                    .iter()
+                                    .filter(|b| !matches!(b, Block::Table(_)))
+                                    .cloned()
+                                    .collect(),
+                                _ => Vec::new(),
+                            };
+                            CellSlot::Origin(Cell::new(blocks))
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        Table { grid, header_rows: self.header_rows, kind: self.kind, keep_empty_rows: self.keep_empty_rows }
+    }
+
+    /// Fork (sznb): true when any position is covered by a span.
+    pub fn has_spans(&self) -> bool {
+        self.grid.iter().flatten().any(|s| matches!(s, CellSlot::Covered { .. }))
+    }
+
     /// True when the table is a single origin cell (any covered padding aside).
     pub fn is_single_cell(&self) -> bool {
         self.grid.len() == 1
@@ -123,6 +167,8 @@ pub struct GridBuilder {
     /// Whether trailing rows holding only covered positions survive
     /// [`GridBuilder::finish`]; see [`GridBuilder::keep_covered_tail`].
     keep_covered_tail: bool,
+    /// Fork (sznb): see [`Table::keep_empty_rows`].
+    keep_empty_rows: bool,
 }
 
 impl GridBuilder {
@@ -140,6 +186,12 @@ impl GridBuilder {
     /// default trim.
     pub fn keep_covered_tail(&mut self) {
         self.keep_covered_tail = true;
+    }
+
+    /// Fork (sznb): keep trailing all-empty rows (Word sources); the built
+    /// table carries the flag so renderers skip their own tail trim too.
+    pub fn keep_empty_rows(&mut self) {
+        self.keep_empty_rows = true;
     }
 
     fn row_index(&mut self) -> usize {
@@ -255,8 +307,13 @@ impl GridBuilder {
                 self.grid[row].push(CellSlot::Covered { origin_row, origin_col });
             }
         }
-        // Drop trailing all-empty rows.
-        while self.grid.last().is_some_and(|r| {
+        // Drop trailing all-empty rows (unless the source keeps them; a
+        // fully blank table still collapses to nothing).
+        let all_blank = self.grid.iter().flatten().all(|s| match s {
+            CellSlot::Origin(c) => c.is_empty(),
+            CellSlot::Covered { .. } => true,
+        });
+        while (!self.keep_empty_rows || all_blank) && self.grid.last().is_some_and(|r| {
             r.iter().all(|s| match s {
                 CellSlot::Origin(c) => c.is_empty(),
                 CellSlot::Covered { .. } => !self.keep_covered_tail,
@@ -276,7 +333,7 @@ impl GridBuilder {
                 }
             }
         }
-        Table { grid: self.grid, header_rows: 0, kind }
+        Table { grid: self.grid, header_rows: 0, kind, keep_empty_rows: self.keep_empty_rows }
     }
 }
 
@@ -491,5 +548,33 @@ mod tests {
         b.place(Cell::default()).unwrap();
         let t = b.finish(TableKind::Data);
         assert_eq!(widths(&t), vec![1]);
+    }
+
+    #[test]
+    fn keep_empty_rows_preserves_trailing_blank_rows() {
+        // Fork (sznb): Word sources keep authored blank rows.
+        let mut b = GridBuilder::new();
+        b.keep_empty_rows();
+        b.next_row();
+        b.place(text_cell("a")).unwrap();
+        b.next_row();
+        b.place(Cell::default()).unwrap();
+        b.next_row();
+        b.place(Cell::default()).unwrap();
+        let t = b.finish(TableKind::Data);
+        assert_eq!(widths(&t), vec![1, 1, 1]);
+        assert!(t.keep_empty_rows);
+    }
+
+    #[test]
+    fn keep_empty_rows_still_drops_wholly_blank_table() {
+        let mut b = GridBuilder::new();
+        b.keep_empty_rows();
+        b.next_row();
+        b.place(Cell::default()).unwrap();
+        b.next_row();
+        b.place(Cell::default()).unwrap();
+        let t = b.finish(TableKind::Data);
+        assert!(t.grid.is_empty());
     }
 }

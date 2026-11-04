@@ -17,7 +17,9 @@ from anydoc_sznb._anydoc import (
     ConvertError,
     Document,
     EncryptedError,
+    ExtractedImage,
     ImageSource,
+    ImagesResult,
     Inline,
     LinkTarget,
     List,
@@ -34,6 +36,8 @@ from anydoc_sznb._anydoc import (
     format_from_extension,
     format_from_path,
     to_document,
+    to_markdown_with_images,
+    to_text_with_images,
 )
 from anydoc_sznb._anydoc import to_markdown as _to_markdown
 from anydoc_sznb._anydoc import to_markdown_bytes as _to_markdown_bytes
@@ -93,6 +97,8 @@ def to_markdown_bytes(
     format: "Format | None" = None,
     *,
     html_tables: bool = True,
+    dedup_cells: bool = True,
+    include_toc: bool = True,
     ocr: Ocr = "reject",
     parse_mode: ParseMode = "auto",
     api_key: "str | None" = None,
@@ -104,11 +110,15 @@ def to_markdown_bytes(
 
     Fork (sznb): `html_tables` selects the table form — `True` (default)
     renders HTML `<table>` carrying merged-cell colspan/rowspan; `False`
-    renders GFM pipe tables (no span syntax). `ocr`, `parse_mode`,
+    renders GFM pipe tables (no span syntax). `dedup_cells` shows merged
+    content once on the origin cell (default) or repeats it in every covered
+    position; `include_toc=False` drops the Word table of contents. `ocr`, `parse_mode`,
     `api_key` and `api_url` are as for `to_markdown`."""
     _check_parse_mode(parse_mode)
     try:
-        return _to_markdown_bytes(data, format, html_tables=html_tables)
+        return _to_markdown_bytes(
+            data, format, html_tables=html_tables, dedup_cells=dedup_cells, include_toc=include_toc
+        )
     except NeedsOcrError:
         if ocr != "hosted":
             raise
@@ -212,9 +222,11 @@ __all__ = [
     "ConvertError",
     "Document",
     "EncryptedError",
+    "ExtractedImage",
     "Format",
     "HostedError",
     "ImageSource",
+    "ImagesResult",
     "Inline",
     "LinkTarget",
     "List",
@@ -235,5 +247,7 @@ __all__ = [
     "to_document",
     "to_markdown",
     "to_markdown_bytes",
+    "to_markdown_with_images",
     "to_text_bytes",
+    "to_text_with_images",
 ]

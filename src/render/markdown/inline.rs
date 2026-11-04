@@ -189,6 +189,8 @@ fn render_image(
         // Embedded assets render as their alt text: Markdown cannot embed
         // bytes, and the bytes stay available in `Document::assets`. A
         // source-less image has only its alt text to offer.
+        // Fork (sznb): an extracted image's placeholder token, verbatim.
+        ImageSource::Placeholder(token) => out.push_str(token),
         ImageSource::Asset(_) | ImageSource::Unavailable => {
             if !alt.trim().is_empty() {
                 out.push_str(&escape_text(
@@ -264,6 +266,7 @@ fn delims_of(run: &Norm, rc: &Ctx) -> Delims {
             ImageSource::External(_) => {}
             // Sourceless images degrade to their alt as plain text.
             ImageSource::Asset(_) | ImageSource::Unavailable => delims.insert_closers(alt),
+            ImageSource::Placeholder(token) => delims.insert_closers(token),
         },
         Norm::NoteRef(_)
         | Norm::Anchor(_)
@@ -414,6 +417,8 @@ pub(crate) fn inlines_to_plain(
         match inline {
             Inline::Text { text, .. } => out.push_str(text),
             Inline::Link { content, .. } => inlines_to_plain(content, nums, out),
+            // Fork (sznb): extracted images keep their placeholder token.
+            Inline::Image { source: ImageSource::Placeholder(token), .. } => out.push_str(token),
             Inline::Image { .. } | Inline::Anchor(_) => {}
             Inline::NoteRef(id) => {
                 if let Some(n) = nums.get(id) {

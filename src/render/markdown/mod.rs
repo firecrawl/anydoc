@@ -39,12 +39,28 @@ pub(crate) struct Ctx {
     /// GFM pipe tables (false) — the conversion service's `table_as_html`
     /// parameter reaches the fork through this flag.
     pub(crate) html_tables: bool,
+    /// Fork (sznb): merged cells show their content once (true, default) or
+    /// repeat it in every covered position (false) — `dedup_table_cells`.
+    pub(crate) dedup_cells: bool,
 }
 
-/// Fork (sznb): render with the table form selected by `html_tables`
-/// (`true` = HTML tables, the historical default).
-pub fn document_to_markdown_opts(doc: &Document, html_tables: bool) -> String {
-    let rc = Ctx { nums: number_notes(doc), anchors: resolve_anchors(doc), html_tables };
+/// Test-only shim for upstream tests written against the pre-fork name
+/// (the fork renamed it to `document_to_markdown_with`).
+#[cfg(test)]
+pub fn document_to_markdown(doc: &Document) -> String {
+    document_to_markdown_with(doc, true, true)
+}
+
+/// Fork (sznb): render with the table form (`html_tables`) and merged-cell
+/// handling (`dedup_cells`: content once on the origin vs repeated in every
+/// covered position) selected.
+pub fn document_to_markdown_with(doc: &Document, html_tables: bool, dedup_cells: bool) -> String {
+    let rc = Ctx {
+        nums: number_notes(doc),
+        anchors: resolve_anchors(doc),
+        html_tables,
+        dedup_cells,
+    };
     let mut parts: Vec<(bool, String)> = doc
         .blocks
         .iter()
@@ -288,19 +304,26 @@ fn render_list(list: &List, rc: &Ctx) -> Option<String> {
         // so `1、` / `iv.` / composite labels stay literal text lines that
         // mirror the source — the Chinese-official-document corpus reads
         // best without the doubled prefix (`- 1、 …`).
-        let marker = match (&item.marker_label, list.marker) {
+        let (marker, gfm) = match (&item.marker_label, list.marker) {
             (Some(label), _) => {
-                format!("{} ", escape_marker_label(label, InlineContext::Block))
+                (format!("{} ", escape_marker_label(label, InlineContext::Block)), false)
             }
-            (None, MarkerKind::Bullet) => "- ".to_string(),
-            (None, MarkerKind::Decimal) => format!("{}. ", list.start.saturating_add(i as u64)),
-            (None, kind) => format!("{} ", kind.label(list.start.saturating_add(i as u64))),
+            (None, MarkerKind::Bullet) => ("- ".to_string(), true),
+            (None, MarkerKind::Decimal) => {
+                (format!("{}. ", list.start.saturating_add(i as u64)), true)
+            }
+            (None, kind) => (format!("{} ", kind.label(list.start.saturating_add(i as u64))), false),
         };
         let body = render_blocks(&item.blocks, rc);
         if item.blocks.len() > 1 {
             loose = true;
         }
-        let indent = " ".repeat(marker.chars().count());
+        // Fork (sznb): only real GFM list items (`- ` / `N. `) indent their
+        // continuation lines to stay inside the item. A literal marker
+        // (`1.1.`, `一、`, `iv.`) is plain text, so indenting its nested
+        // content only adds spaces the source never shows -- and four or
+        // more would turn a deep line into an indented code block.
+        let indent = if gfm { " ".repeat(marker.chars().count()) } else { String::new() };
         let mut lines = body.lines();
         let first = lines.next().unwrap_or("");
         let mut s = format!("{marker}{first}");

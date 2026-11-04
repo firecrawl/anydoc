@@ -11,7 +11,7 @@ use crate::package::relationships::{RelTarget, Relationships, TargetMode, rel_ta
 use crate::package::xml::{Element, ns};
 use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
-use crate::shared::fields::{FieldFrame, field_result};
+use crate::shared::fields::{FieldFrame, TocTracker, drop_toc_title, field_result};
 use crate::shared::header::resolve_header_rows;
 use crate::shared::list::{ListEntry, ListKey, flush_list};
 use crate::shared::math::{omath_para_to_tex, omath_to_tex};
@@ -45,6 +45,8 @@ pub(super) struct Ctx<'a, 'b> {
     pub numbering: &'b Numbering,
     pub counters: &'b RefCell<Counters>,
     pub assets: &'b RefCell<AssetSink>,
+    /// Fork (sznb): drop the table of contents (the service's `content=false`).
+    pub skip_toc: bool,
 }
 
 impl<'a, 'b> Ctx<'a, 'b> {
@@ -59,6 +61,7 @@ impl<'a, 'b> Ctx<'a, 'b> {
             numbering: self.numbering,
             counters: self.counters,
             assets: self.assets,
+            skip_toc: self.skip_toc,
         }
     }
 
@@ -112,7 +115,56 @@ pub(super) enum ParaKind {
 pub(super) struct Runs {
     list: Vec<ListEntry>,
     styled: StyledRun,
+    /// Fork (sznb): complex-field state across sibling paragraphs, tracked
+    /// only when the TOC is skipped (a `TOC` field spans many paragraphs).
+    toc: TocTracker,
 }
+
+/// Fork (sznb): feed one paragraph's field characters (document order) to
+/// the tracker; returns `(in_toc, toc_started_here)`.
+fn paragraph_in_toc(toc: &mut TocTracker, p: &Element) -> (bool, bool) {
+    let mut stack: Vec<&Element> = vec![p];
+    while let Some(e) = stack.pop() {
+        if e.ns.as_deref() == Some(ns::W) {
+            match e.local.as_str() {
+                "fldChar" => {
+                    match e.attr(ns::W, "fldCharType") {
+                        Some("begin") => toc.begin(),
+                        Some("separate") => toc.separate(),
+                        Some("end") => toc.end(),
+                        _ => {}
+                    }
+                    continue;
+                }
+                "instrText" => {
+                    toc.instr_text(&e.text());
+                    continue;
+                }
+                "fldSimple" => {
+                    if let Some(instr) = e.attr(ns::W, "instr") {
+                        toc.simple(instr);
+                    }
+                }
+                // Text boxes carry their own paragraphs and field chains.
+                "txbxContent" => continue,
+                _ => {}
+            }
+        }
+        let kids: Vec<&Element> = e.child_elems().collect();
+        stack.extend(kids.into_iter().rev());
+    }
+    toc.finish_paragraph()
+}
+
+/// A `Table of Contents` building-block SDT (`w:docPartGallery`).
+fn is_toc_sdt(sdt: &Element) -> bool {
+    sdt.find(ns::W, "sdtPr")
+        .and_then(|pr| pr.find(ns::W, "docPartObj"))
+        .and_then(|o| o.find(ns::W, "docPartGallery"))
+        .and_then(|g| g.attr(ns::W, "val"))
+        .is_some_and(|v| v.trim().to_ascii_lowercase().starts_with("table of contents"))
+}
+
 
 impl Runs {
     fn flush(&mut self, blocks: &mut Vec<Block>) {
@@ -159,6 +211,18 @@ fn collect_blocks(
         }
         match child.local.as_str() {
             "p" => {
+                if ctx.skip_toc {
+                    let (in_toc, started) = paragraph_in_toc(&mut runs.toc, child);
+                    if in_toc {
+                        // Fork (sznb): content=false — the TOC's result
+                        // paragraphs go, and so does the title right before.
+                        if started {
+                            runs.flush(blocks);
+                            drop_toc_title(blocks);
+                        }
+                        continue;
+                    }
+                }
                 let (kind, pieces) = parse_paragraph(child, ctx)?;
                 emit_paragraph(kind, pieces, blocks, runs);
             }
@@ -167,6 +231,13 @@ fn collect_blocks(
                 blocks.extend(parse_table(child, ctx)?);
             }
             "sdt" => {
+                // Fork (sznb): content=false drops a TOC building block whole,
+                // with the title right before it (outside the SDT).
+                if ctx.skip_toc && is_toc_sdt(child) {
+                    runs.flush(blocks);
+                    drop_toc_title(blocks);
+                    continue;
+                }
                 if let Some(content) = child.find(ns::W, "sdtContent") {
                     collect_blocks(content, ctx, blocks, runs)?;
                 }
@@ -262,7 +333,15 @@ fn parse_paragraph(p: &Element, ctx: &Ctx) -> Result<(ParaKind, Vec<Piece>), Con
 
     // Numbering resolves independently of heading semantics: a numbered
     // heading advances its sequence and keeps its number visible.
-    let numbering = resolve_numbering(ppr, pstyle_id, ctx)?;
+    // Fork (sznb): an empty paragraph that only carries a section break
+    // (`w:pPr/w:sectPr`) takes no number. Word and LibreOffice show no
+    // label on it and do not advance the list, so a numbered style on that
+    // carrier (typically Heading 1 right before the first chapter) must not
+    // consume `第1章` and shift every chapter by one.
+    let section_carrier =
+        ppr.is_some_and(|pr| pr.find(ns::W, "sectPr").is_some()) && !has_visible_content(p);
+    let numbering =
+        if section_carrier { None } else { resolve_numbering(ppr, pstyle_id, ctx)? };
 
     // Toggle properties: the paragraph style chain's true-parity flips the
     // docDefaults base. Headings use the same resolution as body text.
@@ -294,6 +373,23 @@ fn parse_paragraph(p: &Element, ctx: &Ctx) -> Result<(ParaKind, Vec<Piece>), Con
     let mut walker = InlineWalker::new(ctx, paragraph_level);
     walker.walk(p)?;
     Ok((kind, walker.finish()))
+}
+
+/// Fork (sznb): whether a paragraph renders anything besides its mark —
+/// non-empty text, a tab, a symbol, or a drawing/picture/OLE object. The
+/// `pPr` subtree is skipped (its `w:tabs/w:tab` are tab stops, not content).
+fn has_visible_content(p: &Element) -> bool {
+    let visible = |e: &Element| {
+        (e.is(ns::W, "t") && !e.text().trim().is_empty())
+            || e.is(ns::W, "tab")
+            || e.is(ns::W, "sym")
+            || e.is(ns::W, "drawing")
+            || e.is(ns::W, "pict")
+            || e.is(ns::W, "object")
+    };
+    p.child_elems()
+        .filter(|c| !c.is(ns::W, "pPr"))
+        .any(|c| visible(c) || c.descendant_elems().any(visible))
 }
 
 /// Resolve a paragraph's effective numbering per ECMA-376: the direct
@@ -649,20 +745,19 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
                 self.ctx.assets,
                 rel_id,
             )?;
-            match source {
-                Some(source) => self.push(Inline::Image { alt: descr, source }),
-                None => {
-                    if !descr.trim().is_empty() {
-                        self.push(Inline::Image { alt: descr, source: ImageSource::Unavailable });
-                    }
-                }
+            // Fork (sznb): a bitmap's `descr` is not body text. Word/WPS fill
+            // it with the inserted file's name (「图片1」「捕获」 from
+            // 捕获.PNG), and rendering it as the image's alt text spliced
+            // those words into paragraphs. The original pipeline emits
+            // nothing for images; keep the asset, drop the alt text.
+            if let Some(source) = source {
+                self.push(Inline::Image { alt: String::new(), source });
             }
             return Ok(());
         }
 
-        if !descr.trim().is_empty() {
-            self.push(Inline::Image { alt: descr, source: ImageSource::Unavailable });
-        }
+        // Fork (sznb): a drawing with neither text, chart, OLE nor bitmap —
+        // likewise no `descr` text (see above).
         Ok(())
     }
 
@@ -831,6 +926,7 @@ pub(super) fn parse_table(tbl: &Element, ctx: &Ctx) -> Result<Vec<Block>, Conver
         .count();
 
     let mut builder = GridBuilder::new();
+    builder.keep_empty_rows();
     for row in &matrix {
         builder.next_row();
         for tc in row {

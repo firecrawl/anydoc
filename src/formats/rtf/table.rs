@@ -175,8 +175,8 @@ impl TableState {
         }
         let t = std::mem::take(&mut self.tables[depth - 1]);
         let rows =
-            t.rows.into_iter().map(|r| GridRow { cells: r.cells, header: r.header }).collect();
-        build_edge_table(rows)
+            t.rows.into_iter().map(|r| GridRow { cells: r.cells, header: r.header, left: None }).collect();
+        build_edge_table(rows, false)
     }
 
     /// Build a finished table at `depth` into cell blocks one level up.

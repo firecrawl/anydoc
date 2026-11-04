@@ -16,3 +16,6 @@ __pycache__/
 /fuzz/corpus/
 /fuzz/artifacts/
 /fuzz/coverage/
+
+# sznb: maturin 本地构建产物
+dist/

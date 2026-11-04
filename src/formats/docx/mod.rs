@@ -18,7 +18,15 @@ use content::Ctx;
 use numbering::Counters;
 use std::cell::RefCell;
 
+#[cfg(test)]
 pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
+    parse_with(bytes, true)
+}
+
+/// Fork (sznb): `include_toc = false` drops the table of contents — a
+/// `Table of Contents` SDT and the result paragraphs of a bare `TOC` field
+/// (plus the 目录 / Contents title right before it).
+pub fn parse_with(bytes: &[u8], include_toc: bool) -> Result<Document, ConvertError> {
     let pkg = match Package::open(bytes) {
         Ok(p) => p,
         Err(e) => return Err(crate::package::archive::probe_ole(bytes).unwrap_or(e)),
@@ -71,6 +79,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
         numbering: &numbering,
         counters: &counters,
         assets: &assets,
+        skip_toc: !include_toc,
     };
     let blocks = content::parse_blocks(body, &ctx)?;
 
@@ -330,5 +339,225 @@ mod tests {
             })
             .collect();
         assert_eq!(headings, vec!["1. Intro", "2. Details"]);
+    }
+
+    /// Fork (sznb): `(numId, text)` paragraphs over a single-level abstract
+    /// with label `第%1项`; `nums` is the `<w:num>` list. Returns the text
+    /// output lines.
+    fn shared_abstract_lines(paras: &[(u32, &str)], nums: &str) -> Vec<String> {
+        let body: String = paras
+            .iter()
+            .map(|(num_id, text)| {
+                format!(
+                    r#"<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="{num_id}"/></w:numPr></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>"#
+                )
+            })
+            .collect();
+        let document = format!(r#"<w:document {W}><w:body>{body}</w:body></w:document>"#);
+        let numbering = format!(
+            r#"<w:numbering {W}>
+            <w:abstractNum w:abstractNumId="7"><w:lvl w:ilvl="0">
+                <w:numFmt w:val="decimal"/><w:start w:val="1"/><w:lvlText w:val="第%1项"/>
+            </w:lvl></w:abstractNum>
+            {nums}
+            </w:numbering>"#
+        );
+        let bytes = docx_parts(&[("word/document.xml", &document), ("word/numbering.xml", &numbering)]);
+        let text = crate::to_text_bytes(&bytes, crate::Format::Docx).unwrap();
+        text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect()
+    }
+
+    #[test]
+    fn num_ids_sharing_an_abstract_share_one_counter() {
+        // Word/LibreOffice: numIds over the same abstractNum continue one
+        // sequence (a numId is only an instance handle, not a new list).
+        let lines = shared_abstract_lines(
+            &[(1, "丁一"), (2, "丁二"), (1, "丁三")],
+            r#"<w:num w:numId="1"><w:abstractNumId w:val="7"/></w:num>
+               <w:num w:numId="2"><w:abstractNumId w:val="7"/></w:num>"#,
+        );
+        let joined = lines.join("\n");
+        for want in ["第1项", "第2项", "第3项"] {
+            assert!(joined.contains(want), "missing {want} in:\n{joined}");
+        }
+        assert!(joined.find("第1项") < joined.find("丁一"));
+        assert!(joined.find("丁一") < joined.find("第2项") && joined.find("第2项") < joined.find("丁二"));
+        assert!(joined.find("丁二") < joined.find("第3项") && joined.find("第3项") < joined.find("丁三"));
+    }
+
+    #[test]
+    fn start_override_restarts_the_shared_counter_once() {
+        // startOverride restarts the shared counter at its value on that
+        // numId's first use; later paragraphs (either numId) continue: 1, 5, 6.
+        let lines = shared_abstract_lines(
+            &[(1, "甲"), (2, "乙"), (1, "丙"), (2, "丁")],
+            r#"<w:num w:numId="1"><w:abstractNumId w:val="7"/></w:num>
+               <w:num w:numId="2"><w:abstractNumId w:val="7"/>
+                 <w:lvlOverride w:ilvl="0"><w:startOverride w:val="5"/></w:lvlOverride></w:num>"#,
+        );
+        let joined = lines.join("\n");
+        let order: Vec<usize> = ["第1项", "甲", "第5项", "乙", "第6项", "丙", "第7项", "丁"]
+            .iter()
+            .map(|w| joined.find(w).unwrap_or_else(|| panic!("missing {w} in:\n{joined}")))
+            .collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "wrong order in:\n{joined}");
+    }
+
+    #[test]
+    fn orphan_sub_level_consumes_the_upper_start() {
+        // Fork (sznb): Word/LibreOffice — sub-level items ahead of any
+        // top-level item use up the top level's start, so the first real
+        // top-level item is 2 (技术使用手册: 1.1–1.4 then 「2. 网关接口调用」).
+        let p = |ilvl: u8, text: &str| {
+            format!(
+                r#"<w:p><w:pPr><w:numPr><w:ilvl w:val="{ilvl}"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>"#
+            )
+        };
+        let body = [p(1, "甲"), p(1, "乙"), p(0, "丙"), p(1, "丁")].concat();
+        let document = format!(r#"<w:document {W}><w:body>{body}</w:body></w:document>"#);
+        let numbering = format!(
+            r#"<w:numbering {W}>
+            <w:abstractNum w:abstractNumId="7">
+              <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:start w:val="1"/><w:lvlText w:val="第%1项"/></w:lvl>
+              <w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/><w:start w:val="1"/><w:lvlText w:val="%1.%2"/></w:lvl>
+            </w:abstractNum>
+            <w:num w:numId="1"><w:abstractNumId w:val="7"/></w:num>
+            </w:numbering>"#
+        );
+        let bytes = docx_parts(&[("word/document.xml", &document), ("word/numbering.xml", &numbering)]);
+        let text = crate::to_text_bytes(&bytes, crate::Format::Docx).unwrap();
+        let order: Vec<usize> = ["1.1", "甲", "1.2", "乙", "第2项", "丙", "2.1", "丁"]
+            .iter()
+            .map(|w| text.find(w).unwrap_or_else(|| panic!("missing {w} in:\n{text}")))
+            .collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "wrong order in:\n{text}");
+        assert!(!text.contains("第1项"), "top level must not restart at 1:\n{text}");
+    }
+
+    #[test]
+    fn empty_section_break_carrier_takes_no_number() {
+        // Fork (sznb): an empty numbered paragraph that only holds a section
+        // break (144pages: Heading 1 + sectPr before 第1章) shows no label
+        // and does not advance the list; a plain empty numbered paragraph
+        // still counts, as in Word/LibreOffice.
+        let num_p = |extra: &str, run: &str| {
+            format!(
+                r#"<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:tabs><w:tab w:val="clear" w:pos="420"/></w:tabs>{extra}</w:pPr>{run}</w:p>"#
+            )
+        };
+        let body = [
+            num_p("<w:sectPr/>", ""),
+            num_p("", "<w:r><w:t>甲</w:t></w:r>"),
+            num_p("", ""),
+            num_p("", "<w:r><w:t>乙</w:t></w:r>"),
+        ]
+        .concat();
+        let document = format!(r#"<w:document {W}><w:body>{body}</w:body></w:document>"#);
+        let numbering = format!(
+            r#"<w:numbering {W}>
+            <w:abstractNum w:abstractNumId="7"><w:lvl w:ilvl="0">
+                <w:numFmt w:val="decimal"/><w:start w:val="1"/><w:lvlText w:val="第%1章"/>
+            </w:lvl></w:abstractNum>
+            <w:num w:numId="1"><w:abstractNumId w:val="7"/></w:num>
+            </w:numbering>"#
+        );
+        let bytes = docx_parts(&[("word/document.xml", &document), ("word/numbering.xml", &numbering)]);
+        let text = crate::to_text_bytes(&bytes, crate::Format::Docx).unwrap();
+        assert!(text.contains("第1章 甲") || text.contains("第1章甲"), "got:\n{text}");
+        assert!(text.contains("第3章 乙") || text.contains("第3章乙"), "got:\n{text}");
+    }
+
+    // ---------- Fork (sznb): include_toc / dedup_cells ----------
+
+    fn run_p(text: &str) -> String {
+        format!(r#"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"#)
+    }
+
+    fn opts(dedup_cells: bool, include_toc: bool, html_tables: bool) -> crate::ConvertOptions {
+        crate::ConvertOptions { html_tables, dedup_cells, include_toc }
+    }
+
+    #[test]
+    fn toc_sdt_is_dropped_only_without_include_toc() {
+        let sdt = format!(
+            r#"<w:sdt><w:sdtPr><w:docPartObj><w:docPartGallery w:val="Table of Contents"/></w:docPartObj></w:sdtPr>
+            <w:sdtContent>{}{}</w:sdtContent></w:sdt>"#,
+            run_p("目录"),
+            run_p("第一章 总则 1")
+        );
+        // Custom title outside the SDT (技术使用手册: 「公共应用组件调用目录」).
+        let body = [run_p("封面"), run_p("公共应用组件调用目录"), sdt, run_p("正文开始")].concat();
+        let document = format!(r#"<w:document {W}><w:body>{body}</w:body></w:document>"#);
+        let bytes = docx_parts(&[("word/document.xml", &document)]);
+        let keep = crate::to_text_bytes_with(&bytes, crate::Format::Docx, opts(true, true, true)).unwrap();
+        assert!(keep.contains("第一章 总则 1") && keep.contains("目录"), "got:\n{keep}");
+        let drop = crate::to_text_bytes_with(&bytes, crate::Format::Docx, opts(true, false, true)).unwrap();
+        assert!(!drop.contains("总则") && !drop.contains("目录"), "got:\n{drop}");
+        assert!(keep.contains("公共应用组件调用目录"), "got:\n{keep}");
+        assert!(drop.contains("封面") && drop.contains("正文开始"), "got:\n{drop}");
+    }
+
+    #[test]
+    fn bare_toc_field_paragraphs_and_title_are_dropped() {
+        // TOC field begins in the first entry paragraph and ends in the last
+        // one (Word's bare-field form, not wrapped in an SDT).
+        let fld = |kind: &str| format!(r#"<w:r><w:fldChar w:fldCharType="{kind}"/></w:r>"#);
+        let first = format!(
+            r#"<w:p>{}<w:r><w:instrText xml:space="preserve"> TOC \o "1-3" \h \z \u </w:instrText></w:r>{}<w:r><w:t>第1章 概况 3</w:t></w:r></w:p>"#,
+            fld("begin"),
+            fld("separate")
+        );
+        let middle = run_p("第2章 需求 9");
+        let last = format!(r#"<w:p><w:r><w:t>第3章 方案 20</w:t></w:r>{}</w:p>"#, fld("end"));
+        // A blank paragraph between title and field (bullet_problem).
+        let blank = "<w:p/>".to_string();
+        let body = [run_p("目 录"), blank, first, middle, last, run_p("第1章 概况正文")].concat();
+        let document = format!(r#"<w:document {W}><w:body>{body}</w:body></w:document>"#);
+        let bytes = docx_parts(&[("word/document.xml", &document)]);
+        let keep = crate::to_markdown_bytes_with(&bytes, crate::Format::Docx, opts(true, true, true)).unwrap();
+        assert!(keep.contains("第2章 需求 9") && keep.contains("目 录"), "got:\n{keep}");
+        let drop = crate::to_markdown_bytes_with(&bytes, crate::Format::Docx, opts(true, false, true)).unwrap();
+        for gone in ["目 录", "概况 3", "需求 9", "方案 20"] {
+            assert!(!drop.contains(gone), "{gone} survived:\n{drop}");
+        }
+        assert!(drop.contains("第1章 概况正文"), "body lost:\n{drop}");
+    }
+
+    fn merged_table_docx() -> Vec<u8> {
+        // 3×3: row 0 「甲」 spans two columns; column 0 「乙」 spans rows 1–2.
+        let tc = |pr: &str, text: &str| format!(r#"<w:tc><w:tcPr>{pr}</w:tcPr>{}</w:tc>"#, run_p(text));
+        let rows = [
+            [tc(r#"<w:gridSpan w:val="2"/>"#, "甲"), tc("", "丙")].concat(),
+            [tc(r#"<w:vMerge w:val="restart"/>"#, "乙"), tc("", "a"), tc("", "b")].concat(),
+            [tc("<w:vMerge/>", ""), tc("", "c"), tc("", "d")].concat(),
+        ]
+        .map(|r| format!("<w:tr>{r}</w:tr>"))
+        .concat();
+        let grid = r#"<w:tblGrid><w:gridCol/><w:gridCol/><w:gridCol/></w:tblGrid>"#;
+        let document = format!(r#"<w:document {W}><w:body><w:tbl>{grid}{rows}</w:tbl></w:body></w:document>"#);
+        docx_parts(&[("word/document.xml", &document)])
+    }
+
+    #[test]
+    fn dedup_cells_false_repeats_merged_content() {
+        let bytes = merged_table_docx();
+        let count = |s: &str, w: &str| s.matches(w).count();
+        // Markdown, HTML form: spans by default, repeated cells without dedup.
+        let html = crate::to_markdown_bytes_with(&bytes, crate::Format::Docx, opts(true, true, true)).unwrap();
+        assert!(html.contains("colspan") && html.contains("rowspan"), "got:\n{html}");
+        assert_eq!((count(&html, "甲"), count(&html, "乙")), (1, 1), "got:\n{html}");
+        let html = crate::to_markdown_bytes_with(&bytes, crate::Format::Docx, opts(false, true, true)).unwrap();
+        assert!(!html.contains("colspan") && !html.contains("rowspan"), "got:\n{html}");
+        assert_eq!((count(&html, "甲"), count(&html, "乙")), (2, 2), "got:\n{html}");
+        // GFM keeps three columns either way.
+        let gfm = crate::to_markdown_bytes_with(&bytes, crate::Format::Docx, opts(false, true, false)).unwrap();
+        assert_eq!((count(&gfm, "甲"), count(&gfm, "乙")), (2, 2), "got:\n{gfm}");
+        assert!(gfm.lines().all(|l| !l.starts_with('|') || l.matches('|').count() == 4), "got:\n{gfm}");
+        // Plain text.
+        let txt = crate::to_text_bytes_with(&bytes, crate::Format::Docx, opts(true, true, true)).unwrap();
+        assert_eq!((count(&txt, "甲"), count(&txt, "乙")), (1, 1), "got:\n{txt}");
+        let txt = crate::to_text_bytes_with(&bytes, crate::Format::Docx, opts(false, true, true)).unwrap();
+        assert_eq!((count(&txt, "甲"), count(&txt, "乙")), (2, 2), "got:\n{txt}");
+        assert!(txt.contains("甲\t甲\t丙") && txt.contains("乙\tc\td"), "got:\n{txt}");
     }
 }

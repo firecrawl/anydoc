@@ -6,7 +6,7 @@ use crate::error::ConvertError;
 use crate::package::xml::{Element, ns};
 use crate::shared::list::MarkerKind;
 use crate::shared::numbering::{NumberPattern, composite_label, parse_percent_pattern};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub const LEVELS: usize = 9;
 
@@ -36,6 +36,8 @@ impl Default for LevelDef {
 
 #[derive(Debug, Clone)]
 struct AbstractNum {
+    /// `w:abstractNumId`: the identity numbering counters are shared under.
+    id: String,
     levels: [LevelDef; LEVELS],
     /// Paragraph style each level binds to via `w:lvl > w:pStyle`.
     pstyles: [Option<String>; LEVELS],
@@ -46,6 +48,16 @@ struct AbstractNum {
 pub struct Instance {
     pub levels: [LevelDef; LEVELS],
     pstyles: [Option<String>; LEVELS],
+    /// Fork (sznb): id of the resolved abstract (after `numStyleLink`
+    /// indirection). Word/LibreOffice share one counter across every `numId`
+    /// pointing at the same abstractNum -- a `numId` is only a list-instance
+    /// handle -- so counters are keyed by this, not by `numId`.
+    counter_key: String,
+    /// Fork (sznb): `w:lvlOverride > w:startOverride` per level. It restarts
+    /// the shared counter at this value the first time this `numId` is used at
+    /// that level; later paragraphs (of any `numId` on the abstract) continue
+    /// from there (LibreOffice: 1 -> 5 (override) -> 6).
+    start_overrides: [Option<u64>; LEVELS],
 }
 
 impl Instance {
@@ -89,7 +101,7 @@ pub fn parse(
         }
         let num_style_link =
             abs.find(ns::W, "numStyleLink").and_then(|e| e.attr(ns::W, "val")).map(str::to_string);
-        abstracts.insert(id, AbstractNum { levels, pstyles, num_style_link });
+        abstracts.insert(id, AbstractNum { id: id.to_string(), levels, pstyles, num_style_link });
     }
 
     // First pass: direct abstract references per numId.
@@ -112,6 +124,7 @@ pub fn parse(
         };
         let mut levels = abs.levels.clone();
         let mut pstyles = abs.pstyles.clone();
+        let mut start_overrides: [Option<u64>; LEVELS] = [None; LEVELS];
         for over in num_elem.find_all(ns::W, "lvlOverride") {
             let ilvl: usize = over.attr(ns::W, "ilvl").and_then(|v| v.parse().ok()).unwrap_or(0);
             if ilvl >= LEVELS {
@@ -129,9 +142,13 @@ pub fn parse(
                 .and_then(parse_start)
             {
                 levels[ilvl].start = start;
+                start_overrides[ilvl] = Some(start);
             }
         }
-        numbering.instances.insert(num_id, Instance { levels, pstyles });
+        numbering.instances.insert(
+            num_id,
+            Instance { levels, pstyles, counter_key: abs.id.clone(), start_overrides },
+        );
     }
     Ok(numbering)
 }
@@ -222,11 +239,15 @@ fn parse_level(lvl: &Element) -> LevelDef {
     LevelDef { marker, start, restart, pattern: NumberPattern { text, legal } }
 }
 
-/// Document-order numbering state: one counter array per instance, shared
-/// across interruptions so continuation works, with `lvlRestart` semantics.
+/// Document-order numbering state: one counter array per abstract numbering
+/// definition (shared by all `numId`s referencing it, as Word/LibreOffice do),
+/// kept across interruptions so continuation works, with `lvlRestart`
+/// semantics.
 #[derive(Default)]
 pub struct Counters {
-    state: HashMap<u64, InstanceState>,
+    state: HashMap<String, InstanceState>,
+    /// `(numId, ilvl)` pairs whose `startOverride` restart has been applied.
+    applied_overrides: HashSet<(u64, usize)>,
 }
 
 #[derive(Default)]
@@ -242,14 +263,31 @@ impl Counters {
     /// reproducible from the marker kind alone, the composite label.
     pub fn next(&mut self, num_id: u64, ilvl: usize, instance: &Instance) -> (u64, Option<String>) {
         let ilvl = ilvl.min(LEVELS - 1);
-        let state = self.state.entry(num_id).or_default();
+        let override_start = instance.start_overrides[ilvl]
+            .filter(|_| self.applied_overrides.insert((num_id, ilvl)));
+        let state = self.state.entry(instance.counter_key.clone()).or_default();
         let def = &instance.levels[ilvl];
-        if !state.initialized[ilvl] || state.restart_pending[ilvl] {
+        if let Some(start) = override_start {
+            state.value[ilvl] = start;
+            state.initialized[ilvl] = true;
+            state.restart_pending[ilvl] = false;
+        } else if !state.initialized[ilvl] || state.restart_pending[ilvl] {
             state.value[ilvl] = def.start;
             state.initialized[ilvl] = true;
             state.restart_pending[ilvl] = false;
         } else {
             state.value[ilvl] = state.value[ilvl].saturating_add(1);
+        }
+        // Fork (sznb): an orphan deeper item consumes each unadvanced upper
+        // level at its start value (Word/LibreOffice: ilvl1, ilvl1, ilvl0,
+        // ilvl1 → 1.1 / 1.2 / 2 / 2.1). Upstream only *rendered* the start
+        // without recording it, so the first real upper item restarted at 1.
+        for upper in 0..ilvl {
+            if !state.initialized[upper] || state.restart_pending[upper] {
+                state.value[upper] = instance.levels[upper].start;
+                state.initialized[upper] = true;
+                state.restart_pending[upper] = false;
+            }
         }
         // Using level `ilvl` schedules restarts for deeper levels according
         // to their lvlRestart settings.

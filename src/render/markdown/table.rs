@@ -20,6 +20,16 @@ use crate::render::markdown::inline::{
 };
 
 pub(crate) fn render_table(table: &Table, rc: &Ctx) -> Option<String> {
+    // Fork (sznb): dedup_table_cells=false repeats merged content into every
+    // covered position (spans collapse), in both table forms.
+    if !rc.dedup_cells && table.has_spans() {
+        let expanded = table.expanded();
+        return render_table_form(&expanded, rc);
+    }
+    render_table_form(table, rc)
+}
+
+fn render_table_form(table: &Table, rc: &Ctx) -> Option<String> {
     if rc.html_tables {
         render_table_html(table, rc)
     } else {
@@ -63,7 +73,9 @@ fn render_table_html(table: &Table, rc: &Ctx) -> Option<String> {
         return None;
     }
     // Trailing rows whose every slot is blank (covered, or an empty origin)
-    // are scaffolding; drop them, as the GFM renderer did.
+    // are scaffolding; drop them, as the GFM renderer did. Fork (sznb): Word
+    // sources keep them (`Table::keep_empty_rows`) — only a wholly blank
+    // table still renders as nothing.
     let last_meaningful = table
         .grid
         .iter()
@@ -73,6 +85,7 @@ fn render_table_html(table: &Table, rc: &Ctx) -> Option<String> {
                 CellSlot::Covered { .. } => false,
             })
         })?;
+    let last_meaningful = if table.keep_empty_rows { table.grid.len() - 1 } else { last_meaningful };
     let mut lines: Vec<String> = vec!["<table>".to_string()];
     let mut nested: Vec<String> = Vec::new();
     for (ri, row) in table.grid.iter().take(last_meaningful + 1).enumerate() {
@@ -197,7 +210,8 @@ fn render_table_gfm(table: &Table, rc: &Ctx) -> Option<String> {
             cells
         })
         .collect();
-    while rendered.len() > 1
+    while !table.keep_empty_rows
+        && rendered.len() > 1
         && rendered.last().is_some_and(|r| r.iter().all(|c| c.text.is_empty() && !c.covered_span))
     {
         rendered.pop();

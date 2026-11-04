@@ -19,7 +19,6 @@ include = ["/src", "/examples/convert.rs", "/README.md", "/LICENSE"]
 
 [dev-dependencies]
 insta = "1"
-sha2 = "0.11"
 
 [dependencies]
 cfb = "0.14.0"
@@ -29,6 +28,8 @@ encoding_rs = "0.8.35"
 log = "0.4"
 pdf-inspector = "1.14.2"
 quick-xml = "0.41.0"
+# Fork (sznb): content-addressed names for extracted images.
+sha2 = "0.11"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [profile.release]

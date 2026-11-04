@@ -482,6 +482,33 @@ fn nested_list() {
 }
 
 #[test]
+fn literal_label_items_do_not_indent_nested_content() {
+    // Fork (sznb): a composite label is plain text, not GFM list syntax, so
+    // its nested list stays flush left like the source.
+    let para = |t: &str| Block::Paragraph(vec![Inline::plain(t)]);
+    let md = doc(vec![Block::List(List {
+        marker: MarkerKind::Decimal,
+        start: 5,
+        items: vec![ListItem {
+            blocks: vec![
+                para("发区数字"),
+                Block::List(List {
+                    marker: MarkerKind::Decimal,
+                    start: 1,
+                    items: vec![ListItem {
+                        blocks: vec![para("经济发展局")],
+                        marker_label: Some("1.5.1.".into()),
+                    }],
+                }),
+            ],
+            marker_label: Some("1.5.".into()),
+        }],
+    })]);
+    assert!(md.contains("1.5. 发区数字"), "{md:?}");
+    assert!(md.contains("\n1.5.1. 经济发展局"), "nested line must not be indented: {md:?}");
+}
+
+#[test]
 fn roman_and_alpha_markers_render_literally() {
     let item = |text: &str| ListItem {
         blocks: vec![Block::Paragraph(vec![Inline::plain(text)])],

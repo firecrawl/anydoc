@@ -22,6 +22,120 @@ pub fn field_result(instr: &str, content: Vec<Inline>) -> Vec<Inline> {
     }
 }
 
+/// Fork (sznb): complex-field nesting across paragraphs, to find the
+/// paragraphs a `TOC` field's result covers (the service's `content=false`
+/// drops them). Feed field events in document order, then call
+/// [`TocTracker::finish_paragraph`] at each paragraph end.
+#[derive(Default)]
+pub struct TocTracker {
+    /// Open fields (begin without its end yet).
+    depth: usize,
+    /// Nesting depth the open TOC field began at.
+    toc_at: Option<usize>,
+    /// Instruction text of the innermost field still before its separator.
+    instr: Option<(usize, String)>,
+    /// The current paragraph lies (partly) inside a TOC field.
+    touched: bool,
+    /// A TOC field began in the current paragraph.
+    started: bool,
+}
+
+impl TocTracker {
+    pub fn begin(&mut self) {
+        self.depth += 1;
+        self.instr = Some((self.depth, String::new()));
+    }
+
+    pub fn instr_text(&mut self, text: &str) {
+        if let Some((_, buf)) = self.instr.as_mut() {
+            buf.push_str(text);
+        }
+    }
+
+    pub fn separate(&mut self) {
+        self.close_instr();
+    }
+
+    pub fn end(&mut self) {
+        self.close_instr();
+        if self.toc_at == Some(self.depth) {
+            self.toc_at = None;
+            self.touched = true;
+        }
+        self.depth = self.depth.saturating_sub(1);
+    }
+
+    /// A self-contained field (`w:fldSimple`) with this instruction.
+    pub fn simple(&mut self, instr: &str) {
+        if is_toc_instr(instr) {
+            self.touched = true;
+            self.started = true;
+        }
+    }
+
+    /// True while the instruction of the innermost field is being read.
+    pub fn reading_instr(&self) -> bool {
+        self.instr.is_some()
+    }
+
+    fn close_instr(&mut self) {
+        if let Some((depth, instr)) = self.instr.take()
+            && self.toc_at.is_none()
+            && is_toc_instr(&instr)
+        {
+            self.toc_at = Some(depth);
+            self.touched = true;
+            self.started = true;
+        }
+    }
+
+    /// Paragraph end: `(in_toc, toc_started_here)`; resets for the next one.
+    pub fn finish_paragraph(&mut self) -> (bool, bool) {
+        let out = (self.touched || self.toc_at.is_some(), self.started);
+        self.touched = self.toc_at.is_some();
+        self.started = false;
+        out
+    }
+}
+
+/// A `TOC` field instruction (`TOC \o "1-3" \h \z \u`), any case.
+pub fn is_toc_instr(instr: &str) -> bool {
+    let t = instr.trim_start();
+    t.get(..3).is_some_and(|head| head.eq_ignore_ascii_case("TOC"))
+        && t[3..].chars().next().is_none_or(|c| c.is_whitespace() || c == '\\')
+}
+
+/// The title paragraph Word / WPS put right before a TOC (目录 / 目 录 /
+/// Contents / Table of Contents, or a short custom title ending in 目录 such
+/// as 「公共应用组件调用目录」). Only ever asked of the block right before a
+/// TOC, so the suffix rule cannot reach body text.
+pub fn is_toc_title(block: &crate::model::Block) -> bool {
+    use crate::model::Block;
+    let (Block::Paragraph(inlines) | Block::Heading { content: inlines, .. }) = block else {
+        return false;
+    };
+    let text: String = crate::model::inlines_to_plain_text(inlines)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_lowercase();
+    matches!(text.as_str(), "目录" | "目錄" | "contents" | "tableofcontents")
+        || ((text.ends_with("目录") || text.ends_with("目錄")) && text.chars().count() <= 30)
+}
+
+/// Fork (sznb): drop the TOC title — the last non-blank block, when it is
+/// one ([`is_toc_title`]). Blank paragraphs between title and TOC (vertical
+/// spacing) are looked past and left in place.
+pub fn drop_toc_title(blocks: &mut Vec<crate::model::Block>) {
+    use crate::model::Block;
+    let blank = |b: &Block| matches!(b, Block::Paragraph(inlines) if crate::model::inlines_are_empty(inlines));
+    if let Some(i) = blocks.iter().rposition(|b| !blank(b))
+        && is_toc_title(&blocks[i])
+    {
+        blocks.remove(i);
+    }
+}
+
 #[derive(Debug, PartialEq)]
 enum Token {
     Word(String),
