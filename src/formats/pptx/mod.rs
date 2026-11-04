@@ -32,7 +32,6 @@ const MASTER_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster";
 const NOTES_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide";
-const SLIDE_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide";
 
 /// Namespaces whose markup this frontend understands; `mc:Choice` branches
 /// requiring anything else fall back to `mc:Fallback`.
@@ -94,9 +93,10 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let mut blocks: Vec<Block> = Vec::new();
     let mut failed = 0usize;
     let instance_counter = StdCell::new(0u64);
-    // Every slide has a start anchor id so internal slide-to-slide links
-    // resolve after concatenation; the anchor node is emitted only on
-    // slides some link actually targets.
+    // Every slide carries a start anchor id: the node marks where the slide
+    // begins (downstream chunkers key on it) and lets internal slide-to-slide
+    // links resolve after concatenation. An anchor nothing links to renders
+    // as nothing in Markdown, so emitting one per slide is free.
     let slide_anchors: HashMap<String, String> = slide_paths
         .iter()
         .enumerate()
@@ -106,16 +106,6 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     for p in &slide_paths {
         all_rels.push(read_rels(&mut pkg.borrow_mut(), &rels_part_for(p))?);
     }
-    let targeted: std::collections::HashSet<String> = slide_paths
-        .iter()
-        .zip(&all_rels)
-        .flat_map(|(p, rels)| {
-            rels.iter()
-                .filter(|(_, r)| r.rel_type == SLIDE_REL && r.mode == TargetMode::Internal)
-                .filter_map(move |(_, r)| path::resolve(p, &r.target).ok().map(|t| t.path))
-        })
-        .filter(|t| slide_anchors.contains_key(t))
-        .collect();
 
     for (slide_index, slide_path) in slide_paths.iter().enumerate() {
         let tree = match pkg.borrow_mut().optional_xml_part(slide_path)? {
@@ -164,9 +154,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             instance_counter: &instance_counter,
             slide_anchors: &slide_anchors,
         };
-        if targeted.contains(slide_path)
-            && let Some(anchor) = slide_anchors.get(slide_path)
-        {
+        if let Some(anchor) = slide_anchors.get(slide_path) {
             blocks.push(Block::Paragraph(vec![Inline::Anchor(anchor.clone())]));
         }
         parse_shapes(sp_tree, &ctx, &mut blocks)?;
@@ -267,7 +255,8 @@ struct SlideCtx<'a, 'b> {
     master: Option<&'b MasterInfo>,
     /// Per-text-body list instance ids, unique document-wide.
     instance_counter: &'b StdCell<u64>,
-    /// Slide part path -> the slide's start anchor id, for internal
+    /// Slide part path -> the slide's start anchor id: the boundary marker
+    /// emitted before each slide's content and the target of internal
     /// slide-to-slide links.
     slide_anchors: &'b HashMap<String, String>,
 }
