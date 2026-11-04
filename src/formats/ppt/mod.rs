@@ -9,10 +9,11 @@
 mod styletext;
 
 use crate::error::ConvertError;
-use crate::model::{Block, Document, Inline, Style, inlines_are_empty};
+use crate::model::{Block, Cell, Document, GridBuilder, Inline, Style, TableKind, inlines_are_empty};
 use crate::package::limits;
 use crate::shared::binary::{get_u32, read_ole_stream, utf16le_units};
 use crate::shared::delta::{StyleDelta, rebase_emphasis};
+use crate::shared::header::resolve_header_rows;
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::officeart::record_at;
 use crate::shared::text::clean_text;
@@ -414,6 +415,14 @@ impl Extractor {
                 0x03F0 | 0x03F8 | 0x0FC9 => {}
                 // Only instance 0 of SlideListWithText holds slide text here.
                 0x0FF0 if ver_inst >> 4 != 0 => {}
+                // Fork (sznb): a table is a group shape flagged by the
+                // tableProperties property; rebuild its grid from the cell
+                // rectangles instead of emitting every cell as a paragraph.
+                0xF003 if is_table_group(body) => {
+                    if let Some(table) = self.table_from_group(body)? {
+                        self.current.push(table);
+                    }
+                }
                 _ => {
                     if stack.len() >= limits::MAX_RECORD_DEPTH {
                         return Err(ConvertError::ResourceLimit {
@@ -443,6 +452,109 @@ impl Extractor {
             self.atom(rec_type, body);
         }
         Ok(())
+    }
+
+    /// Fork (sznb): text of one shape container as blocks of its own, with
+    /// the slide-level text state set aside so nothing leaks across.
+    fn capture(&mut self, body: &[u8]) -> Result<Vec<Block>, ConvertError> {
+        self.flush_shape();
+        flush_list(&mut self.current, &mut self.list_run);
+        let saved_current = std::mem::take(&mut self.current);
+        let saved_list = std::mem::take(&mut self.list_run);
+        let walked = self.walk(body);
+        self.flush_shape();
+        flush_list(&mut self.current, &mut self.list_run);
+        let blocks = std::mem::replace(&mut self.current, saved_current);
+        self.list_run = saved_list;
+        walked?;
+        Ok(blocks)
+    }
+
+    /// Fork (sznb): rebuild a table group. PowerPoint 97-2003 stores a table
+    /// as a group of cell rectangles plus border lines; column / row
+    /// boundaries come from the cell anchors, and a rectangle crossing
+    /// boundaries is a merged cell with the matching spans. Without anchored
+    /// cells the group's text is emitted in order and `None` returned.
+    fn table_from_group(&mut self, group: &[u8]) -> Result<Option<Block>, ConvertError> {
+        let mut cells: Vec<(Rect, &[u8])> = Vec::new();
+        let mut loose: Vec<&[u8]> = Vec::new();
+        // The first SpContainer is the group shape itself.
+        for (_, rec_type, body) in children(group).skip(1) {
+            self.charge_record()?;
+            if rec_type != 0xF004 {
+                loose.push(body);
+                continue;
+            }
+            let shape_type =
+                children(body).find(|&(_, t, _)| t == 0xF00A).map(|(vi, ..)| vi >> 4).unwrap_or(0);
+            // msosptLine: cell borders.
+            if shape_type == 20 {
+                continue;
+            }
+            match anchor_of(body) {
+                Some(r) if r.right > r.left && r.bottom > r.top => cells.push((r, body)),
+                _ => loose.push(body),
+            }
+        }
+        let xs = boundaries(cells.iter().flat_map(|(r, _)| [r.left, r.right]));
+        let ys = boundaries(cells.iter().flat_map(|(r, _)| [r.top, r.bottom]));
+        let (ncols, nrows) = (xs.len().saturating_sub(1), ys.len().saturating_sub(1));
+        if cells.is_empty()
+            || ncols == 0
+            || nrows == 0
+            || (ncols as u64) * (nrows as u64) > limits::MAX_EXPANSION
+        {
+            for (_, body) in cells {
+                loose.push(body);
+            }
+            for body in loose {
+                let blocks = self.capture(body)?;
+                self.current.extend(blocks);
+            }
+            return Ok(None);
+        }
+        // Claim each cell's grid area; an origin landing on an owned position
+        // (overlapping rectangles) is dropped rather than double-placed.
+        let mut owned = vec![vec![false; ncols]; nrows];
+        let mut placed: Vec<((usize, usize), u32, u32, &[u8])> = Vec::new();
+        for (rect, body) in &cells {
+            let (c0, c1) = (snap(rect.left, &xs), snap(rect.right, &xs));
+            let (r0, r1) = (snap(rect.top, &ys), snap(rect.bottom, &ys));
+            if c1 <= c0 || r1 <= r0 || owned[r0][c0] {
+                continue;
+            }
+            for row in owned.iter_mut().take(r1).skip(r0) {
+                for slot in row.iter_mut().take(c1).skip(c0) {
+                    *slot = true;
+                }
+            }
+            placed.push(((r0, c0), (c1 - c0) as u32, (r1 - r0) as u32, *body));
+        }
+        let mut origins: HashMap<(usize, usize), Cell> = HashMap::new();
+        for (pos, col_span, row_span, body) in placed {
+            let blocks = self.capture(body)?;
+            origins.insert(pos, Cell::spanning(blocks, col_span, row_span));
+        }
+        let mut builder = GridBuilder::new();
+        // Authored slide tables keep blank tail rows (as Word sources do).
+        builder.keep_empty_rows();
+        for (r, row) in owned.iter().enumerate() {
+            builder.next_row();
+            for (c, &is_owned) in row.iter().enumerate() {
+                if let Some(cell) = origins.remove(&(r, c)) {
+                    builder.place(cell)?;
+                } else if !is_owned {
+                    builder.place(Cell::default())?;
+                }
+                // Positions a span covers materialize inside the builder.
+            }
+        }
+        let mut table = builder.finish(TableKind::Data);
+        if table.grid.is_empty() {
+            return Ok(None);
+        }
+        table.header_rows = resolve_header_rows(&table, 0);
+        Ok(Some(Block::Table(table)))
     }
 
     fn charge_record(&mut self) -> Result<(), ConvertError> {
@@ -632,5 +744,202 @@ impl Extractor {
                 self.current.push(Block::Paragraph(inlines));
             }
         }
+    }
+}
+
+/// Fork (sznb): a shape rectangle in its parent's coordinate space.
+#[derive(Debug, Clone, Copy)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+fn get_i32(b: &[u8], off: usize) -> Option<i32> {
+    get_u32(b, off).map(|v| v as i32)
+}
+
+fn get_i16(b: &[u8], off: usize) -> Option<i32> {
+    crate::shared::binary::get_u16(b, off).map(|v| v as i16 as i32)
+}
+
+/// Fork (sznb): a group shape is a table when its own shape (the group's
+/// first SpContainer) carries tableProperties (0x039F, low bit set) or
+/// tableRowProperties (0x03A0) in its primary or tertiary property table.
+fn is_table_group(group: &[u8]) -> bool {
+    let Some((_, 0xF004, own)) = record_at(group, 0) else {
+        return false;
+    };
+    children(own).filter(|&(_, t, _)| t == 0xF00B || t == 0xF122).any(|(vi, _, opt)| {
+        let count = (vi >> 4) as usize;
+        (0..count).any(|k| {
+            let Some(head) = crate::shared::binary::get_u16(opt, 6 * k) else {
+                return false;
+            };
+            let value = get_u32(opt, 6 * k + 2).unwrap_or(0);
+            match head & 0x3FFF {
+                0x039F => value & 1 != 0,
+                0x03A0 => true,
+                _ => false,
+            }
+        })
+    })
+}
+
+/// Fork (sznb): a shape's anchor - OfficeArtChildAnchor (0xF00F,
+/// left/top/right/bottom i32) inside groups, or the slide-level client
+/// anchor (0xF010: top/left/right/bottom, i16 or i32).
+fn anchor_of(shape: &[u8]) -> Option<Rect> {
+    for (_, rec_type, body) in children(shape) {
+        match (rec_type, body.len()) {
+            (0xF00F, 16..) => {
+                return Some(Rect {
+                    left: get_i32(body, 0)?,
+                    top: get_i32(body, 4)?,
+                    right: get_i32(body, 8)?,
+                    bottom: get_i32(body, 12)?,
+                });
+            }
+            (0xF010, 8) => {
+                return Some(Rect {
+                    top: get_i16(body, 0)?,
+                    left: get_i16(body, 2)?,
+                    right: get_i16(body, 4)?,
+                    bottom: get_i16(body, 6)?,
+                });
+            }
+            (0xF010, 16..) => {
+                return Some(Rect {
+                    top: get_i32(body, 0)?,
+                    left: get_i32(body, 4)?,
+                    right: get_i32(body, 8)?,
+                    bottom: get_i32(body, 12)?,
+                });
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Edges closer than this merge into one boundary (master units, 576 per
+/// inch): writers round each cell's edges independently.
+const EDGE_TOLERANCE: i32 = 8;
+
+/// Fork (sznb): sorted distinct edges, merging edges within the tolerance.
+fn boundaries(edges: impl Iterator<Item = i32>) -> Vec<i32> {
+    let mut v: Vec<i32> = edges.collect();
+    v.sort_unstable();
+    let mut out: Vec<i32> = Vec::new();
+    for e in v {
+        if out.last().is_none_or(|&last| e - last > EDGE_TOLERANCE) {
+            out.push(e);
+        }
+    }
+    out
+}
+
+/// Index of the boundary nearest to `edge`.
+fn snap(edge: i32, bounds: &[i32]) -> usize {
+    bounds
+        .iter()
+        .enumerate()
+        .min_by_key(|&(_, &b)| (b - edge).abs())
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod table_tests {
+    use super::*;
+    use crate::model::CellSlot;
+
+    #[test]
+    fn boundaries_merge_close_edges() {
+        assert_eq!(boundaries([0, 100, 103, 200, 0].into_iter()), vec![0, 100, 200]);
+        assert_eq!(snap(104, &[0, 100, 200]), 1);
+        assert_eq!(snap(199, &[0, 100, 200]), 2);
+    }
+
+    /// One record: header (ver_inst, type, len) + body.
+    fn rec(ver_inst: u16, rec_type: u16, body: &[u8]) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&ver_inst.to_le_bytes());
+        v.extend_from_slice(&rec_type.to_le_bytes());
+        v.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        v.extend_from_slice(body);
+        v
+    }
+
+    fn shape(shape_type: u16, rect: [i32; 4], text: Option<&str>) -> Vec<u8> {
+        let mut body = rec((shape_type << 4) | 2, 0xF00A, &[0; 8]);
+        let anchor: Vec<u8> = rect.iter().flat_map(|v| v.to_le_bytes()).collect();
+        body.extend(rec(0, 0xF00F, &anchor));
+        if let Some(t) = text {
+            let mut tb = rec(0, 0x0F9F, &[4, 0, 0, 0]);
+            let units: Vec<u8> = t.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+            tb.extend(rec(0, 0x0FA0, &units));
+            body.extend(rec(0xF, 0xF00D, &tb));
+        }
+        rec(0xF, 0xF004, &body)
+    }
+
+    fn group(table: bool) -> Vec<u8> {
+        let mut own = rec(0x1, 0xF009, &[0; 16]);
+        if table {
+            let mut opt = Vec::new();
+            opt.extend_from_slice(&0x039Fu16.to_le_bytes());
+            opt.extend_from_slice(&1u32.to_le_bytes());
+            own.extend(rec((1 << 4) | 3, 0xF122, &opt));
+        }
+        let mut g = rec(0xF, 0xF004, &own);
+        // 2 cols x 3 rows; column 0 rows 1-2 merged; edges off by 1 snap.
+        g.extend(shape(1, [0, 0, 100, 50], Some("A")));
+        g.extend(shape(1, [100, 0, 200, 50], Some("B")));
+        g.extend(shape(1, [0, 50, 100, 150], Some("M")));
+        g.extend(shape(1, [100, 50, 200, 100], Some("C")));
+        g.extend(shape(1, [101, 100, 200, 150], None));
+        g.extend(shape(20, [0, 50, 200, 50], None));
+        g
+    }
+
+    fn text_of(slot: &CellSlot) -> String {
+        match slot {
+            CellSlot::Origin(c) => c
+                .blocks
+                .iter()
+                .map(|b| match b {
+                    Block::Paragraph(i) => crate::model::inlines_to_plain_text(i),
+                    _ => String::new(),
+                })
+                .collect(),
+            CellSlot::Covered { .. } => "<covered>".into(),
+        }
+    }
+
+    #[test]
+    fn table_group_rebuilds_grid_with_spans() {
+        let g = group(true);
+        assert!(is_table_group(&g));
+        let mut ex = Extractor::default();
+        let Some(Block::Table(t)) = ex.table_from_group(&g).unwrap() else {
+            panic!("expected a table")
+        };
+        assert_eq!(t.grid.len(), 3);
+        assert!(t.grid.iter().all(|r| r.len() == 2));
+        let texts: Vec<Vec<String>> =
+            t.grid.iter().map(|r| r.iter().map(text_of).collect()).collect();
+        assert_eq!(texts, vec![vec!["A", "B"], vec!["M", "C"], vec!["<covered>", ""]]);
+        match &t.grid[1][0] {
+            CellSlot::Origin(c) => assert_eq!((c.col_span, c.row_span), (1, 2)),
+            _ => panic!("merged origin missing"),
+        }
+        assert!(ex.current.is_empty(), "cell text must not leak into the slide");
+    }
+
+    #[test]
+    fn plain_group_is_not_a_table() {
+        assert!(!is_table_group(&group(false)));
     }
 }
