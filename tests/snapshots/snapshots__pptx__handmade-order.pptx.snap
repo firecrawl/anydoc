@@ -2,6 +2,8 @@
 source: tests/snapshots.rs
 expression: output
 ---
+<a id="slide-1"></a>
+
 Kicker before the title
 
 ## Title placed second

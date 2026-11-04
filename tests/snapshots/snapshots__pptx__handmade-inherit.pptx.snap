@@ -2,6 +2,8 @@
 source: tests/snapshots.rs
 expression: output
 ---
+<a id="slide-1"></a>
+
 ## Inherited Title Slide
 
 - iii. **Roman three bold via master**

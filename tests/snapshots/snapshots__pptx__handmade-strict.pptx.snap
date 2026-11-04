@@ -2,6 +2,8 @@
 source: tests/snapshots.rs
 expression: output
 ---
+<a id="slide-1"></a>
+
 ## Strict slide title
 
 Strict body text
