@@ -13,7 +13,7 @@ use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
 use crate::shared::header::resolve_header_rows;
-use crate::shared::list::{ListEntry, ListKey, flush_list};
+use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::math::{omath_para_to_tex, omath_to_tex};
 use crate::shared::text::clean_text;
 use std::cell::RefCell;
@@ -182,7 +182,10 @@ fn emit_paragraph(kind: ParaKind, pieces: Vec<Piece>, blocks: &mut Vec<Block>, r
     match kind {
         ParaKind::ListItem { ilvl, key, number, label } => {
             runs.styled.flush(blocks);
-            let item = pieces_into_blocks(pieces);
+            let mut item = pieces_into_blocks(pieces);
+            if key.marker.ordered() {
+                strip_list_num_prefix(&mut item, key.marker, number, label.as_deref());
+            }
             runs.list.push(ListEntry { level: ilvl, key, number, label, blocks: item });
         }
         ParaKind::Styled(style) => {
@@ -703,6 +706,89 @@ fn split_pieces(pieces: Vec<Piece>) -> (Vec<Inline>, Vec<Block>) {
     (inlines, blocks)
 }
 
+/// Remove a baked-in ordered-list prefix from the start of a list item.
+///
+/// Programmatic DOCX writers (python-docx, docx.js, agent-written reports)
+/// often emit both `numPr` and the rendered prefix in the text itself, so an
+/// item arrives as "1. first item" while the renderer adds its own "1. " in
+/// front of it. Only the item's own marker is stripped — a composite label
+/// when the source carries one, otherwise the marker kind's text for this
+/// number — so a leading number that is not this item's marker (or a bullet
+/// item, handled by the caller's `ordered()` check) is left alone. The
+/// separator after the marker must be whitespace or the end of the leading
+/// text, so "1.5 volts" never loses its "1.", even across run boundaries.
+fn strip_list_num_prefix(
+    blocks: &mut [Block],
+    marker: MarkerKind,
+    number: u64,
+    label: Option<&str>,
+) {
+    let Some(Block::Paragraph(inlines)) = blocks.first_mut() else { return };
+    let expected = match label {
+        Some(label) => label.to_string(),
+        None => marker.label(number),
+    };
+
+    // Validate across run and hyperlink boundaries before changing any span.
+    let mut text = String::new();
+    collect_list_prefix_text(inlines, &mut text);
+    if let Some(rest) = text.trim_start().strip_prefix(expected.as_str())
+        && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+    {
+        let mut remaining = text.len() - rest.trim_start().len();
+        remove_list_prefix_text(inlines, &mut remaining);
+    }
+}
+
+/// Collect adjacent text, stopping at any other visible inline, including
+/// one nested inside a hyperlink. Anchors have no visible width.
+fn collect_list_prefix_text(inlines: &[Inline], text: &mut String) -> bool {
+    for inline in inlines {
+        match inline {
+            Inline::Text { text: span, .. } => text.push_str(span),
+            Inline::Link { content, target } => {
+                // An empty link label renders its target URL as visible text.
+                if (!target.is_empty() && inlines_are_empty(content))
+                    || !collect_list_prefix_text(content, text)
+                {
+                    return false;
+                }
+            }
+            Inline::Anchor(_) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn remove_list_prefix_text(inlines: &mut Vec<Inline>, remaining: &mut usize) {
+    let mut index = 0;
+    while index < inlines.len() && *remaining > 0 {
+        match &mut inlines[index] {
+            Inline::Text { text, .. } => {
+                let count = (*remaining).min(text.len());
+                text.drain(..count);
+                *remaining -= count;
+            }
+            Inline::Link { content, .. } => {
+                remove_list_prefix_text(content, remaining);
+                if inlines_are_empty(content) {
+                    // A consumed label must not turn into a visible URL.
+                    // Unwrap it so any anchors still keep their position.
+                    let children = std::mem::take(content);
+                    let count = children.len();
+                    inlines.splice(index..=index, children);
+                    index += count;
+                    continue;
+                }
+            }
+            Inline::Anchor(_) => {}
+            _ => return,
+        }
+        index += 1;
+    }
+}
+
 fn pieces_into_blocks(pieces: Vec<Piece>) -> Vec<Block> {
     let mut blocks = Vec::new();
     for piece in pieces {
@@ -970,6 +1056,198 @@ mod tests {
         runs.flush(&mut blocks);
         let [Block::List(list)] = &blocks[..] else { panic!("{blocks:?}") };
         assert!(list.items[0].blocks.is_empty(), "{:?}", list.items[0].blocks);
+    }
+
+    fn list_item_text(marker: MarkerKind, number: u64, label: Option<&str>, value: &str) -> String {
+        let mut blocks = Vec::new();
+        let mut runs = Runs::default();
+        emit_paragraph(
+            ParaKind::ListItem {
+                ilvl: 0,
+                key: ListKey { instance: 1, marker },
+                number,
+                label: label.map(str::to_string),
+            },
+            vec![text(value)],
+            &mut blocks,
+            &mut runs,
+        );
+        runs.flush(&mut blocks);
+        let [Block::List(list)] = &blocks[..] else { panic!("{blocks:?}") };
+        let [Block::Paragraph(inlines)] = &list.items[0].blocks[..] else {
+            panic!("{:?}", list.items[0].blocks)
+        };
+        crate::model::inlines_to_plain_text(inlines)
+    }
+
+    #[test]
+    fn baked_in_list_prefix_is_stripped_once() {
+        assert_eq!(list_item_text(MarkerKind::Decimal, 1, None, "1. first item"), "first item");
+        assert_eq!(list_item_text(MarkerKind::LowerRoman, 4, None, "iv. fourth"), "fourth");
+        assert_eq!(list_item_text(MarkerKind::LowerAlpha, 3, None, "c. third"), "third");
+        assert_eq!(list_item_text(MarkerKind::Decimal, 1, Some("1.1)"), "1.1) sub"), "sub");
+    }
+
+    #[test]
+    fn only_the_items_own_marker_is_stripped() {
+        // A different item's number, a bullet, and number-like content that
+        // is not a marker all stay untouched.
+        assert_eq!(list_item_text(MarkerKind::Decimal, 2, None, "1. first"), "1. first");
+        assert_eq!(list_item_text(MarkerKind::Bullet, 0, None, "1. first"), "1. first");
+        assert_eq!(list_item_text(MarkerKind::Decimal, 1, None, "1.5 volts"), "1.5 volts");
+        assert_eq!(list_item_text(MarkerKind::Decimal, 1, None, "e.g. foo"), "e.g. foo");
+    }
+
+    fn link(content: Vec<Inline>) -> Inline {
+        Inline::Link { content, target: LinkTarget::External("https://example.com".into()) }
+    }
+
+    #[test]
+    fn list_prefix_does_not_skip_the_first_block() {
+        use crate::model::{List, ListItem};
+
+        for first in [
+            Block::Math("x = 1".into()),
+            Block::heading(2, vec![Inline::plain("chart title")]),
+            Block::BlockQuote(vec![Block::Paragraph(vec![Inline::plain("text box")])]),
+            Block::List(List {
+                marker: MarkerKind::Bullet,
+                start: 0,
+                items: vec![ListItem {
+                    blocks: vec![Block::Paragraph(vec![Inline::plain("nested item")])],
+                    marker_label: None,
+                }],
+            }),
+            Block::Paragraph(Vec::new()),
+        ] {
+            let mut blocks = Vec::new();
+            let mut runs = Runs::default();
+            emit_paragraph(
+                ParaKind::ListItem {
+                    ilvl: 0,
+                    key: ListKey { instance: 1, marker: MarkerKind::Decimal },
+                    number: 1,
+                    label: None,
+                },
+                vec![Piece::Blocks(vec![first]), text("1. later paragraph")],
+                &mut blocks,
+                &mut runs,
+            );
+            runs.flush(&mut blocks);
+            let [Block::List(list)] = &blocks[..] else { panic!("{blocks:?}") };
+            assert_eq!(list.items[0].blocks.len(), 2);
+            assert_text(&list.items[0].blocks[1], "1. later paragraph");
+        }
+    }
+
+    #[test]
+    fn list_prefix_crosses_styled_runs_and_anchors() {
+        let bold = Style { bold: true, ..Style::PLAIN };
+        let italic = Style { italic: true, ..Style::PLAIN };
+        let mut blocks = vec![Block::Paragraph(vec![
+            Inline::plain("\u{2003}"),
+            Inline::Text { text: "1".into(), style: bold },
+            Inline::Anchor("mark".into()),
+            Inline::plain(""),
+            Inline::plain("."),
+            Inline::plain("\t"),
+            Inline::Text { text: " \u{2003}項目".into(), style: italic },
+        ])];
+        strip_list_num_prefix(&mut blocks, MarkerKind::Decimal, 1, None);
+        assert_text(&blocks[0], "項目");
+        let Block::Paragraph(inlines) = &blocks[0] else { unreachable!() };
+        assert!(
+            matches!(&inlines[1], Inline::Text { text, style } if text.is_empty() && *style == bold)
+        );
+        assert!(matches!(&inlines[2], Inline::Anchor(id) if id == "mark"));
+        assert!(
+            matches!(&inlines[6], Inline::Text { text, style } if text == "項目" && *style == italic)
+        );
+    }
+
+    #[test]
+    fn list_prefix_crosses_hyperlinks_and_nested_text() {
+        for (inlines, expected) in [
+            (vec![link(vec![Inline::plain("1. item")])], "[item](https://example.com)\n"),
+            (
+                vec![link(vec![Inline::plain("1"), Inline::plain("."), Inline::plain(" item")])],
+                "[item](https://example.com)\n",
+            ),
+            (
+                vec![Inline::plain("1"), link(vec![Inline::plain(". item")])],
+                "[item](https://example.com)\n",
+            ),
+            (vec![link(vec![Inline::plain("1.")]), Inline::plain(" item")], "item\n"),
+            (
+                vec![link(vec![link(vec![Inline::plain("1.")]), Inline::plain(" item")])],
+                "[item](https://example.com)\n",
+            ),
+        ] {
+            let mut blocks = vec![Block::Paragraph(inlines)];
+            strip_list_num_prefix(&mut blocks, MarkerKind::Decimal, 1, None);
+            assert_text(&blocks[0], "item");
+            let doc = crate::model::Document { blocks, ..Default::default() };
+            assert_eq!(crate::render::markdown::document_to_markdown(&doc), expected);
+        }
+    }
+
+    #[test]
+    fn list_prefix_keeps_anchors_in_a_consumed_hyperlink() {
+        let mut blocks = vec![Block::Paragraph(vec![
+            link(vec![Inline::Anchor("mark".into()), Inline::plain("1.")]),
+            Inline::plain(" item"),
+        ])];
+        strip_list_num_prefix(&mut blocks, MarkerKind::Decimal, 1, None);
+        assert_text(&blocks[0], "item");
+        let Block::Paragraph(inlines) = &blocks[0] else { unreachable!() };
+        assert!(matches!(&inlines[0], Inline::Anchor(id) if id == "mark"));
+    }
+
+    #[test]
+    fn list_prefix_requires_a_separator_across_runs() {
+        for inlines in [
+            vec![Inline::plain("1."), Inline::plain("5 volts")],
+            vec![Inline::plain("1"), link(vec![Inline::plain(".5 volts")])],
+            vec![link(vec![Inline::plain("1.")]), Inline::plain("5 volts")],
+            vec![Inline::plain("1"), Inline::plain("2. item")],
+            vec![Inline::plain("1"), Inline::plain("x item")],
+        ] {
+            let expected = crate::model::inlines_to_plain_text(&inlines);
+            let mut blocks = vec![Block::Paragraph(inlines)];
+            strip_list_num_prefix(&mut blocks, MarkerKind::Decimal, 1, None);
+            assert_text(&blocks[0], &expected);
+        }
+    }
+
+    #[test]
+    fn list_prefix_stops_at_other_visible_inlines() {
+        for first in [
+            Inline::Image { alt: "image".into(), source: ImageSource::Unavailable },
+            Inline::Math("x".into()),
+            Inline::NoteRef("note".into()),
+            Inline::Checkbox(false),
+            Inline::LineBreak,
+            link(Vec::new()),
+        ] {
+            for first in [first.clone(), link(vec![first])] {
+                let mut blocks = vec![Block::Paragraph(vec![first, Inline::plain("1. later")])];
+                strip_list_num_prefix(&mut blocks, MarkerKind::Decimal, 1, None);
+                let Block::Paragraph(inlines) = &blocks[0] else { unreachable!() };
+                assert!(matches!(&inlines[1], Inline::Text { text, .. } if text == "1. later"));
+            }
+        }
+    }
+
+    #[test]
+    fn list_prefix_can_end_after_several_runs() {
+        let mut blocks = vec![Block::Paragraph(vec![
+            Inline::plain("\u{2003}第"),
+            link(vec![Inline::plain("1")]),
+            Inline::plain(")"),
+            Inline::plain("\t"),
+        ])];
+        strip_list_num_prefix(&mut blocks, MarkerKind::Decimal, 1, Some("第1)"));
+        assert_text(&blocks[0], "");
     }
 
     #[test]
