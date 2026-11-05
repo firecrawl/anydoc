@@ -13,7 +13,7 @@ use crate::shared::blockstyle::{BlockStyle, StyledRun};
 use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
 use crate::shared::header::resolve_header_rows;
-use crate::shared::list::{ListEntry, ListKey, flush_list};
+use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::math::{omath_para_to_tex, omath_to_tex};
 use crate::shared::text::clean_text;
 use std::cell::RefCell;
@@ -182,7 +182,10 @@ fn emit_paragraph(kind: ParaKind, pieces: Vec<Piece>, blocks: &mut Vec<Block>, r
     match kind {
         ParaKind::ListItem { ilvl, key, number, label } => {
             runs.styled.flush(blocks);
-            let item = pieces_into_blocks(pieces);
+            let mut item = pieces_into_blocks(pieces);
+            if key.marker.ordered() {
+                strip_list_num_prefix(&mut item, key.marker, number, label.as_deref());
+            }
             runs.list.push(ListEntry { level: ilvl, key, number, label, blocks: item });
         }
         ParaKind::Styled(style) => {
@@ -703,6 +706,48 @@ fn split_pieces(pieces: Vec<Piece>) -> (Vec<Inline>, Vec<Block>) {
     (inlines, blocks)
 }
 
+/// Remove a baked-in ordered-list prefix from the start of a list item.
+///
+/// Programmatic DOCX writers (python-docx, docx.js, agent-written reports)
+/// often emit both `numPr` and the rendered prefix in the text itself, so an
+/// item arrives as "1. first item" while the renderer adds its own "1. " in
+/// front of it. Only the item's own marker is stripped — a composite label
+/// when the source carries one, otherwise the marker kind's text for this
+/// number — so a leading number that is not this item's marker (or a bullet
+/// item, handled by the caller's `ordered()` check) is left alone. The
+/// separator after the marker must be whitespace or the end of the run, so
+/// "1.5 volts" never loses its "1.".
+fn strip_list_num_prefix(
+    blocks: &mut [Block],
+    marker: MarkerKind,
+    number: u64,
+    label: Option<&str>,
+) {
+    let expected = match label {
+        Some(label) => label.to_string(),
+        None => marker.label(number),
+    };
+    for block in blocks.iter_mut() {
+        let Block::Paragraph(inlines) = block else { continue };
+        for inline in inlines.iter_mut() {
+            match inline {
+                Inline::Text { text, .. } if !text.trim().is_empty() => {
+                    let trimmed = text.trim_start();
+                    if let Some(rest) = trimmed.strip_prefix(expected.as_str())
+                        && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+                    {
+                        *text = rest.trim_start().to_string();
+                    }
+                    return;
+                }
+                Inline::Text { .. } | Inline::Anchor(_) => {}
+                _ => return,
+            }
+        }
+        return;
+    }
+}
+
 fn pieces_into_blocks(pieces: Vec<Piece>) -> Vec<Block> {
     let mut blocks = Vec::new();
     for piece in pieces {
@@ -970,6 +1015,46 @@ mod tests {
         runs.flush(&mut blocks);
         let [Block::List(list)] = &blocks[..] else { panic!("{blocks:?}") };
         assert!(list.items[0].blocks.is_empty(), "{:?}", list.items[0].blocks);
+    }
+
+    fn list_item_text(marker: MarkerKind, number: u64, label: Option<&str>, value: &str) -> String {
+        let mut blocks = Vec::new();
+        let mut runs = Runs::default();
+        emit_paragraph(
+            ParaKind::ListItem {
+                ilvl: 0,
+                key: ListKey { instance: 1, marker },
+                number,
+                label: label.map(str::to_string),
+            },
+            vec![text(value)],
+            &mut blocks,
+            &mut runs,
+        );
+        runs.flush(&mut blocks);
+        let [Block::List(list)] = &blocks[..] else { panic!("{blocks:?}") };
+        let [Block::Paragraph(inlines)] = &list.items[0].blocks[..] else {
+            panic!("{:?}", list.items[0].blocks)
+        };
+        crate::model::inlines_to_plain_text(inlines)
+    }
+
+    #[test]
+    fn baked_in_list_prefix_is_stripped_once() {
+        assert_eq!(list_item_text(MarkerKind::Decimal, 1, None, "1. first item"), "first item");
+        assert_eq!(list_item_text(MarkerKind::LowerRoman, 4, None, "iv. fourth"), "fourth");
+        assert_eq!(list_item_text(MarkerKind::LowerAlpha, 3, None, "c. third"), "third");
+        assert_eq!(list_item_text(MarkerKind::Decimal, 1, Some("1.1)"), "1.1) sub"), "sub");
+    }
+
+    #[test]
+    fn only_the_items_own_marker_is_stripped() {
+        // A different item's number, a bullet, and number-like content that
+        // is not a marker all stay untouched.
+        assert_eq!(list_item_text(MarkerKind::Decimal, 2, None, "1. first"), "1. first");
+        assert_eq!(list_item_text(MarkerKind::Bullet, 0, None, "1. first"), "1. first");
+        assert_eq!(list_item_text(MarkerKind::Decimal, 1, None, "1.5 volts"), "1.5 volts");
+        assert_eq!(list_item_text(MarkerKind::Decimal, 1, None, "e.g. foo"), "e.g. foo");
     }
 
     #[test]
