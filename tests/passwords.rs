@@ -39,7 +39,7 @@ fn encrypted_ooxml_without_the_right_password_stays_encrypted() {
 
 #[test]
 fn oversized_encrypted_package_is_rejected() {
-    // A tiny encrypted container declaring a plaintext length of u32::MAX.
+    // The valid DOCX fixture with only its package length changed to u32::MAX.
     // Decryption must reject this before allocating the declared ~4 GiB.
     let bytes = include_bytes!("fixtures/malformed/oversized-encrypted-package--errors.docx");
     assert!(matches!(

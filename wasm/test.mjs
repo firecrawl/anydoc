@@ -32,7 +32,11 @@ test('toMarkdownBytes converts in memory', () => {
 })
 
 test('password-protected OOXML converts with the password', () => {
-  assert.ok(toMarkdownBytes(ENCRYPTED_DOCX, undefined, 'testPassword').length > 0)
+  assert.match(toMarkdownBytes(ENCRYPTED_DOCX, undefined, 'testPassword'), /testing testing/)
+  const document = toDocument(ENCRYPTED_DOCX, undefined, 'testPassword')
+  assert.ok(document.blocks.some((block) => block.kind === 'paragraph' &&
+    block.content.some((inline) => inline.text === 'testing testing')))
+  assert.throws(() => toDocument(ENCRYPTED_DOCX, undefined, 'wrong'), { code: 'encrypted' })
   assert.throws(() => toMarkdownBytes(ENCRYPTED_DOCX, undefined, 'wrong'), { code: 'encrypted' })
 })
 

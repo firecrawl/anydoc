@@ -114,13 +114,16 @@ pub fn to_markdown_with_password(
 
 fn to_markdown_path(path: &Path, password: Option<&str>) -> Result<String, ConvertError> {
     let bytes = std::fs::read(path)?;
-    let Some(format) = Format::from_bytes(&bytes).or_else(|| Format::from_path(path)) else {
+    let format = Format::from_bytes(&bytes).or_else(|| Format::from_path(path));
+    if format.is_none()
+        && !matches!(package::archive::probe_ole(&bytes), Some(ConvertError::Encrypted))
+    {
         return Err(ConvertError::Unsupported(format!(
             "unrecognized file content and extension: {}",
             path.display()
         )));
     };
-    to_markdown_bytes_impl(&bytes, Some(format), password)
+    to_markdown_bytes_impl(&bytes, format, password)
 }
 
 /// Convert an in-memory document to Markdown. Pass a [`Format`] to select the
@@ -200,6 +203,8 @@ fn prepare_input<'a>(
         let decrypted = office_crypto::decrypt_from_bytes(bytes.to_vec(), password)
             .map_err(|_| ConvertError::Encrypted)?;
         let Some(format) = Format::from_bytes(&decrypted) else {
+            // office-crypto can return garbage bytes for a wrong password.
+            // Successful decryption alone does not authenticate the password.
             return Err(ConvertError::Encrypted);
         };
         return Ok((Cow::Owned(decrypted), format));

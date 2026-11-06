@@ -84,6 +84,13 @@ class AnydocTest(unittest.TestCase):
         self.assertIn("testing testing", anydoc.to_markdown_bytes(data, password="testPassword"))
         self.assertIn("heres some data", anydoc.to_markdown(
             FIXTURES / "encrypted" / "password-test.xlsx", password="testPassword"))
+        document = anydoc.to_document(data, password="testPassword")
+        self.assertTrue(any(
+            block.kind == "paragraph" and any(inline.text == "testing testing" for inline in block.content)
+            for block in document.blocks
+        ))
+        with self.assertRaises(anydoc.EncryptedError):
+            anydoc.to_document(data, password="wrong")
         with self.assertRaises(anydoc.EncryptedError):
             anydoc.to_markdown_bytes(data, password="wrong")
 

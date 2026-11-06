@@ -74,6 +74,8 @@ def to_markdown(
     file content; the extension is the fallback for signature-less formats
     (CSV) and unrecognizable containers.
 
+    `password` decrypts encrypted OOXML (.docx, .xlsx, .pptx) locally.
+
     For `ocr="hosted"`, `parse_mode` picks the Parse PDF mode, and any other
     value raises `HostedError` before anything is sent; `api_key` falls back
     to `FIRECRAWL_API_KEY`, then keyless; `api_url` to `FIRECRAWL_API_URL`,
@@ -100,7 +102,8 @@ def to_markdown_bytes(
 ) -> str:
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
-    name explicitly. `ocr`, `parse_mode`, `api_key` and `api_url` are as
+    name explicitly. `password` decrypts encrypted OOXML locally.
+    `ocr`, `parse_mode`, `api_key` and `api_url` are as
     for `to_markdown`."""
     _check_parse_mode(parse_mode)
     try:

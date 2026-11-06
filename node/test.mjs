@@ -1,7 +1,7 @@
 // Smoke test: the bindings load and every entry point round-trips a fixture.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -43,6 +43,20 @@ test('password-protected OOXML converts with the password', async () => {
   assert.match(await toMarkdownBytes(bytes, undefined, { password: 'testPassword' }), /testing testing/)
   assert.match(await toMarkdown(ENCRYPTED_XLSX, { password: 'testPassword' }), /heres some data/)
   await assert.rejects(toMarkdownBytes(bytes, undefined, { password: 'wrong' }), { code: 'encrypted' })
+})
+
+test('encrypted files convert without a recognized extension', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'anydoc-encrypted-'))
+  try {
+    for (const name of ['workbook', 'workbook.bin']) {
+      const path = join(dir, name)
+      await copyFile(ENCRYPTED_XLSX, path)
+      assert.match(await toMarkdown(path, { password: 'testPassword' }), /heres some data/)
+      await assert.rejects(toMarkdown(path), { code: 'encrypted' })
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('toMarkdownBytes detects the format when none is named', async () => {

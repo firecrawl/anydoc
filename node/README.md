@@ -49,7 +49,7 @@ import { toDocument, toMarkdown, toMarkdownBytes } from '@firecrawl/anydoc';
 // From a file path:
 const markdown = await toMarkdown('report.docx');
 
-// Decrypt a password-protected Office document.
+// Decrypt a password-protected OOXML document (.docx, .xlsx, .pptx).
 const decrypted = await toMarkdown('report.xlsx', { password: 'secret' });
 
 // From bytes, with the format detected from the content:
