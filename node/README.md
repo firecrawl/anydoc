@@ -32,8 +32,12 @@ The package ships an `anydoc` command, so `npx` converts a document with no inst
 npx @firecrawl/anydoc report.docx               # Markdown to stdout
 npx @firecrawl/anydoc slides.pptx -o slides.md  # or to a file
 npx @firecrawl/anydoc - --format csv < data.csv # read stdin
+npx @firecrawl/anydoc report.docx --password secret
 npx @firecrawl/anydoc scan.pdf --ocr hosted     # scanned pages via Firecrawl Parse
 ```
+
+Set `ANYDOC_PASSWORD` instead of using `--password` when the password should
+not appear in shell history or the process list.
 
 Markdown goes to stdout, errors to stderr, and `anydoc --help` covers the rest.
 
@@ -44,6 +48,9 @@ import { toDocument, toMarkdown, toMarkdownBytes } from '@firecrawl/anydoc';
 
 // From a file path:
 const markdown = await toMarkdown('report.docx');
+
+// Decrypt a password-protected OOXML document (.docx, .xlsx, .pptx).
+const decrypted = await toMarkdown('report.xlsx', { password: 'secret' });
 
 // From bytes, with the format detected from the content:
 const fromBytes = await toMarkdownBytes(bytes);

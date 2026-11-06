@@ -19,7 +19,7 @@ const PARSE_MODES = ['auto', 'fast', 'ocr']
 async function toMarkdown(path, options) {
   checkParseMode(options)
   try {
-    return await native.toMarkdown(path)
+    return await native.toMarkdown(path, options?.password)
   } catch (error) {
     if (!sendsToHosted(error, options)) throw error
     return parseHosted(await readFile(path), basename(path), options)
@@ -30,7 +30,7 @@ async function toMarkdown(path, options) {
 async function toMarkdownBytes(bytes, format, options) {
   checkParseMode(options)
   try {
-    return await native.toMarkdownBytes(bytes, format)
+    return await native.toMarkdownBytes(bytes, format, options?.password)
   } catch (error) {
     if (!sendsToHosted(error, options)) throw error
     return parseHosted(bytes, 'document.pdf', options)

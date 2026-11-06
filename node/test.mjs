@@ -1,7 +1,7 @@
 // Smoke test: the bindings load and every entry point round-trips a fixture.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,6 +24,8 @@ const OUTLINE = fixture('docx/handmade-outline.docx')
 const RICH = fixture('docx/handmade-rich.docx')
 const CSV = fixture('csv/sheet.csv')
 const ENCRYPTED = fixture('malformed/encrypted--errors.odt')
+const ENCRYPTED_DOCX = fixture('encrypted/password-test.docx')
+const ENCRYPTED_XLSX = fixture('encrypted/password-test.xlsx')
 const MIXED = fixture('pdf/handmade-mixed.pdf')
 
 test('toMarkdown detects the format from the file content', async () => {
@@ -34,6 +36,27 @@ test('toMarkdown detects the format from the file content', async () => {
 test('toMarkdownBytes converts in memory', async () => {
   const markdown = await toMarkdownBytes(await readFile(RICH), 'docx')
   assert.match(markdown, /\| Quarter \| Widgets \|/)
+})
+
+test('password-protected OOXML converts with the password', async () => {
+  const bytes = await readFile(ENCRYPTED_DOCX)
+  assert.match(await toMarkdownBytes(bytes, undefined, { password: 'testPassword' }), /testing testing/)
+  assert.match(await toMarkdown(ENCRYPTED_XLSX, { password: 'testPassword' }), /heres some data/)
+  await assert.rejects(toMarkdownBytes(bytes, undefined, { password: 'wrong' }), { code: 'encrypted' })
+})
+
+test('encrypted files convert without a recognized extension', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'anydoc-encrypted-'))
+  try {
+    for (const name of ['workbook', 'workbook.bin']) {
+      const path = join(dir, name)
+      await copyFile(ENCRYPTED_XLSX, path)
+      assert.match(await toMarkdown(path, { password: 'testPassword' }), /heres some data/)
+      await assert.rejects(toMarkdown(path), { code: 'encrypted' })
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('toMarkdownBytes detects the format when none is named', async () => {
@@ -219,6 +242,18 @@ test('cli reads stdin with an explicit format', async () => {
   child.child.stdin.end(await readFile(CSV))
   const { stdout } = await child
   assert.match(stdout, /\| --- \|/)
+})
+
+test('cli decrypts OOXML with an argument or environment password', async () => {
+  const fromArgument = await runCli([ENCRYPTED_XLSX, '--password', 'testPassword'])
+  assert.equal(fromArgument.code, undefined)
+  assert.match(fromArgument.stdout, /heres some data/)
+
+  const fromEnvironment = await runCli([ENCRYPTED_XLSX], {
+    env: { ...process.env, ANYDOC_PASSWORD: 'testPassword' },
+  })
+  assert.equal(fromEnvironment.code, undefined)
+  assert.match(fromEnvironment.stdout, /heres some data/)
 })
 
 test('cli exits 1 when the document cannot be converted', async () => {

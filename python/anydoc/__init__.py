@@ -64,6 +64,7 @@ class HostedError(ConvertError):
 def to_markdown(
     path: "str | os.PathLike[str]",
     *,
+    password: "str | None" = None,
     ocr: Ocr = "reject",
     parse_mode: ParseMode = "auto",
     api_key: "str | None" = None,
@@ -73,13 +74,15 @@ def to_markdown(
     file content; the extension is the fallback for signature-less formats
     (CSV) and unrecognizable containers.
 
+    `password` decrypts encrypted OOXML (.docx, .xlsx, .pptx) locally.
+
     For `ocr="hosted"`, `parse_mode` picks the Parse PDF mode, and any other
     value raises `HostedError` before anything is sent; `api_key` falls back
     to `FIRECRAWL_API_KEY`, then keyless; `api_url` to `FIRECRAWL_API_URL`,
     then `https://api.firecrawl.dev`."""
     _check_parse_mode(parse_mode)
     try:
-        return _to_markdown(path)
+        return _to_markdown(path, password)
     except NeedsOcrError:
         if ocr != "hosted":
             raise
@@ -91,6 +94,7 @@ def to_markdown_bytes(
     data: "bytes | bytearray",
     format: "Format | None" = None,
     *,
+    password: "str | None" = None,
     ocr: Ocr = "reject",
     parse_mode: ParseMode = "auto",
     api_key: "str | None" = None,
@@ -98,11 +102,12 @@ def to_markdown_bytes(
 ) -> str:
     """Convert an in-memory document to Markdown. Without a format, it is
     detected from the content, which signature-less formats (CSV) have to
-    name explicitly. `ocr`, `parse_mode`, `api_key` and `api_url` are as
+    name explicitly. `password` decrypts encrypted OOXML locally.
+    `ocr`, `parse_mode`, `api_key` and `api_url` are as
     for `to_markdown`."""
     _check_parse_mode(parse_mode)
     try:
-        return _to_markdown_bytes(data, format)
+        return _to_markdown_bytes(data, format, password)
     except NeedsOcrError:
         if ocr != "hosted":
             raise

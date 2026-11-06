@@ -13,7 +13,7 @@ Usage:
 
 Converts one document per invocation and writes the Markdown to stdout.
 Pass - as the input to read the document from stdin. Never prompts; all
-diagnostics go to stderr.
+diagnostics go to stderr. ANYDOC_PASSWORD is used when --password is omitted.
 
 Options:
   -o, --output <path>    Write the Markdown to <path> instead of stdout
@@ -21,6 +21,7 @@ Options:
                          ${FORMATS}
                          (extension aliases like xls, docm, ppsx resolve
                          to these)
+  -p, --password <value> Decrypt a password-protected OOXML document
   --ocr <mode>           What to do with a PDF whose pages need OCR:
                          reject (default) exits 3; hosted sends the
                          document to Firecrawl Parse
@@ -67,7 +68,7 @@ function fail(code, message) {
 }
 
 function parseArgs(argv) {
-  const args = { input: null, output: null, format: null, ocr: null, parseMode: null, apiKey: null, apiUrl: null }
+  const args = { input: null, output: null, format: null, password: null, ocr: null, parseMode: null, apiKey: null, apiUrl: null }
   let positionalOnly = false
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i]
@@ -111,6 +112,10 @@ function parseArgs(argv) {
       case '-f':
       case '--format':
         args.format = value()
+        break
+      case '-p':
+      case '--password':
+        args.password = value()
         break
       case '--ocr':
         args.ocr = value()
@@ -167,6 +172,7 @@ async function main() {
   }
 
   const options = {
+    password: args.password ?? process.env.ANYDOC_PASSWORD,
     ocr: args.ocr ?? undefined,
     parseMode: args.parseMode ?? undefined,
     apiKey: args.apiKey ?? undefined,

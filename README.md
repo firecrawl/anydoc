@@ -47,6 +47,9 @@ import { toDocument, toMarkdown, toMarkdownBytes } from '@firecrawl/anydoc';
 // From a file path:
 const markdown = await toMarkdown('report.docx');
 
+// Decrypt a password-protected OOXML document (.docx, .xlsx, .pptx).
+const decrypted = await toMarkdown('report.xlsx', { password: 'secret' });
+
 // To enable OCR:
 const markdown = await toMarkdown('report.docx', { ocr: 'hosted' );
 
@@ -82,6 +85,9 @@ markdown = anydoc.to_markdown_bytes(data)
 
 # Or name it, which signature-less formats (CSV) need:
 markdown = anydoc.to_markdown_bytes(data, "csv")
+
+# Password-protected OOXML
+markdown = anydoc.to_markdown_bytes(data, password="secret")
 
 # Or stop at the document model, which also carries embedded assets:
 document = anydoc.to_document(data)
@@ -127,6 +133,9 @@ let markdown = anydoc::to_markdown_bytes(&bytes, None)?;
 
 // Or name it, which signature-less formats (CSV) need:
 let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Csv)?;
+
+// Password-protected OOXML
+let markdown = anydoc::to_markdown_bytes_with_password(&bytes, None, "secret")?;
 
 // Or stop at the document model, which also carries embedded assets:
 let document = anydoc::to_document(&bytes, None)?;

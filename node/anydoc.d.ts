@@ -1,8 +1,10 @@
 export * from './index.js'
 import type { Format } from './index.js'
 
-/** What happens to a PDF whose pages need OCR. */
+/** Password decryption and handling of PDFs whose pages need OCR. */
 export interface ConvertOptions {
+  /** Password for an encrypted OOXML document. */
+  password?: string
   /**
    * `reject` (the default) rejects with `needsOcr` naming the pages.
    * `hosted` sends the whole document to Firecrawl Parse instead, keyless
