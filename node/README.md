@@ -33,6 +33,7 @@ npx @firecrawl/anydoc report.docx               # Markdown to stdout
 npx @firecrawl/anydoc slides.pptx -o slides.md  # or to a file
 npx @firecrawl/anydoc - --format csv < data.csv # read stdin
 npx @firecrawl/anydoc report.docx --password secret
+npx @firecrawl/anydoc scan.pdf --ocr hosted     # scanned pages via Firecrawl Parse
 ```
 
 Set `ANYDOC_PASSWORD` instead of using `--password` when the password should
@@ -48,6 +49,9 @@ import { toDocument, toMarkdown, toMarkdownBytes } from '@firecrawl/anydoc';
 // From a file path:
 const markdown = await toMarkdown('report.docx');
 
+// Decrypt a password-protected Office document.
+const decrypted = await toMarkdown('report.xlsx', { password: 'secret' });
+
 // From bytes, with the format detected from the content:
 const fromBytes = await toMarkdownBytes(bytes);
 
@@ -58,9 +62,25 @@ const fromCsv = await toMarkdownBytes(bytes, 'csv');
 const document = await toDocument(bytes);
 ```
 
+## Scanned pages
+
+anydoc converts locally and does not do OCR, so a PDF with scanned or image-only pages rejects with `needsOcr`. Opt in with `ocr: 'hosted'` to send that document to [Firecrawl Parse](https://firecrawl.dev/parse). No signup needed. Set `apiKey` or `FIRECRAWL_API_KEY` for higher limits.
+
+```js
+const markdown = await toMarkdown('scan.pdf', { ocr: 'hosted' });
+```
+
+`parseMode` picks the Parse PDF mode: `'auto'` (the default) extracts text and falls back to OCR, `'fast'` extracts text only, `'ocr'` OCRs every page. Any other value rejects with `code: 'hosted'` before anything is sent.
+
+```js
+const markdown = await toMarkdown('scan.pdf', { ocr: 'hosted', parseMode: 'ocr' });
+```
+
+On the CLI, `anydoc scan.pdf --ocr hosted`, and `--parse-mode ocr` to pick the mode.
+
 ## Errors
 
-A conversion rejects only when no meaningful Markdown could come out of the file. The rejection is an `Error` whose `code` names what went wrong:
+A conversion rejects only when no complete Markdown could come out of the file. The rejection is an `Error` whose `code` names what went wrong:
 
 ```js
 try {
@@ -77,12 +97,14 @@ try {
 
 | `code`          | Meaning                                                             |
 | --------------- | ------------------------------------------------------------------- |
-| `unsupported`   | Unknown format, or one that cannot be converted (an image-only PDF) |
+| `unsupported`   | Unknown format, or one that cannot be converted                     |
+| `needsOcr`      | Scanned or image-only pages of a PDF, listed in `pages`             |
 | `malformed`     | Structurally unusable: no meaningful content could be extracted     |
 | `encrypted`     | Encrypted or password-protected                                     |
 | `resourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |
 | `missingPart`   | A part required for any meaningful output is absent                 |
 | `io`            | The file could not be read, from `toMarkdown` only                  |
+| `hosted`        | `ocr: 'hosted'` could not get the document through Firecrawl Parse  |
 
 `error.message` carries the detail, naming the package part at fault where the format identifies one. TypeScript gets the union as `ConvertErrorCode`.
 

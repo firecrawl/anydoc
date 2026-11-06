@@ -147,7 +147,7 @@ fn collect_note_refs(
                 }
             }
             Block::BlockQuote(blocks) => collect_note_refs(blocks, valid, order, seen),
-            Block::CodeBlock { .. } | Block::Rule => {}
+            Block::CodeBlock { .. } | Block::Rule | Block::Math(_) => {}
         }
     }
 }
@@ -199,6 +199,24 @@ fn render_block(block: &Block, rc: &Ctx) -> Option<String> {
             Some(format!("{fence}{lang}\n{body}\n{fence}"))
         }
         Block::Rule => Some("---".to_string()),
+        Block::Math(tex) => {
+            let tex = tex.trim();
+            if tex.is_empty() {
+                return None;
+            }
+            // A bare `$` is never valid inside math; escaped, it cannot
+            // close the block early.
+            let mut source = String::with_capacity(tex.len());
+            let mut backslashes = 0;
+            for c in tex.chars() {
+                if c == '$' && backslashes % 2 == 0 {
+                    source.push('\\');
+                }
+                source.push(c);
+                backslashes = if c == '\\' { backslashes + 1 } else { 0 };
+            }
+            Some(format!("$$\n{source}\n$$"))
+        }
     }
 }
 
@@ -221,11 +239,6 @@ fn render_list(list: &List, rc: &Ctx) -> Option<String> {
             (None, MarkerKind::Decimal) => format!("{}. ", list.start.saturating_add(i as u64)),
             (None, kind) => format!("- {} ", kind.label(list.start.saturating_add(i as u64))),
         };
-        let checkbox = match item.checked {
-            Some(true) => "[x] ",
-            Some(false) => "[ ] ",
-            None => "",
-        };
         let body = render_blocks(&item.blocks, rc);
         if item.blocks.len() > 1 {
             loose = true;
@@ -233,7 +246,7 @@ fn render_list(list: &List, rc: &Ctx) -> Option<String> {
         let indent = " ".repeat(marker.chars().count());
         let mut lines = body.lines();
         let first = lines.next().unwrap_or("");
-        let mut s = format!("{marker}{checkbox}{first}");
+        let mut s = format!("{marker}{first}");
         for line in lines {
             s.push('\n');
             if line.is_empty() {

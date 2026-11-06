@@ -11,7 +11,7 @@ mod styletext;
 use crate::error::ConvertError;
 use crate::model::{Block, Document, Inline, Style, inlines_are_empty};
 use crate::package::limits;
-use crate::shared::binary::{get_u32, read_ole_stream};
+use crate::shared::binary::{get_u32, read_ole_stream, utf16le_units};
 use crate::shared::delta::{StyleDelta, rebase_emphasis};
 use crate::shared::list::{ListEntry, ListKey, MarkerKind, flush_list};
 use crate::shared::officeart::record_at;
@@ -469,7 +469,7 @@ impl Extractor {
             }
             // TextCharsAtom: UTF-16LE.
             0x0FA0 => {
-                let units = body.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]));
+                let units = utf16le_units(body);
                 let text: String =
                     char::decode_utf16(units).map(|r| r.unwrap_or('\u{fffd}')).collect();
                 self.push_text(text);

@@ -80,7 +80,6 @@ pub fn diagram_blocks(root: &Element) -> Vec<Block> {
             }
             Some(ListItem {
                 blocks: vec![Block::Paragraph(vec![Inline::plain(text)])],
-                checked: None,
                 marker_label: None,
             })
         })

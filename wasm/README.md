@@ -39,7 +39,7 @@ argument to `toMarkdownBytes(bytes, format, password)`.
 
 ## Errors
 
-A conversion throws only when no meaningful Markdown could come out of the bytes. The thrown value is an `Error` whose `code` names what went wrong:
+A conversion throws only when no complete Markdown could come out of the bytes. The thrown value is an `Error` whose `code` names what went wrong:
 
 ```js
 try {
@@ -56,7 +56,8 @@ try {
 
 | `code`          | Meaning                                                             |
 | --------------- | ------------------------------------------------------------------- |
-| `unsupported`   | Unknown format, or one that cannot be converted (an image-only PDF) |
+| `unsupported`   | Unknown format, or one that cannot be converted                     |
+| `needsOcr`      | Pages of a PDF are scanned or image-only; `pages` names them        |
 | `malformed`     | Structurally unusable: no meaningful content could be extracted     |
 | `encrypted`     | Encrypted or password-protected                                     |
 | `resourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |

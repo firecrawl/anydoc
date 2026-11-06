@@ -12,3 +12,7 @@ __pycache__/
 # wasm-pack build output: pkg/ is the npm package, www/pkg/ the demo site copy
 /wasm/pkg/
 /wasm/www/pkg/
+# cargo-fuzz working dirs: seeds live in fuzz/seeds/ and are checked in
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/

@@ -81,11 +81,7 @@ fn build_lists(entries: Vec<ListEntry>) -> Vec<Block> {
                 current = Some((list, key, number));
             }
             let (list, _, last) = current.as_mut().unwrap();
-            list.items.push(ListItem {
-                blocks: entry.blocks,
-                checked: None,
-                marker_label: entry.label,
-            });
+            list.items.push(ListItem { blocks: entry.blocks, marker_label: entry.label });
             *last = number;
         } else {
             let mut sub = Vec::new();

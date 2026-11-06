@@ -117,6 +117,11 @@ fn walk_shapes(
                         inner.extend(parse_container(content, ctx)?);
                     } else if content.is(ns::TABLE, "table") {
                         inner.extend(table::parse_table(content, ctx)?);
+                    } else if content.is(ns::DRAW, "object")
+                        && let Some(tex) = text::formula_tex(ctx, content)?
+                    {
+                        inner.push(Block::Math(tex));
+                        break;
                     } else if content.is(ns::DRAW, "image") {
                         let mut out = Vec::new();
                         let mut boxes = Vec::new();
@@ -289,5 +294,32 @@ mod tests {
             matches!(err, ConvertError::ResourceLimit { limit: "max_xml_depth", .. }),
             "encryption probing must not swallow fatal errors, got: {err}"
         );
+    }
+
+    #[test]
+    fn form_checkboxes_anchored_in_a_cell_follow_its_content() {
+        let content = r#"<office:document-content
+            xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+            xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+            xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+            xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+            xmlns:form="urn:oasis:names:tc:opendocument:xmlns:form:1.0"
+            xmlns:xml="http://www.w3.org/XML/1998/namespace">
+            <office:body><office:spreadsheet><table:table table:name="S">
+            <office:forms><form:form>
+              <form:checkbox xml:id="c1" form:label="Roof" form:current-state="checked"/>
+              <form:checkbox xml:id="c2" form:label="Wall"/>
+              <form:checkbox xml:id="c3" form:current-state="unknown"/>
+            </form:form></office:forms>
+            <table:table-row>
+              <table:table-cell><text:p>14</text:p></table:table-cell>
+              <table:table-cell><text:p>L/R</text:p><draw:control draw:control="c1"/></table:table-cell>
+              <table:table-cell><draw:control draw:control="c2"/><draw:control draw:control="c3"/></table:table-cell>
+            </table:table-row>
+            </table:table></office:spreadsheet></office:body>
+            </office:document-content>"#;
+        let doc = parse(&odt_with_content(content)).unwrap();
+        let md = crate::render::markdown::document_to_markdown(&doc);
+        assert_eq!(md, "|  |  |  |\n| --- | --- | --- |\n| 14 | L/R [x] Roof | [ ] Wall |\n");
     }
 }

@@ -22,28 +22,45 @@ Options:
                          (extension aliases like xls, docm, ppsx resolve
                          to these)
   -p, --password <value> Decrypt a password-protected OOXML document
+  --ocr <mode>           What to do with a PDF whose pages need OCR:
+                         reject (default) exits 3; hosted sends the
+                         document to Firecrawl Parse
+  --parse-mode <mode>    Firecrawl Parse PDF mode for --ocr hosted: auto
+                         (default) falls back to OCR, fast extracts text
+                         only, ocr OCRs every page
+  --api-key <key>        Firecrawl API key for --ocr hosted, else
+                         FIRECRAWL_API_KEY, else keyless
+  --api-url <url>        Firecrawl API URL for --ocr hosted, else
+                         FIRECRAWL_API_URL, else https://api.firecrawl.dev
   -h, --help             Print this help and exit
   -V, --version          Print the version and exit
 
 The format is detected from the file content; the file extension is the
 fallback for signature-less formats (CSV). stdin has no extension, so CSV
-input from stdin needs --format csv. Scanned or image-only PDFs need OCR,
-which anydoc does not do, and error as unsupported.
+input from stdin needs --format csv. Scanned or image-only pages need OCR,
+which anydoc does not do: the document exits 3, or goes to Firecrawl Parse
+with --ocr hosted.
 
 Exit codes:
   0  success
   1  the document could not be read or converted
   2  usage error: unknown option, missing input, or invalid --format
+  3  pages of a PDF need OCR
 
 Examples:
   anydoc report.docx
   anydoc slides.pptx -o slides.md
   anydoc - --format csv < data.csv
   curl -s https://example.com/paper.pdf | anydoc -
+  anydoc scan.pdf --ocr hosted
 `
+
+const OCR_MODES = ['reject', 'hosted']
+const PARSE_MODES = ['auto', 'fast', 'ocr']
 
 const USAGE_ERROR = 2
 const CONVERSION_ERROR = 1
+const NEEDS_OCR = 3
 
 function fail(code, message) {
   process.stderr.write(`anydoc: ${message}\n`)
@@ -51,7 +68,7 @@ function fail(code, message) {
 }
 
 function parseArgs(argv) {
-  const args = { input: null, output: null, format: null, password: null }
+  const args = { input: null, output: null, format: null, password: null, ocr: null, parseMode: null, apiKey: null, apiUrl: null }
   let positionalOnly = false
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i]
@@ -100,6 +117,24 @@ function parseArgs(argv) {
       case '--password':
         args.password = value()
         break
+      case '--ocr':
+        args.ocr = value()
+        if (!OCR_MODES.includes(args.ocr)) {
+          fail(USAGE_ERROR, `invalid --ocr '${args.ocr}'; expected one of: ${OCR_MODES.join(', ')}`)
+        }
+        break
+      case '--parse-mode':
+        args.parseMode = value()
+        if (!PARSE_MODES.includes(args.parseMode)) {
+          fail(USAGE_ERROR, `invalid --parse-mode '${args.parseMode}'; expected one of: ${PARSE_MODES.join(', ')}`)
+        }
+        break
+      case '--api-key':
+        args.apiKey = value()
+        break
+      case '--api-url':
+        args.apiUrl = value()
+        break
       default:
         fail(USAGE_ERROR, `unknown option '${arg}' (see anydoc --help)`)
     }
@@ -126,7 +161,7 @@ async function main() {
 
   // Loaded after argument handling so --help and --version work even where
   // no native binding is available.
-  const { formatFromExtension, toMarkdown, toMarkdownBytes } = require('./index.js')
+  const { formatFromExtension, toMarkdown, toMarkdownBytes } = require('./anydoc.js')
 
   let format
   if (args.format !== null) {
@@ -136,18 +171,24 @@ async function main() {
     }
   }
 
+  const options = {
+    password: args.password ?? process.env.ANYDOC_PASSWORD,
+    ocr: args.ocr ?? undefined,
+    parseMode: args.parseMode ?? undefined,
+    apiKey: args.apiKey ?? undefined,
+    apiUrl: args.apiUrl ?? undefined,
+  }
   let markdown
   try {
-    const password = args.password ?? process.env.ANYDOC_PASSWORD
     if (args.input === '-') {
-      markdown = await toMarkdownBytes(await readStdin(), format, password)
+      markdown = await toMarkdownBytes(await readStdin(), format, options)
     } else if (format !== undefined) {
-      markdown = await toMarkdownBytes(await readFile(args.input), format, password)
+      markdown = await toMarkdownBytes(await readFile(args.input), format, options)
     } else {
-      markdown = await toMarkdown(args.input, password)
+      markdown = await toMarkdown(args.input, options)
     }
   } catch (error) {
-    fail(CONVERSION_ERROR, error.message)
+    fail(error.code === 'needsOcr' ? NEEDS_OCR : CONVERSION_ERROR, error.message)
   }
 
   if (args.output !== null) {

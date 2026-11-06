@@ -14,6 +14,7 @@ use crate::model::{
 use crate::package::xml::{Element, Node};
 use crate::shared::delta::{StyleDelta, rebase_emphasis};
 use crate::shared::header::resolve_header_rows;
+use crate::shared::math::{mathml_is_display, mathml_to_tex};
 use crate::shared::text::{clean_text, collapse_ws};
 use std::collections::HashMap;
 
@@ -243,7 +244,9 @@ fn at_space_boundary(inlines: &[Inline], start: bool) -> bool {
                 }
                 return at_space_boundary(content, false);
             }
-            Inline::Image { .. } | Inline::NoteRef(_) => return false,
+            Inline::Image { .. } | Inline::NoteRef(_) | Inline::Math(_) | Inline::Checkbox(_) => {
+                return false;
+            }
         }
     }
     start
@@ -431,6 +434,16 @@ impl Builder<'_> {
                 self.flush_paragraph();
                 self.blocks.push(Block::Rule);
             }
+            "math" => {
+                let tex = mathml_to_tex(elem);
+                if tex.is_empty() {
+                } else if mathml_is_display(elem) {
+                    self.flush_paragraph();
+                    self.blocks.push(Block::Math(tex));
+                } else {
+                    self.inlines.push(Inline::Math(tex));
+                }
+            }
             name if is_container_tag(name) => {
                 self.push_anchor(elem);
                 if has_block_children(elem) {
@@ -533,11 +546,8 @@ impl Builder<'_> {
         if !ordered {
             let mut list_items = Vec::with_capacity(items.len());
             for li in &items {
-                list_items.push(ListItem {
-                    blocks: self.sub_blocks(li, delta)?,
-                    checked: None,
-                    marker_label: None,
-                });
+                list_items
+                    .push(ListItem { blocks: self.sub_blocks(li, delta)?, marker_label: None });
             }
             let list = List { marker: MarkerKind::Bullet, start: 1, items: list_items };
             return Ok(vec![Block::List(list)]);
@@ -573,7 +583,6 @@ impl Builder<'_> {
             for (li, &n) in items.iter().zip(&numbers) {
                 list_items.push(ListItem {
                     blocks: self.sub_blocks(li, delta)?,
-                    checked: None,
                     marker_label: Some(format!("{n}.")),
                 });
             }
@@ -583,8 +592,7 @@ impl Builder<'_> {
         let mut current: Option<List> = None;
         let mut last_number = 0i64;
         for (li, &number) in items.iter().zip(&numbers) {
-            let item =
-                ListItem { blocks: self.sub_blocks(li, delta)?, checked: None, marker_label: None };
+            let item = ListItem { blocks: self.sub_blocks(li, delta)?, marker_label: None };
             let contiguous = current.is_some() && last_number.checked_add(1) == Some(number);
             if !contiguous {
                 if let Some(list) = current.take() {
@@ -703,7 +711,7 @@ fn block_text(block: &Block) -> String {
             .collect::<Vec<_>>()
             .join(" "),
         Block::BlockQuote(blocks) => blocks.iter().map(block_text).collect::<Vec<_>>().join(" "),
-        Block::CodeBlock { text, .. } => text.clone(),
+        Block::CodeBlock { text, .. } | Block::Math(text) => text.clone(),
         Block::Table(table) => table
             .grid
             .iter()

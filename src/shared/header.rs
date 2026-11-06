@@ -94,6 +94,11 @@ pub fn resolve_header_rows(table: &Table, declared: usize) -> usize {
     }
 
     let (mut header_votes, mut data_votes) = (0usize, 0usize);
+    // Columns whose first-row value recurs below. Kept apart from the type
+    // votes: one body cell that happens to repeat its label (a `region`
+    // column holding "region") is weaker evidence than a column of numbers
+    // under a text label.
+    let mut repeat_votes = 0usize;
     for (c, label) in head.iter().enumerate().take(width) {
         let values: Vec<&str> = body
             .iter()
@@ -119,20 +124,25 @@ pub fn resolve_header_rows(table: &Table, declared: usize) -> usize {
             // recurs below is plainly a value of the column, not its label.
             _ => {
                 if values.iter().any(|v| fold(v) == fold(label)) {
-                    data_votes += 1;
+                    repeat_votes += 1;
                 }
             }
         }
     }
 
-    if header_votes == 0 && data_votes == 0 {
-        // Text above text, with no value repeated: only the shape of the row
-        // is left to go on. Short single-line entries read as labels, and the
-        // alternative is the empty header row every such table renders today.
-        let labelled = head.iter().take(width).all(|v| v.chars().count() <= MAX_LABEL);
-        return usize::from(labelled);
+    // Type evidence decides whenever there is any; a repeated value only
+    // settles tables that have none.
+    if header_votes > 0 || data_votes > 0 {
+        return usize::from(header_votes > data_votes);
     }
-    usize::from(header_votes > data_votes)
+    if repeat_votes > 0 {
+        return 0;
+    }
+    // Text above text, with no value repeated: only the shape of the row is
+    // left to go on. Short single-line entries read as labels, and the
+    // alternative is the empty header row every such table renders today.
+    let labelled = head.iter().take(width).all(|v| v.chars().count() <= MAX_LABEL);
+    usize::from(labelled)
 }
 
 /// The field count most sampled body rows agree on. Frequency ties break

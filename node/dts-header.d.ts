@@ -2,12 +2,17 @@
 /* eslint-disable */
 /**
  * `code` on the `Error` a failed conversion rejects with. Conversion fails
- * only when no meaningful Markdown could be produced; producer quirks are
+ * only when no complete Markdown could be produced; producer quirks are
  * recovered or skipped instead.
  */
 export type ConvertErrorCode =
-  /** Unknown format, or one that cannot be converted (an image-only PDF). */
+  /** Unknown format, or one that cannot be converted. */
   | 'unsupported'
+  /**
+   * Pages of a PDF are scanned or image-only and need OCR, which anydoc does
+   * not do. The error is a `NeedsOcrError` naming them.
+   */
+  | 'needsOcr'
   /** Structurally unusable: no meaningful content could be extracted. */
   | 'malformed'
   /** Encrypted or password-protected. */
@@ -18,3 +23,14 @@ export type ConvertErrorCode =
   | 'missingPart'
   /** The file could not be read, from `toMarkdown` only. */
   | 'io'
+  /** `ocr: 'hosted'` could not get the document through Firecrawl Parse. */
+  | 'hosted'
+
+/** The rejection for a PDF with pages that need OCR. */
+export interface NeedsOcrError extends Error {
+  code: 'needsOcr'
+  /** 1-indexed pages that need OCR. */
+  pages: number[]
+  /** Pages in the document. */
+  pageCount: number
+}

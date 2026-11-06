@@ -24,6 +24,7 @@ pub enum BlockKind {
     blockQuote,
     codeBlock,
     rule,
+    math,
 }
 
 #[napi(object)]
@@ -41,7 +42,7 @@ pub struct Block {
     pub blocks: Option<Vec<Block>>,
     /// codeBlock.
     pub lang: Option<String>,
-    /// codeBlock.
+    /// codeBlock, math (LaTeX source without delimiters).
     pub text: Option<String>,
 }
 
@@ -86,6 +87,7 @@ impl From<model::Block> for Block {
                 Block { lang, text: Some(text), ..Block::of(BlockKind::codeBlock) }
             }
             model::Block::Rule => Block::of(BlockKind::rule),
+            model::Block::Math(tex) => Block { text: Some(tex), ..Block::of(BlockKind::math) },
         }
     }
 }
@@ -100,12 +102,16 @@ pub enum InlineKind {
     anchor,
     noteRef,
     lineBreak,
+    /// An inline formula.
+    math,
+    /// A checkbox control.
+    checkbox,
 }
 
 #[napi(object)]
 pub struct Inline {
     pub kind: InlineKind,
-    /// text.
+    /// text; math (LaTeX source without delimiters).
     pub text: Option<String>,
     /// text.
     pub style: Option<Style>,
@@ -121,6 +127,8 @@ pub struct Inline {
     pub anchor: Option<String>,
     /// noteRef: the id of the note in `Document.notes`.
     pub note_id: Option<String>,
+    /// checkbox: its state.
+    pub checked: Option<bool>,
 }
 
 impl Inline {
@@ -135,6 +143,7 @@ impl Inline {
             source: None,
             anchor: None,
             note_id: None,
+            checked: None,
         }
     }
 }
@@ -164,6 +173,10 @@ impl From<model::Inline> for Inline {
                 Inline { note_id: Some(id), ..Inline::of(InlineKind::noteRef) }
             }
             model::Inline::LineBreak => Inline::of(InlineKind::lineBreak),
+            model::Inline::Math(tex) => Inline { text: Some(tex), ..Inline::of(InlineKind::math) },
+            model::Inline::Checkbox(checked) => {
+                Inline { checked: Some(checked), ..Inline::of(InlineKind::checkbox) }
+            }
         }
     }
 }
@@ -295,8 +308,6 @@ impl From<model::List> for List {
 #[napi(object)]
 pub struct ListItem {
     pub blocks: Vec<Block>,
-    /// Task-list state, when the item carries a checkbox.
-    pub checked: Option<bool>,
     /// Literal marker text that overrides the list marker when the source
     /// number text cannot be reproduced from the marker and position alone
     /// (composite number text such as `1-a)`).
@@ -305,11 +316,7 @@ pub struct ListItem {
 
 impl From<model::ListItem> for ListItem {
     fn from(item: model::ListItem) -> Self {
-        ListItem {
-            blocks: blocks(item.blocks),
-            checked: item.checked,
-            marker_label: item.marker_label,
-        }
+        ListItem { blocks: blocks(item.blocks), marker_label: item.marker_label }
     }
 }
 

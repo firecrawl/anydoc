@@ -26,13 +26,6 @@ pub fn clean_text(text: &str) -> String {
     out
 }
 
-/// XML whitespace, the S production of XML 1.0: the only characters an
-/// `xml:space` contract governs. Everything else, a no-break space included,
-/// is character data.
-pub fn is_xml_space(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\r' | '\n')
-}
-
 /// Collapse whitespace runs to single spaces.
 pub fn collapse_ws(text: &str) -> String {
     let mut out = String::with_capacity(text.len());

@@ -867,6 +867,218 @@ or <a href="notes.txt">a relative resource</a>.</p>
 
 
 # ---------------------------------------------------------------------------
+# Math: OMML (docx, pptx, rtf) and MathML (odt, epub) convert to LaTeX
+
+M_NS = 'xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"'
+MC_NS = 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"'
+A14_NS = 'xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main"'
+
+
+def omml_run(text):
+    return f'<m:r><m:t xml:space="preserve">{text}</m:t></m:r>'
+
+
+# x = (-b ± √(b² - 4ac)) / 2a
+OMML_QUADRATIC = (
+    "<m:oMath>" + omml_run("x") + omml_run("=")
+    + "<m:f><m:num>" + omml_run("-b±")
+    + '<m:rad><m:radPr><m:degHide m:val="1"/></m:radPr><m:deg/><m:e>'
+    + "<m:sSup><m:e>" + omml_run("b") + "</m:e><m:sup>" + omml_run("2") + "</m:sup></m:sSup>"
+    + omml_run("-4ac") + "</m:e></m:rad></m:num>"
+    + "<m:den>" + omml_run("2a") + "</m:den></m:f></m:oMath>"
+)
+# ∑_{i=1}^{n} x_i = sin(θ)
+OMML_SUM = (
+    '<m:oMath><m:nary><m:naryPr><m:chr m:val="∑"/><m:limLoc m:val="undOvr"/></m:naryPr>'
+    + "<m:sub>" + omml_run("i=1") + "</m:sub><m:sup>" + omml_run("n") + "</m:sup>"
+    + "<m:e><m:sSub><m:e>" + omml_run("x") + "</m:e><m:sub>" + omml_run("i") + "</m:sub></m:sSub></m:e></m:nary>"
+    + omml_run("=")
+    + '<m:func><m:fName><m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t>sin</m:t></m:r></m:fName>'
+    + "<m:e><m:d><m:e>" + omml_run("θ") + "</m:e></m:d></m:e></m:func></m:oMath>"
+)
+# where 𝐱 ∈ ℝ (normal text run plus styled alphanumerics)
+OMML_WHERE = (
+    '<m:oMath><m:r><m:rPr><m:nor/></m:rPr><m:t xml:space="preserve">where </m:t></m:r>'
+    + omml_run("𝐱 ∈ ℝ") + "</m:oMath>"
+)
+
+
+def math_docx():
+    document = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document {W} {M_NS}><w:body>
+<w:p><w:r><w:t xml:space="preserve">The roots are </w:t></w:r>{OMML_QUADRATIC}<w:r><w:t xml:space="preserve"> for any a.</w:t></w:r></w:p>
+<w:p><m:oMathPara>{OMML_SUM}{OMML_WHERE}</m:oMathPara></w:p>
+<w:p><w:r><w:t>A price of $5 or $6 is not math.</w:t></w:r></w:p>
+</w:body></w:document>"""
+    styles = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              f'<w:styles {W}>'
+              '<w:docDefaults><w:rPrDefault><w:rPr/></w:rPrDefault></w:docDefaults></w:styles>')
+    write_zip(OUT / "docx" / "handmade-math.docx", [
+        ("[Content_Types].xml", CONTENT_TYPES_BASE.format(extra="")),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/document.xml", document),
+        ("word/styles.xml", styles),
+    ])
+
+
+def math_pptx():
+    """PowerPoint wraps an equation shape in an a14 AlternateContent whose
+    fallback is a picture of the equation."""
+    presentation = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation {PPTX_NS}>
+<p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+</p:presentation>"""
+    pres_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>"""
+    slide = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld {PPTX_NS} {MC_NS} {A14_NS} {M_NS}>
+<p:cSld><p:spTree>
+<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+<p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>Quadratic formula</a:t></a:r></a:p></p:txBody></p:sp>
+<mc:AlternateContent><mc:Choice Requires="a14">
+<p:sp><p:nvSpPr><p:cNvPr id="3" name="Equation"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+<p:spPr/><p:txBody><a:bodyPr/>
+<a:p><a:r><a:t>Solve with </a:t></a:r><a14:m><m:oMathPara>{OMML_QUADRATIC}</m:oMathPara></a14:m></a:p>
+<a:p><a14:m><m:oMathPara>{OMML_SUM}</m:oMathPara></a14:m></a:p>
+</p:txBody></p:sp>
+</mc:Choice><mc:Fallback>
+<p:sp><p:nvSpPr><p:cNvPr id="3" name="Equation"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+<p:spPr><a:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></a:blipFill></p:spPr>
+<p:txBody><a:bodyPr/><a:p/></p:txBody></p:sp>
+</mc:Fallback></mc:AlternateContent>
+</p:spTree></p:cSld></p:sld>"""
+    slide_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"""
+    root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>"""
+    ct = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Default Extension="png" ContentType="image/png"/>
+<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>"""
+    write_zip(OUT / "pptx" / "handmade-math.pptx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", root_rels),
+        ("ppt/presentation.xml", presentation),
+        ("ppt/_rels/presentation.xml.rels", pres_rels),
+        ("ppt/slides/slide1.xml", slide),
+        ("ppt/slides/_rels/slide1.xml.rels", slide_rels),
+        ("ppt/media/image1.png", DOT_PNG),
+    ])
+
+
+def math_odt():
+    """LibreOffice stores a formula as an object directory holding MathML
+    (with a StarMath annotation) next to a replacement metafile; ODF also
+    allows the MathML inline in the draw:object."""
+    formula = """<?xml version="1.0" encoding="UTF-8"?>
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+<semantics>
+<mrow><mi>E</mi><mo stretchy="false">=</mo><mi>m</mi><msup><mi>c</mi><mn>2</mn></msup></mrow>
+<annotation encoding="StarMath 5.0">E = m c^2</annotation>
+</semantics>
+</math>"""
+    content = """<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xmlns:math="http://www.w3.org/1998/Math/MathML" office:version="1.3">
+<office:body><office:text>
+<text:p>Einstein wrote <draw:frame draw:name="Object1" text:anchor-type="as-char">
+<draw:object xlink:href="./Object 1" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>
+<draw:image xlink:href="./ObjectReplacements/Object 1" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>
+</draw:frame> on the board.</text:p>
+<text:p>Inline object: <draw:frame draw:name="Object2" text:anchor-type="as-char"><draw:object>
+<math:math><math:semantics><math:mrow><math:mfrac><math:mi>a</math:mi><math:mi>b</math:mi></math:mfrac>
+<math:mo>+</math:mo><math:msqrt><math:mi>x</math:mi></math:msqrt></math:mrow></math:semantics></math:math>
+</draw:object></draw:frame> done.</text:p>
+</office:text></office:body></office:document-content>"""
+    manifest = """<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3">
+<manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/>
+<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+<manifest:file-entry manifest:full-path="Object 1/content.xml" manifest:media-type="text/xml"/>
+<manifest:file-entry manifest:full-path="Object 1/" manifest:media-type="application/vnd.oasis.opendocument.formula"/>
+<manifest:file-entry manifest:full-path="ObjectReplacements/Object 1" manifest:media-type=""/>
+</manifest:manifest>"""
+    write_zip(OUT / "odt" / "handmade-math.odt", [
+        ("content.xml", content),
+        ("META-INF/manifest.xml", manifest),
+        ("Object 1/content.xml", formula),
+        ("ObjectReplacements/Object 1", b"VCLMTF\x00replacement-stand-in"),
+    ], mimetype_first="application/vnd.oasis.opendocument.text")
+
+
+def math_epub():
+    ch = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Math</title></head><body>
+<h1>Formulas</h1>
+<p>Euler: <math xmlns="http://www.w3.org/1998/Math/MathML"><semantics>
+<mrow><msup><mi>e</mi><mrow><mi>i</mi><mi>π</mi></mrow></msup><mo>+</mo><mn>1</mn><mo>=</mo><mn>0</mn></mrow>
+<annotation encoding="application/x-tex">e^{i\\pi} + 1 = 0</annotation>
+</semantics></math> holds.</p>
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+<mrow><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><mi>∞</mi></munderover>
+<mfrac><msup><mi>x</mi><mi>k</mi></msup><mrow><mi>k</mi><mo>!</mo></mrow></mfrac>
+<mo>=</mo><mi>exp</mi><mo>⁡</mo><mfenced><mi>x</mi></mfenced></mrow>
+</math>
+<p>Vectors: <math xmlns="http://www.w3.org/1998/Math/MathML"><mover><mi>v</mi><mo>→</mo></mover><mo>·</mo><mover><mi>w</mi><mo>→</mo></mover></math>.</p>
+</body></html>"""
+    opf = """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:identifier id="uid">urn:uuid:00000000-0000-0000-0000-0000000math0</dc:identifier>
+<dc:title>Math Book</dc:title><dc:language>en</dc:language>
+</metadata>
+<manifest><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml" properties="mathml"/></manifest>
+<spine><itemref idref="c1"/></spine>
+</package>"""
+    container = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"""
+    write_zip(OUT / "epub" / "handmade-math.epub", [
+        ("META-INF/container.xml", container),
+        ("OEBPS/content.opf", opf),
+        ("OEBPS/ch1.xhtml", ch),
+    ], mimetype_first="application/epub+zip")
+
+
+def math_rtf():
+    """Word's rtf: a math zone nests `{\\*\\moMath ...}` (inside a
+    `\\*\\moMathPara` when displayed) and a `\\mmathPict` picture fallback;
+    run style is a parameter word on the run and flags are `on`."""
+    def r(text):
+        return "{\\mr\\mscr0\\msty2 " + text + "}"
+    parts = [
+        "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0 Cambria Math;}}",
+        "\\pard The roots are {\\mmath{\\*\\moMath{\\rtlch\\fcs1 \\af0 \\ltrch\\fcs0 \\f0\\insrsid1 }" + r("x") + r("=")
+        + "{\\mf{\\mfPr{\\mctrlPr\\f0 }}{\\mnum" + r("-b\\'b1") + "{\\mrad{\\mradPr{\\mdegHide on}{\\mctrlPr\\f0 }}{\\mdeg}"
+        + "{\\me{\\msSup{\\me" + r("b") + "}{\\msup" + r("2") + "}}" + r("-4ac") + "}}}{\\mden" + r("2a") + "}}}"
+        + "{\\mmathPict{\\*\\mmathPr}{\\pict\\pngblip\\picw1\\pich1 89504e47}}} for any a.\\par",
+        "\\pard {\\mmath{\\*\\moMathPara{\\moMathParaPr{\\mjc centerGroup}}{\\*\\moMath"
+        + "{\\mnary{\\mnaryPr{\\mchr \\u8721 ?}{\\mlimLoc undOvr}{\\mctrlPr\\f0 }}"
+        + "{\\msub" + r("i=1") + "}{\\msup" + r("n") + "}{\\me{\\msSub{\\me" + r("x") + "}{\\msub" + r("i") + "}}}}" + r("=")
+        + "{\\mfunc{\\mfName{\\mr\\mscr0\\msty0 sin}}{\\me{\\md{\\mdPr{\\mctrlPr\\f0 }}{\\me" + r("\\u952 ?") + "}}}}}"
+        + "{\\*\\moMath{\\mr\\mnor where }" + r("\\u8722 ?1<x") + "}}}\\par",
+        "\\pard A price of $5 or $6 is not math.\\par",
+        "}",
+    ]
+    (OUT / "rtf" / "handmade-math.rtf").write_bytes("\n".join(parts).encode("cp1252"))
+
+
+# ---------------------------------------------------------------------------
 # R17a: merged ranges in spreadsheets become spanning grid cells
 
 def merged_xlsx():
@@ -911,6 +1123,112 @@ def merged_xlsx():
         ("xl/workbook.xml", workbook),
         ("xl/_rels/workbook.xml.rels", wb_rels),
         ("xl/worksheets/sheet1.xml", sheet),
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Handmade XLSB: binary SpreadsheetML records (MS-XLSB). Exercises the
+# variable-length record framing (two-byte ids, multi-byte sizes via a long
+# shared string), RK integer/float cells with and without the /100 bit,
+# number formats, a hidden row, a hidden column, a hidden sheet, and a merge
+# extending past the populated range.
+
+def xlsb_rec(rec_id, payload=b""):
+    out = bytearray()
+    if rec_id < 0x80:
+        out.append(rec_id)
+    else:
+        out.append((rec_id & 0x7F) | 0x80)
+        out.append(rec_id >> 7)
+    size = len(payload)
+    while True:
+        low = size & 0x7F
+        size >>= 7
+        if size == 0:
+            out.append(low)
+            break
+        out.append(low | 0x80)
+    return bytes(out) + payload
+
+
+def xlsb_str(s):
+    data = s.encode("utf-16-le")
+    return struct.pack("<I", len(data) // 2) + data
+
+
+def xlsb_cell(col, style=0):
+    return struct.pack("<II", col, style)
+
+
+def xlsb_row(r, hidden=False):
+    flags = 0x10 if hidden else 0
+    return xlsb_rec(0, struct.pack("<IIHBBBI", r, 0, 0, 0, flags, 0, 0))
+
+
+def sheet_xlsb():
+    root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.bin"/>
+</Relationships>"""
+    wb_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.bin"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.bin"/>
+<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.bin"/>
+<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.bin"/>
+</Relationships>"""
+    workbook = (
+        xlsb_rec(153, struct.pack("<II", 0, 0) + xlsb_str(""))  # BrtWbProp, 1900 dates
+        + xlsb_rec(156, struct.pack("<II", 0, 1) + xlsb_str("rId1") + xlsb_str("Data"))
+        + xlsb_rec(156, struct.pack("<II", 1, 2) + xlsb_str("rId2") + xlsb_str("Secret"))
+    )
+    # cellXfs: 0 General, 1 percent, 2 currency, 3 builtin date (ifmt 14).
+    xf = lambda ifmt: xlsb_rec(47, struct.pack("<HH", 0, ifmt) + bytes(12))
+    styles = (
+        xlsb_rec(44, struct.pack("<H", 164) + xlsb_str("0.0%"))
+        + xlsb_rec(44, struct.pack("<H", 165) + xlsb_str('"$"#,##0.00'))
+        + xlsb_rec(617, struct.pack("<I", 4))
+        + xf(0) + xf(164) + xf(165) + xf(14)
+        + xlsb_rec(618)
+    )
+    # The long entry forces a record size beyond one byte.
+    sst_items = ["Region", "north " * 40]
+    shared = b"".join(xlsb_rec(19, b"\x00" + xlsb_str(s)) for s in sst_items)
+    isst = lambda col, i: xlsb_rec(7, xlsb_cell(col) + struct.pack("<I", i))
+    real = lambda col, style, v: xlsb_rec(5, xlsb_cell(col, style) + struct.pack("<d", v))
+    rk = lambda col, style, v: xlsb_rec(2, xlsb_cell(col, style) + struct.pack("<I", v))
+    st = lambda col, s: xlsb_rec(6, xlsb_cell(col) + xlsb_str(s))
+    data = (
+        xlsb_rec(60, struct.pack("<IIIIH", 3, 3, 0, 0, 1))  # column D hidden
+        + xlsb_row(0)
+        + isst(0, 0) + isst(1, 1) + st(2, "Notes") + st(3, "hidden column")
+        + xlsb_row(1)
+        + rk(0, 0, (42 << 2) | 2)                       # RK integer 42
+        + rk(1, 1, (65 << 2) | 2 | 1)                   # RK integer/100: 65% via 0.65
+        + real(2, 2, 1234.5)                            # currency
+        + xlsb_row(2, hidden=True)
+        + st(0, "hidden row")
+        + xlsb_row(3)
+        + rk(0, 0, struct.unpack("<Q", struct.pack("<d", 1.5))[0] >> 32)  # RK float
+        + rk(1, 0, (struct.unpack("<Q", struct.pack("<d", 1.5))[0] >> 32) | 1)  # RK float/100
+        + real(2, 3, 46096.0)                           # builtin date format
+        + xlsb_row(4)
+        + st(0, "wide merge")
+        + xlsb_rec(4, xlsb_cell(1) + b"\x01")           # TRUE
+        + xlsb_rec(3, xlsb_cell(2) + b"\x07")           # #DIV/0!
+        + xlsb_rec(177, struct.pack("<I", 1))           # BrtBeginMergeCells
+        + xlsb_rec(176, struct.pack("<IIII", 4, 5, 0, 2))  # A5:C6, past the populated rows
+        + xlsb_rec(178)                                 # BrtEndMergeCells
+    )
+    secret = xlsb_row(0) + st(0, "must not appear")
+    write_zip(OUT / "xlsb" / "handmade-sheet.xlsb", [
+        ("_rels/.rels", root_rels),
+        ("xl/workbook.bin", workbook),
+        ("xl/_rels/workbook.bin.rels", wb_rels),
+        ("xl/styles.bin", styles),
+        ("xl/sharedStrings.bin", shared),
+        ("xl/worksheets/sheet1.bin", data),
+        ("xl/worksheets/sheet2.bin", secret),
     ])
 
 
@@ -1877,6 +2195,49 @@ def abuse():
 
 # ---------------------------------------------------------------------------
 
+# A minimal PDF: Helvetica as /F1 and a 1x1 gray image as /Im1 on every page,
+# one content stream per page. Object numbers are fixed by position, so the
+# xref table is exact rather than reconstructed by the reader.
+def handmade_pdf(pages):
+    n = len(pages)
+    objs = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [" + b" ".join(b"%d 0 R" % (5 + 2 * i) for i in range(n))
+           + b"] /Count %d >>" % n,
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        4: b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray"
+           b" /BitsPerComponent 8 /Length 1 >>\nstream\n\x80\nendstream",
+    }
+    for i, content in enumerate(pages):
+        page, stream = 5 + 2 * i, 6 + 2 * i
+        objs[page] = (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"
+                      b" /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R >> >>"
+                      b" /Contents %d 0 R >>" % stream)
+        objs[stream] = b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream"
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for num in sorted(objs):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % num + objs[num] + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    for off in offsets:
+        out += b"%010d 00000 n \n" % off
+    out += (b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n"
+            % (len(objs) + 1, xref))
+    return bytes(out)
+
+
+TEXT_PAGE = b"BT /F1 24 Tf 72 700 Td (Text on the first page) Tj ET"
+IMAGE_PAGE = b"q 468 0 0 648 72 72 cm /Im1 Do Q"
+
+
+def ocr_pdfs():
+    """A scan (image-only pages) and a mixed document (a text page then a scanned one)."""
+    (OUT / "pdf" / "handmade-scanned.pdf").write_bytes(handmade_pdf([IMAGE_PAGE, IMAGE_PAGE]))
+    (OUT / "pdf" / "handmade-mixed.pdf").write_bytes(handmade_pdf([TEXT_PAGE, IMAGE_PAGE]))
+
+
 def main():
     skip_office = "--skip-office" in sys.argv
     for sub in ["odt", "docx", "doc", "rtf", "ods", "xlsx", "xls", "csv",
@@ -1925,8 +2286,15 @@ def main():
     manyrefs_docx()
     defaults_odf()
     merged_xlsx()
+    sheet_xlsb()
     features_epub()
     bin_rtf()
+    math_docx()
+    math_pptx()
+    ocr_pdfs()
+    math_odt()
+    math_epub()
+    math_rtf()
     csvs()
     malformed()
     abuse()

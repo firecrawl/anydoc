@@ -16,6 +16,11 @@ pub(crate) fn get_u32(b: &[u8], off: usize) -> Option<u32> {
     Some(u32::from_le_bytes(b.get(off..)?.get(..4)?.try_into().ok()?))
 }
 
+/// The UTF-16LE code units of `bytes`; a trailing odd byte is dropped.
+pub(crate) fn utf16le_units(bytes: &[u8]) -> impl Iterator<Item = u16> + '_ {
+    bytes.as_chunks::<2>().0.iter().map(|pair| u16::from_le_bytes(*pair))
+}
+
 /// Read a named stream from an OLE2 compound file. A missing stream is
 /// `MissingPart`; the read is hard-capped at `MAX_ENTRY_BYTES` so a corrupt
 /// sector chain cannot expand without bound.

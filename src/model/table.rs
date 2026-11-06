@@ -120,6 +120,9 @@ pub struct GridBuilder {
     /// [`limits::MAX_EXPANSION`] *before* any per-position work so a tiny
     /// document carrying a huge span cannot force unbounded insertions.
     expansion: u64,
+    /// Whether trailing rows holding only covered positions survive
+    /// [`GridBuilder::finish`]; see [`GridBuilder::keep_covered_tail`].
+    keep_covered_tail: bool,
 }
 
 impl GridBuilder {
@@ -129,6 +132,14 @@ impl GridBuilder {
 
     pub fn next_row(&mut self) {
         self.grid.push(Vec::new());
+    }
+
+    /// Treat covered positions as content when trimming trailing rows. A
+    /// spreadsheet merge region is real extent even where every covered
+    /// cell is empty; other sources treat such rows as filler and keep the
+    /// default trim.
+    pub fn keep_covered_tail(&mut self) {
+        self.keep_covered_tail = true;
     }
 
     fn row_index(&mut self) -> usize {
@@ -248,7 +259,7 @@ impl GridBuilder {
         while self.grid.last().is_some_and(|r| {
             r.iter().all(|s| match s {
                 CellSlot::Origin(c) => c.is_empty(),
-                CellSlot::Covered { .. } => true,
+                CellSlot::Covered { .. } => !self.keep_covered_tail,
             })
         }) {
             self.grid.pop();

@@ -14,6 +14,7 @@ pub mod grid;
 pub mod header;
 pub mod html;
 pub mod list;
+pub mod math;
 pub mod mc;
 pub mod numbering;
 pub mod officeart;

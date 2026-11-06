@@ -14,7 +14,8 @@ use crate::shared::delta::rebase_emphasis;
 use crate::shared::fields::{FieldFrame, field_result};
 use crate::shared::header::resolve_header_rows;
 use crate::shared::list::{ListEntry, ListKey, flush_list};
-use crate::shared::text::{clean_text, is_xml_space};
+use crate::shared::math::{omath_para_to_tex, omath_to_tex};
+use crate::shared::text::clean_text;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -146,6 +147,11 @@ fn collect_blocks(
             if let Some(branch) = ctx.alternate_branch(child) {
                 collect_blocks(branch, ctx, blocks, runs)?;
             }
+            continue;
+        }
+        if child.is(ns::M, "oMathPara") || child.is(ns::M, "oMath") {
+            runs.flush(blocks);
+            blocks.extend(omath_para_to_tex(child).into_iter().map(Block::Math));
             continue;
         }
         if child.ns.as_deref().is_none_or(|n| n != ns::W) {
@@ -380,6 +386,18 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
                 }
                 continue;
             }
+            if child.is(ns::M, "oMathPara") {
+                // A math paragraph is displayed on its own line.
+                self.push_blocks(omath_para_to_tex(child).into_iter().map(Block::Math).collect());
+                continue;
+            }
+            if child.is(ns::M, "oMath") {
+                let tex = omath_to_tex(child);
+                if !tex.is_empty() {
+                    self.push(Inline::Math(tex));
+                }
+                continue;
+            }
             if child.ns.as_deref().is_none_or(|n| n != ns::W) {
                 continue;
             }
@@ -475,20 +493,10 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
             }
             match child.local.as_str() {
                 "t" => {
-                    // Open XML text-space contract: edge whitespace in w:t
-                    // is significant only under xml:space="preserve";
-                    // unmarked edges are discarded (Word never renders them).
-                    // Only XML whitespace counts: a no-break space is
-                    // character data, not whitespace the contract may drop.
-                    let preserved = child.attr_qualified(ns::XML, "space") == Some("preserve");
-                    let raw = child.text();
-                    // The contract applies to the XML text, before
-                    // normalization turns a no-break space into a space.
-                    let text = clean_text(if preserved {
-                        raw.as_ref()
-                    } else {
-                        raw.trim_matches(is_xml_space)
-                    });
+                    // Run edges carry the spacing between words in documents
+                    // that never mark xml:space, and XML leaves unmarked
+                    // whitespace to the application, so it is kept.
+                    let text = clean_text(child.text().as_ref());
                     if !text.is_empty() {
                         self.push(Inline::Text { text, style });
                     }

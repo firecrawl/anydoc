@@ -10,6 +10,8 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 anydoc = { path = ".." }
+cfb = "0.14.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [[bin]]
 name = "docx"
@@ -62,5 +64,23 @@ doc = false
 [[bin]]
 name = "pdf"
 path = "fuzz_targets/pdf.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "xls"
+path = "fuzz_targets/xls.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "xlsb"
+path = "fuzz_targets/xlsb.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "numfmt"
+path = "fuzz_targets/numfmt.rs"
 test = false
 doc = false
