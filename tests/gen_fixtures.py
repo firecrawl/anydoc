@@ -1474,8 +1474,7 @@ def links_pptx():
 
 
 # ---------------------------------------------------------------------------
-# S5: standard Word OLE markup - a VML preview image next to the
-# o:OLEObject; the object's identity and payload must win over the preview.
+# S5: Word OLE markup with two VML shapes. ShapeID selects the preview.
 
 def ole_docx():
     V = 'xmlns:v="urn:schemas-microsoft-com:vml"'
@@ -1484,6 +1483,9 @@ def ole_docx():
 <w:document {W} {R} {V} {O}><w:body>
 <w:p><w:r><w:t>Before the object</w:t></w:r></w:p>
 <w:p><w:r><w:object>
+<v:shape id="_x0000_i1024" style="width:96pt;height:48pt">
+<v:imagedata r:id="rId4" o:title="unrelated"/>
+</v:shape>
 <v:shape id="_x0000_i1025" style="width:96pt;height:48pt">
 <v:imagedata r:id="rId3" o:title="preview"/>
 </v:shape>
@@ -1494,6 +1496,7 @@ def ole_docx():
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="embeddings/oleObject1.bin"/>
 <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/preview.png"/>
+<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/unrelated.png"/>
 </Relationships>"""
     styles = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
               f'<w:styles {W}>'
@@ -1509,6 +1512,7 @@ def ole_docx():
         ("word/styles.xml", styles),
         ("word/embeddings/oleObject1.bin", b"DOCX-OLE-PAYLOAD" * 4),
         ("word/media/preview.png", b"\x89PNG\r\n\x1a\nfakepreview"),
+        ("word/media/unrelated.png", b"\x89PNG\r\n\x1a\nunrelated"),
     ])
 
 

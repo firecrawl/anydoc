@@ -144,7 +144,7 @@ fn embedded_ole_payload_is_retained() {
 
 /// Word renders the preview in place, while the object remains extractable.
 #[test]
-fn docx_ole_retains_payload_and_displays_preview() {
+fn docx_ole_retains_payload_and_selects_preview_by_shape_id() {
     use anydoc::model::{Block, ImageSource, Inline};
 
     let bytes = std::fs::read(fixture_root().join("docx/handmade-ole.docx")).unwrap();
@@ -164,6 +164,7 @@ fn docx_ole_retains_payload_and_displays_preview() {
         .expect("preview retained as a separate asset");
     assert_eq!(preview.media_type, "image/png");
     assert_eq!(preview.bytes, b"\x89PNG\r\n\x1a\nfakepreview");
+    assert_eq!(doc.assets.len(), 2, "unrelated shape is not extracted");
     assert!(doc.blocks.iter().any(|block| {
         matches!(block, Block::Paragraph(inlines) if inlines.iter().any(|inline| {
             matches!(inline, Inline::Image { source: ImageSource::Asset(id), .. } if *id == preview.id)
