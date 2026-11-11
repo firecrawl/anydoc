@@ -334,7 +334,9 @@ mod tests {
             0
         );
         assert_eq!(detect(&[&["name", "12\n13"], &["a", "1"], &["b", "2"]]), 0);
-        assert_eq!(detect(&[&["col1", "col\n2"], &["a", "b"], &["c", "d"]]), 0);
+        // Text above text with a wrapped label: the row-shape fallback wants
+        // single-line labels.
+        assert_eq!(detect(&[&["col1", "col\ntwo"], &["a", "b"], &["c", "d"]]), 0);
     }
 
     #[test]
