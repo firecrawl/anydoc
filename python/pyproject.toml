@@ -6,7 +6,7 @@ build-backend = "maturin"
 # PyPI is held by an unrelated package) and imports as `anydoc`.
 [project]
 name = "firecrawl-anydoc"
-description = "Convert documents (doc, docx, odt, rtf, epub, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown"
+description = "Convert documents (doc, docx, odt, rtf, epub, html, pdf, presentations, spreadsheets, csv) to GitHub-Flavored Markdown"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

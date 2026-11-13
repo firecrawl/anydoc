@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+assertion_line: 69
+expression: output
+---
+# Standalone HTML
+
+Issue text with **formatting**.
+
+[External link](https://example.com)

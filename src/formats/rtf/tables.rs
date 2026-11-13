@@ -289,19 +289,13 @@ fn parse_listtable(
                     levels = std::array::from_fn(|_| ListLevelDef::default());
                     level_index = 0;
                 }
-                "listid" => {
-                    if list_depth.is_some() {
-                        list_id = param;
-                    }
-                }
+                "listid" if list_depth.is_some() => list_id = param,
                 "listlevel" => {
                     in_level = true;
                     collector = LevelTextCollector::default();
                 }
-                "levelnfc" | "levelnfcn" => {
-                    if in_level && level_index < LIST_LEVELS {
-                        levels[level_index].marker = marker_for_nfc(param.unwrap_or(0));
-                    }
+                "levelnfc" | "levelnfcn" if in_level && level_index < LIST_LEVELS => {
+                    levels[level_index].marker = marker_for_nfc(param.unwrap_or(0));
                 }
                 "levelstartat" => {
                     if in_level
@@ -418,10 +412,8 @@ fn parse_overrides(
                         starts[level_index] = Some(n.max(0) as u64);
                     }
                 }
-                "levelnfc" | "levelnfcn" if lfo_depth.is_some() => {
-                    if level_index < LIST_LEVELS {
-                        markers[level_index] = Some(marker_for_nfc(param.unwrap_or(0)));
-                    }
+                "levelnfc" | "levelnfcn" if lfo_depth.is_some() && level_index < LIST_LEVELS => {
+                    markers[level_index] = Some(marker_for_nfc(param.unwrap_or(0)));
                 }
                 "leveltext" if lfo_depth.is_some() => collector.active = Some(true),
                 "levelnumbers" if lfo_depth.is_some() => collector.active = Some(false),
