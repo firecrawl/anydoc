@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: markdown
+---
+| Wide head |  |
+| --- | --- |
+| a | b |

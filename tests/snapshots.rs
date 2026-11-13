@@ -127,6 +127,48 @@ fn scanned_pages_are_reported_not_dropped() {
     }
 }
 
+/// A parsed document renders through `document_to_markdown` exactly as
+/// `to_markdown_bytes` renders it.
+#[test]
+fn document_to_markdown_matches_the_direct_conversion() {
+    let root = fixture_root();
+    for (rel, format) in [
+        ("docx/handmade-rich.docx", anydoc::Format::Docx),
+        ("epub/handmade-features.epub", anydoc::Format::Epub),
+        ("xlsx/handmade-merged.xlsx", anydoc::Format::Excel),
+        ("csv/sheet.csv", anydoc::Format::Csv),
+    ] {
+        let bytes = std::fs::read(root.join(rel)).unwrap();
+        let document = anydoc::to_document(&bytes, format).unwrap();
+        assert_eq!(
+            anydoc::document_to_markdown(&document),
+            anydoc::to_markdown_bytes(&bytes, format).unwrap(),
+            "{rel}"
+        );
+    }
+}
+
+/// A table built outside the crate goes through the same builder as the
+/// frontends', so its spans hold the exactly-once invariant.
+#[test]
+fn tables_built_outside_the_crate_keep_the_grid_invariant() {
+    use anydoc::model::{Block, Cell, CellSlot, Document, GridBuilder, Inline, TableKind};
+    let text = |t: &str| vec![Block::Paragraph(vec![Inline::plain(t)])];
+    let mut builder = GridBuilder::new();
+    builder.next_row();
+    builder.place(Cell::spanning(text("Wide head"), 2, 1)).unwrap();
+    builder.next_row();
+    builder.place(Cell::new(text("a"))).unwrap();
+    builder.place(Cell::new(text("b"))).unwrap();
+    let mut table = builder.finish(TableKind::Data);
+    table.header_rows = 1;
+    assert!(matches!(table.grid[0][1], CellSlot::Covered { origin_row: 0, origin_col: 0 }));
+
+    let document = Document { blocks: vec![Block::Table(table)], ..Default::default() };
+    let markdown = anydoc::document_to_markdown(&document);
+    insta::assert_snapshot!("api__grid_builder_table", markdown);
+}
+
 /// Embedded object payloads land in `Document::assets` with their identity
 /// and media type (the Markdown output shows only the alt text).
 #[test]

@@ -130,6 +130,9 @@ let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Csv)?;
 
 // Or stop at the document model, which also carries embedded assets:
 let document = anydoc::to_document(&bytes, None)?;
+
+// A document model you changed or built renders the same way:
+let markdown = anydoc::document_to_markdown(&document);
 ```
 
 ## OCR
