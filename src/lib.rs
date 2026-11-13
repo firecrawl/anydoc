@@ -126,6 +126,41 @@ pub fn to_markdown_bytes(
     Ok(document_to_markdown(&to_document(bytes, format)?))
 }
 
+/// Convert a document file to a DocLang archive (`.dclx`, OPC ZIP per
+/// DocLang 0.9 Annex B). The format is detected from the file content.
+///
+/// Currently supported for [`Format::Pdf`], including scanned or image-only
+/// pages, which export as `<picture>` elements with extracted raster parts
+/// instead of requiring OCR.
+pub fn to_doclang(path: impl AsRef<Path>) -> Result<Vec<u8>, ConvertError> {
+    let path = path.as_ref();
+    let bytes = std::fs::read(path)?;
+    let Some(format) = Format::from_bytes(&bytes).or_else(|| Format::from_path(path)) else {
+        return Err(ConvertError::Unsupported(format!(
+            "unrecognized file content and extension: {}",
+            path.display()
+        )));
+    };
+    to_doclang_bytes(&bytes, format)
+}
+
+/// Convert an in-memory document to a DocLang archive. Pass a [`Format`] to
+/// select the exporter, or `None` to detect it from the content.
+///
+/// Currently only [`Format::Pdf`] has a DocLang exporter; other formats
+/// return [`ConvertError::Unsupported`].
+pub fn to_doclang_bytes(
+    bytes: &[u8],
+    format: impl Into<Option<Format>>,
+) -> Result<Vec<u8>, ConvertError> {
+    match resolve_format(bytes, format.into())? {
+        Format::Pdf => formats::pdf::to_doclang(bytes),
+        other => Err(ConvertError::Unsupported(format!(
+            "DocLang export is not supported for {other:?}; use to_markdown or to_markdown_bytes"
+        ))),
+    }
+}
+
 /// Parse an in-memory document into the document model. Pass a [`Format`] to
 /// select the parser, or `None` to detect it from the content.
 ///

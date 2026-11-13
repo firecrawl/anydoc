@@ -8,8 +8,17 @@
 //!
 //! [pdf-inspector]: https://github.com/firecrawl/pdf-inspector
 
+mod doclang;
+
 use crate::error::ConvertError;
 use pdf_inspector::PdfError;
+
+/// Export PDF bytes to a `.dclx` (OPC ZIP) DocLang archive. Unlike
+/// [`to_markdown`], scanned or image-only pages export as `<picture>`
+/// elements with extracted raster parts instead of erroring.
+pub fn to_doclang(bytes: &[u8]) -> Result<Vec<u8>, ConvertError> {
+    doclang::to_doclang(bytes)
+}
 
 pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
     let result = pdf_inspector::process_pdf_mem(bytes).map_err(map_error)?;
@@ -41,7 +50,7 @@ pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
     }
 }
 
-fn map_error(e: PdfError) -> ConvertError {
+pub(crate) fn map_error(e: PdfError) -> ConvertError {
     match e {
         PdfError::Encrypted => ConvertError::Encrypted,
         PdfError::Io(e) => ConvertError::Io(e),

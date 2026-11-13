@@ -1,12 +1,12 @@
-//! Convert a document to Markdown:
-//! `cargo run --example convert -- <file> [-f csv] [-o out.md] [--assets dir]`
+//! Convert a document to Markdown (or DocLang with `--doclang`):
+//! `cargo run --example convert -- <file> [-f csv] [-o out.md] [--assets dir] [--doclang]`
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anydoc::{ConvertError, Format};
 
-const USAGE: &str = "usage: convert <file> [-f csv] [-o out.md] [--assets dir]";
+const USAGE: &str = "usage: convert <file> [-f csv] [-o out.md] [--assets dir] [--doclang]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -14,6 +14,7 @@ fn main() -> ExitCode {
     let mut output: Option<PathBuf> = None;
     let mut format: Option<Format> = None;
     let mut assets: Option<PathBuf> = None;
+    let mut doclang = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -34,6 +35,7 @@ fn main() -> ExitCode {
                 i += 1;
                 assets = args.get(i).map(PathBuf::from);
             }
+            "--doclang" => doclang = true,
             other => input = Some(PathBuf::from(other)),
         }
         i += 1;
@@ -43,7 +45,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    match run(&input, output.as_deref(), format, assets.as_deref()) {
+    match run(&input, output.as_deref(), format, assets.as_deref(), doclang) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e:#}");
@@ -57,6 +59,7 @@ fn run(
     output: Option<&Path>,
     format: Option<Format>,
     assets: Option<&Path>,
+    doclang: bool,
 ) -> Result<(), ConvertError> {
     let bytes = std::fs::read(input)?;
     // Without -f the format comes from the file content, with the extension as
@@ -73,21 +76,26 @@ fn run(
         };
 
     let start = std::time::Instant::now();
-    let markdown = anydoc::to_markdown_bytes(&bytes, format)?;
+    let payload = if doclang {
+        anydoc::to_doclang_bytes(&bytes, format)?
+    } else {
+        anydoc::to_markdown_bytes(&bytes, format)?.into_bytes()
+    };
     let elapsed = start.elapsed().as_secs_f64() * 1000.0;
     eprintln!("converted {} in {}", input.display(), millis(elapsed));
 
     match output {
-        Some(out) => std::fs::write(out, markdown)?,
+        Some(out) => std::fs::write(out, payload)?,
         None => {
             use std::io::Write;
-            let _ = std::io::stdout().write_all(markdown.as_bytes());
+            let _ = std::io::stdout().write_all(&payload);
         }
     }
 
     // Images and embedded objects live on the document model, not in the
-    // Markdown, so they need a second pass to write out.
-    if let Some(dir) = assets {
+    // Markdown, so they need a second pass to write out. DocLang output
+    // carries its rasters inside the archive already.
+    if let Some(dir) = assets.filter(|_| !doclang) {
         let document = anydoc::to_document(&bytes, format)?;
         std::fs::create_dir_all(dir)?;
         let stem = input.file_stem().unwrap_or_default().to_string_lossy();
