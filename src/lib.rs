@@ -126,13 +126,43 @@ pub fn to_markdown_bytes(
     Ok(document_to_markdown(&to_document(bytes, format)?))
 }
 
+/// Conversion hints steering DocLang structure detection.
+///
+/// Hints only gate the detectors: the output schema is the same either
+/// way. [`DoclangHints::default`] enables every implemented detector.
+#[derive(Debug, Clone)]
+pub struct DoclangHints {
+    /// Detect bulleted and numbered list structure from marker glyphs,
+    /// numbering sequences, and hanging indentation. When `false`, list
+    /// text stays in `<text>` blocks.
+    pub lists: bool,
+    /// Detect table structure: tagged `Table`/`TR`/`TD` elements from the
+    /// structure tree, and ruled tables reconstructed from the page's
+    /// drawn grid lines. When `false`, table regions stay `<text>` blocks.
+    pub tables: bool,
+    /// Restrict the geometric (ruled) table detector to these 1-indexed
+    /// pages. `None` runs it on every page. Tagged tables are used
+    /// wherever the structure tree marks them, regardless of this list.
+    pub pages_with_tables: Option<Vec<u32>>,
+}
+
+impl Default for DoclangHints {
+    fn default() -> Self {
+        DoclangHints { lists: true, tables: true, pages_with_tables: None }
+    }
+}
+
 /// Convert a document file to a DocLang archive (`.dclx`, OPC ZIP per
 /// DocLang 0.9 Annex B). The format is detected from the file content.
 ///
 /// Currently supported for [`Format::Pdf`], including scanned or image-only
 /// pages, which export as `<picture>` elements with extracted raster parts
-/// instead of requiring OCR.
-pub fn to_doclang(path: impl AsRef<Path>) -> Result<Vec<u8>, ConvertError> {
+/// instead of requiring OCR. `hints` steer structure detection; `None` uses
+/// the defaults.
+pub fn to_doclang(
+    path: impl AsRef<Path>,
+    hints: impl Into<Option<DoclangHints>>,
+) -> Result<Vec<u8>, ConvertError> {
     let path = path.as_ref();
     let bytes = std::fs::read(path)?;
     let Some(format) = Format::from_bytes(&bytes).or_else(|| Format::from_path(path)) else {
@@ -141,20 +171,22 @@ pub fn to_doclang(path: impl AsRef<Path>) -> Result<Vec<u8>, ConvertError> {
             path.display()
         )));
     };
-    to_doclang_bytes(&bytes, format)
+    to_doclang_bytes(&bytes, format, hints)
 }
 
 /// Convert an in-memory document to a DocLang archive. Pass a [`Format`] to
-/// select the exporter, or `None` to detect it from the content.
+/// select the exporter, or `None` to detect it from the content; `hints`
+/// steer structure detection (see [`DoclangHints`]).
 ///
 /// Currently only [`Format::Pdf`] has a DocLang exporter; other formats
 /// return [`ConvertError::Unsupported`].
 pub fn to_doclang_bytes(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
+    hints: impl Into<Option<DoclangHints>>,
 ) -> Result<Vec<u8>, ConvertError> {
     match resolve_format(bytes, format.into())? {
-        Format::Pdf => formats::pdf::to_doclang(bytes),
+        Format::Pdf => render::doclang::to_doclang(bytes, hints.into().unwrap_or_default()),
         other => Err(ConvertError::Unsupported(format!(
             "DocLang export is not supported for {other:?}; use to_markdown or to_markdown_bytes"
         ))),

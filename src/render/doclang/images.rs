@@ -13,6 +13,8 @@ use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 use std::collections::HashSet;
 use std::io::Write;
 
+use super::FormCache;
+
 /// An image XObject a page draws, in content-stream order.
 pub struct PlacedImage {
     /// The resource name the content stream uses (`Im1`); matches the name
@@ -31,26 +33,22 @@ pub struct Raster {
 }
 
 /// Every image a page's content streams draw, in draw order. Form XObjects
-/// are walked recursively with a depth cap and a visited set (malformed
-/// documents can nest or cycle them).
-pub fn placed_images(doc: &Document, page_id: ObjectId) -> Vec<PlacedImage> {
+/// are walked recursively with a depth cap and a per-path visited set
+/// (malformed documents can cycle them); images and forms reused on the
+/// page appear once per draw. The caller supplies the page's resources
+/// and decoded content so the page stream is decoded once for both this
+/// walk and the rule walk; `cache` shares decoded Form contents between
+/// them.
+pub fn placed_images(
+    doc: &Document,
+    resources: &[Dictionary],
+    content: Option<&Content>,
+    cache: &mut FormCache,
+) -> Vec<PlacedImage> {
     let mut out = Vec::new();
+    let Some(content) = content else { return out };
     let mut seen = HashSet::new();
-    // Page resources: the page's own dict plus every dict reachable through
-    // /Parent (lopdf returns the inline dict and the referenced dicts).
-    let (own, inherited_ids) = doc.get_page_resources(page_id).unwrap_or_default();
-    let mut resources: Vec<Dictionary> = Vec::new();
-    if let Some(dict) = own {
-        resources.push(dict.clone());
-    }
-    for id in inherited_ids {
-        if let Ok(dict) = doc.get_dictionary(id) {
-            resources.push(dict.clone());
-        }
-    }
-    let Ok(content_bytes) = doc.get_page_content(page_id) else { return out };
-    let Ok(content) = Content::decode(&content_bytes) else { return out };
-    collect_drawn_images(doc, &resources, &content, &mut out, &mut seen, 0);
+    collect_drawn_images(doc, resources, content, &mut out, &mut seen, 0, cache);
     out
 }
 
@@ -61,6 +59,7 @@ fn collect_drawn_images(
     out: &mut Vec<PlacedImage>,
     seen: &mut HashSet<ObjectId>,
     depth: usize,
+    cache: &mut FormCache,
 ) {
     if depth > 8 {
         return;
@@ -73,15 +72,19 @@ fn collect_drawn_images(
             continue;
         };
         let Some(id) = resolve_xobject(doc, resources, name) else { continue };
-        if !seen.insert(id) {
-            continue;
-        }
         let Ok(stream) = doc.get_object(id).and_then(Object::as_stream) else { continue };
         match stream.dict.get(b"Subtype").and_then(Object::as_name) {
             Ok(b"Image") => {
+                // Every drawn occurrence gets an entry; the same object may
+                // be drawn more than once. Parts are deduplicated upstream.
                 out.push(PlacedImage { name: String::from_utf8_lossy(name).to_string(), id })
             }
             Ok(b"Form") => {
+                // `seen` tracks the current path only: cycles stop here, but
+                // a Form reused elsewhere on the page still expands again.
+                if !seen.insert(id) {
+                    continue;
+                }
                 let mut form_resources = resources.to_vec();
                 match stream.dict.get(b"Resources") {
                     Ok(Object::Dictionary(res)) => form_resources.insert(0, res.clone()),
@@ -92,11 +95,10 @@ fn collect_drawn_images(
                     }
                     _ => {}
                 }
-                if let Ok(bytes) = stream.decompressed_content()
-                    && let Ok(inner) = Content::decode(&bytes)
-                {
-                    collect_drawn_images(doc, &form_resources, &inner, out, seen, depth + 1);
+                if let Some(inner) = cache.content(id, stream) {
+                    collect_drawn_images(doc, &form_resources, &inner, out, seen, depth + 1, cache);
                 }
+                seen.remove(&id);
             }
             _ => {}
         }
@@ -136,15 +138,15 @@ pub fn raster(doc: &Document, id: ObjectId) -> Option<Raster> {
 
     match last {
         b"DCTDecode" if prefix_decodable => {
-            decode_prefix(stream, prefix.len()).map(|bytes| Raster { ext: "jpg", bytes })
+            decode_prefix(doc, stream, prefix.len()).map(|bytes| Raster { ext: "jpg", bytes })
         }
         b"JPXDecode" if prefix_decodable => {
-            decode_prefix(stream, prefix.len()).map(|bytes| Raster { ext: "jp2", bytes })
+            decode_prefix(doc, stream, prefix.len()).map(|bytes| Raster { ext: "jp2", bytes })
         }
         b"CCITTFaxDecode" if prefix_decodable => {
-            let params = decode_parms(stream, filters.len() - 1);
-            decode_prefix(stream, prefix.len())
-                .and_then(|coded| ccitt_to_tiff(&coded, params))
+            let params = decode_parms(doc, stream, filters.len() - 1);
+            decode_prefix(doc, stream, prefix.len())
+                .and_then(|coded| ccitt_to_tiff(&coded, params.as_ref()))
                 .map(|bytes| Raster { ext: "tif", bytes })
         }
         _ => {
@@ -164,36 +166,49 @@ pub fn raster(doc: &Document, id: ObjectId) -> Option<Raster> {
 
 /// Decode all but the last filter by masking it out of the stream dict, so
 /// lopdf's own decompressor handles the decodable prefix.
-fn decode_prefix(stream: &Stream, kept: usize) -> Option<Vec<u8>> {
+fn decode_prefix(doc: &Document, stream: &Stream, kept: usize) -> Option<Vec<u8>> {
     if kept == 0 {
         return Some(stream.content.clone());
     }
     let mut stripped = stream.clone();
-    match stripped.dict.get_mut(b"Filter") {
-        Ok(Object::Array(a)) => {
-            a.truncate(kept);
-        }
-        _ => {
-            stripped.dict.remove(b"Filter");
-        }
-    }
-    match stripped.dict.get_mut(b"DecodeParms") {
-        Ok(Object::Array(a)) => {
-            a.truncate(kept);
-        }
-        _ => {
-            stripped.dict.remove(b"DecodeParms");
-        }
-    }
+    truncate_list(doc, &mut stripped.dict, b"Filter", kept)?;
+    truncate_list(doc, &mut stripped.dict, b"DecodeParms", kept)?;
     stripped.decompressed_content().ok()
 }
 
-/// The `/DecodeParms` dict for filter `index` (`DecodeParms` may be a single
-/// dict or an array paralleling the filter list).
-fn decode_parms(stream: &Stream, index: usize) -> Option<&Dictionary> {
-    match stream.dict.get(b"DecodeParms").ok()? {
+/// Keep the first `kept` entries of a stream-dict filter/params list. An
+/// absent key or a single non-array value is left untouched (a lone `Name`
+/// filter never reaches here — `kept` is zero for it); an indirect array is
+/// resolved, truncated, and inlined back.
+fn truncate_list(doc: &Document, dict: &mut Dictionary, key: &[u8], kept: usize) -> Option<()> {
+    let resolved = match dict.get(key) {
+        Err(_) => return Some(()),
+        Ok(Object::Reference(id)) => doc.get_object(*id).ok()?.clone(),
+        Ok(obj) => obj.clone(),
+    };
+    if let Object::Array(mut a) = resolved {
+        a.truncate(kept);
+        dict.set(key, Object::Array(a));
+    }
+    Some(())
+}
+
+/// The `/DecodeParms` dict for filter `index`, resolved through references
+/// (`DecodeParms` may be a single dict or an array paralleling the filter
+/// list, and either may be indirect).
+fn decode_parms(doc: &Document, stream: &Stream, index: usize) -> Option<Dictionary> {
+    let resolved = match stream.dict.get(b"DecodeParms") {
+        Ok(Object::Reference(id)) => doc.get_object(*id).ok()?.clone(),
+        Ok(o) => o.clone(),
+        Err(_) => return None,
+    };
+    match resolved {
         Object::Dictionary(d) => Some(d),
-        Object::Array(a) => a.get(index).and_then(|o| o.as_dict().ok()),
+        Object::Array(a) => match a.get(index) {
+            Some(Object::Reference(id)) => doc.get_object(*id).ok()?.as_dict().ok().cloned(),
+            Some(o) => o.as_dict().ok().cloned(),
+            None => None,
+        },
         _ => None,
     }
 }
@@ -264,7 +279,9 @@ fn color_space(doc: &Document, obj: Option<&Object>) -> Option<(Kind, Option<Vec
 fn image_to_png(doc: &Document, dict: &Dictionary, raw: &[u8]) -> Option<Vec<u8>> {
     let w = dict.get(b"Width").ok()?.as_i64().ok()? as u32;
     let h = dict.get(b"Height").ok()?.as_i64().ok()? as u32;
-    if w == 0 || h == 0 {
+    // Bound decoded memory before allocation: 32M pixels is 128 MiB of
+    // RGBA, matching the archive asset cap.
+    if w == 0 || h == 0 || w as u64 * h as u64 > 32_000_000 {
         return None;
     }
     let bpc = dict.get(b"BitsPerComponent").ok().and_then(|o| o.as_i64().ok()).unwrap_or(8);
@@ -437,6 +454,11 @@ fn ccitt_to_tiff(coded: &[u8], params: Option<&Dictionary>) -> Option<Vec<u8>> {
     let k = get(b"K", 0);
     let width = get(b"Columns", 1728).max(1) as u32;
     let height = get(b"Rows", 0).max(0) as u32;
+    if height == 0 {
+        // A stream whose row count is left to the decoder cannot be framed
+        // as a single-strip TIFF without decoding the data.
+        return None;
+    }
     let black_is_1 = params
         .and_then(|p| p.get(b"BlackIs1").ok())
         .and_then(|o| o.as_bool().ok())
@@ -533,13 +555,29 @@ mod tests {
 
     #[test]
     fn ccitt_wraps_in_tiff() {
-        let tiff = ccitt_to_tiff(&[0xAA; 10], None).unwrap();
+        let mut params = Dictionary::new();
+        params.set("Columns", 8i64);
+        params.set("Rows", 10i64);
+        let tiff = ccitt_to_tiff(&[0xAA; 10], Some(&params)).unwrap();
         assert_eq!(&tiff[..4], b"II\x2a\x00");
+        // A stream with no declared row count cannot be framed.
+        assert!(ccitt_to_tiff(&[0xAA; 10], None).is_none());
     }
 
     #[test]
     fn unpack_indices_reads_subbyte_samples() {
         assert_eq!(unpack_indices(&[0b1010_0000], 4, 1, 1), Some(vec![1, 0, 1, 0]));
         assert_eq!(unpack_indices(&[0b11_00_10_01], 4, 1, 2), Some(vec![3, 0, 2, 1]));
+    }
+
+    #[test]
+    fn oversized_pixel_count_yields_no_png() {
+        let mut dict = Dictionary::new();
+        dict.set("Width", 8192i64);
+        dict.set("Height", 8192i64);
+        dict.set("BitsPerComponent", 8i64);
+        dict.set("ColorSpace", Object::Name(b"DeviceGray".to_vec()));
+        // 67M pixels ≈ 200 MiB decoded — refused before allocation.
+        assert!(image_to_png(&Document::new(), &dict, &[]).is_none());
     }
 }

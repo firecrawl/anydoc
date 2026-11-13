@@ -3,6 +3,7 @@
 //! and the original source bytes (Annex B of the DocLang spec).
 
 use crate::error::ConvertError;
+use crate::package::limits;
 use std::collections::BTreeSet;
 use std::io::{Cursor, Write};
 
@@ -24,6 +25,7 @@ pub(crate) fn pack(
     parts: &[Part],
     source: Option<&[u8]>,
 ) -> Result<Vec<u8>, ConvertError> {
+    check_limits(document_xml, parts, source)?;
     let opts = zip::write::SimpleFileOptions::default();
     let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
 
@@ -51,6 +53,45 @@ pub(crate) fn pack(
         w.write_all(bytes).map_err(ConvertError::Io)?;
     }
     Ok(w.finish().map_err(zip_err)?.into_inner())
+}
+
+/// Bound the archive like an archive read: the same per-part, total-bytes,
+/// and entry-count caps apply to what we write out.
+fn check_limits(
+    document_xml: &[u8],
+    parts: &[Part],
+    source: Option<&[u8]>,
+) -> Result<(), ConvertError> {
+    let over = |limit: &'static str, detail: String| ConvertError::ResourceLimit { limit, detail };
+    if document_xml.len() as u64 > limits::MAX_ENTRY_BYTES {
+        return Err(over(
+            "max_entry_bytes",
+            format!("document.xml is {} bytes", document_xml.len()),
+        ));
+    }
+    if parts.len() > limits::MAX_ENTRY_COUNT {
+        return Err(over("max_entry_count", format!("{} parts", parts.len())));
+    }
+    // 4 KiB covers the OPC plumbing ([Content_Types].xml, _rels/.rels)
+    // plus ZIP local/central headers, so the emitted archive stays
+    // within the logical content-byte budget.
+    let mut total = document_xml.len() as u64 + source.map_or(0, |s| s.len() as u64) + 4_096;
+    for part in parts {
+        if part.bytes.len() as u64 > limits::MAX_ENTRY_BYTES {
+            return Err(over(
+                "max_entry_bytes",
+                format!("{} is {} bytes", part.path, part.bytes.len()),
+            ));
+        }
+        total += part.bytes.len() as u64;
+    }
+    if total > limits::MAX_TOTAL_BYTES {
+        return Err(over(
+            "max_total_bytes",
+            format!("archive exceeds {} bytes", limits::MAX_TOTAL_BYTES),
+        ));
+    }
+    Ok(())
 }
 
 fn zip_err(e: zip::result::ZipError) -> ConvertError {
