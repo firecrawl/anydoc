@@ -237,7 +237,6 @@ fn ruled_table_pdf() -> Vec<u8> {
 #[test]
 fn ruled_table_exports_table_structure() {
     let bytes = ruled_table_pdf();
-    std::fs::write("/tmp/ruled.pdf", &bytes).unwrap();
     let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf, None).unwrap();
     let xml = document_xml(&unzip(&dclx));
     assert_well_formed(&xml);

@@ -78,7 +78,10 @@ fn tagged_blocks(items: &mut Vec<TextItem>, ctx: &TableCtx) -> Vec<TableBlock> {
     let mut blocks = Vec::new();
     for table in ctx.tagged {
         // A row belongs to this page when any cell references it; a table
-        // spanning pages yields one block per page.
+        // spanning pages yields one block per page. Items are claimed into
+        // `taken` and only committed to `consumed` when the table is
+        // accepted — a rejected fragment returns its text to normal flow.
+        let mut taken: HashSet<usize> = HashSet::new();
         let mut rows: Vec<Vec<TableCell>> = Vec::new();
         let mut header_flags: Vec<Vec<bool>> = Vec::new();
         let mut bbox: Option<BBox> = None;
@@ -92,10 +95,13 @@ fn tagged_blocks(items: &mut Vec<TextItem>, ctx: &TableCtx) -> Vec<TableBlock> {
                 let mut cell_items = Vec::new();
                 let mut cell_bbox: Option<BBox> = None;
                 for (idx, item) in items.iter().enumerate() {
-                    if consumed.contains(&idx) || !item.mcid.is_some_and(|m| wanted.contains(&m)) {
+                    if consumed.contains(&idx)
+                        || taken.contains(&idx)
+                        || !item.mcid.is_some_and(|m| wanted.contains(&m))
+                    {
                         continue;
                     }
-                    consumed.insert(idx);
+                    taken.insert(idx);
                     cell_bbox = Some(match cell_bbox {
                         Some(mut b) => {
                             b.union(BBox::of(item));
@@ -131,8 +137,8 @@ fn tagged_blocks(items: &mut Vec<TextItem>, ctx: &TableCtx) -> Vec<TableBlock> {
             }
         }
         if rows.len() < 2 {
-            // Rows consumed from a too-small table still got claimed —
-            // that is fine, structure-tree membership is authoritative.
+            // Too small to emit as a table — `taken` is dropped, so its
+            // items flow through normal layout.
             continue;
         }
         let Some(bbox) = bbox else { continue };
@@ -153,6 +159,7 @@ fn tagged_blocks(items: &mut Vec<TextItem>, ctx: &TableCtx) -> Vec<TableBlock> {
                 };
             }
         }
+        consumed.extend(taken);
         blocks.push(TableBlock { cells: rows, bbox });
     }
     drop_consumed(items, &consumed);
@@ -189,6 +196,9 @@ const EDGE_COVER: f32 = 0.55;
 /// Hard cap on rules per page — a pathological content stream degrades
 /// to plain text rather than an O(n²) blowup.
 const MAX_RULES: usize = 4_000;
+/// Hard cap on grid cells — the ruled cell matrix is quadratic in
+/// boundary count.
+const MAX_GRID_CELLS: usize = 10_000;
 
 /// The page's resource dictionaries: its own dict plus every dict
 /// reachable through `/Parent`.
@@ -266,6 +276,15 @@ impl Gfx {
         (a * x + c * y + e, b * x + d * y + f)
     }
 
+    /// `h`: close the current subpath with a straight segment back to
+    /// its start (also implied by `s`/`b`/`B` before painting).
+    fn close(&mut self) {
+        if let (Some(cur), Some(start)) = (self.cur, self.start) {
+            self.seg(cur.0, cur.1, start.0, start.1);
+            self.cur = self.start;
+        }
+    }
+
     /// Add a path segment in user space; `paint` applies the CTM at
     /// paint time, so a path spanning a `q`/`Q` boundary keeps the PDF
     /// semantics (paths are not part of the saved graphics state).
@@ -312,8 +331,12 @@ impl Gfx {
 }
 
 /// Register one transformed segment as a rule when it is axis-aligned and
-/// long enough.
+/// long enough. The cap lives here — a single `paint` can push many rules
+/// before the outer `collect_rules` check runs again.
 fn push_rule(x0: f32, y0: f32, x1: f32, y1: f32, out: &mut Vec<Rule>) {
+    if out.len() >= MAX_RULES {
+        return;
+    }
     let (dx, dy) = ((x1 - x0).abs(), (y1 - y0).abs());
     if dx <= AXIS_TOL && dy >= MIN_RULE {
         out.push(Rule { vertical: true, pos: (x0 + x1) / 2.0, lo: y0.min(y1), hi: y0.max(y1) });
@@ -465,9 +488,19 @@ fn collect_rules(
                     gfx.start = Some((x, y));
                 }
             }
-            "S" | "s" => gfx.paint(Paint::Stroke, &mut acc.out),
+            "S" => gfx.paint(Paint::Stroke, &mut acc.out),
+            // Close-and-paint operators imply `h` first: the closing
+            // segment back to the subpath start is painted too.
+            "s" => {
+                gfx.close();
+                gfx.paint(Paint::Stroke, &mut acc.out);
+            }
             "f" | "F" | "f*" => gfx.paint(Paint::Fill, &mut acc.out),
-            "B" | "b" | "B*" | "b*" => gfx.paint(Paint::Both, &mut acc.out),
+            "B" | "B*" => gfx.paint(Paint::Both, &mut acc.out),
+            "b" | "b*" => {
+                gfx.close();
+                gfx.paint(Paint::Both, &mut acc.out);
+            }
             "n" => gfx.paint(Paint::Discard, &mut acc.out),
             "Do" => {
                 let Some(name) = op.operands.first().and_then(|o| o.as_name().ok()) else {
@@ -631,6 +664,11 @@ impl Grid {
         let mut ys = cluster(&hors);
         ys.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
         if xs.len() < 3 || ys.len() < 3 {
+            return None;
+        }
+        // `build` allocates an nrows×ncols union-find and cell matrix —
+        // reject oversized grids before that quadratic allocation.
+        if (xs.len() - 1) * (ys.len() - 1) > MAX_GRID_CELLS {
             return None;
         }
         Some(Grid {

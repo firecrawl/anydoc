@@ -69,8 +69,16 @@ fn check_limits(
             format!("document.xml is {} bytes", document_xml.len()),
         ));
     }
-    if parts.len() > limits::MAX_ENTRY_COUNT {
-        return Err(over("max_entry_count", format!("{} parts", parts.len())));
+    // The reader counts every ZIP entry: the three mandatory OPC parts
+    // and `/source` ride along with the caller's parts.
+    let fixed = 3 + usize::from(source.is_some());
+    if parts.len() + fixed > limits::MAX_ENTRY_COUNT {
+        return Err(over("max_entry_count", format!("{} entries", parts.len() + fixed)));
+    }
+    if let Some(source) = source
+        && source.len() as u64 > limits::MAX_ENTRY_BYTES
+    {
+        return Err(over("max_entry_bytes", format!("source is {} bytes", source.len())));
     }
     // 4 KiB covers the OPC plumbing ([Content_Types].xml, _rels/.rels)
     // plus ZIP local/central headers, so the emitted archive stays

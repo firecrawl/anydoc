@@ -333,7 +333,9 @@ fn emit_field(out: &mut String, item: &TextItem, geom: &PageGeom) {
     // pdf-inspector reports AcroForm widgets as `name: value`.
     match item.text.split_once(':') {
         Some((key, value)) => {
-            let _ = write!(out, "<key>{}</key>:", esc(key.trim_end()));
+            // `field_item`'s content model has no raw text between
+            // elements — the separator is dropped, not emitted.
+            let _ = write!(out, "<key>{}</key>", esc(key.trim_end()));
             emit_value(out, value.trim());
         }
         None => emit_value(out, item.text.trim()),
@@ -424,6 +426,16 @@ fn fmt_num(v: f32) -> String {
 
 /// XML-escape text or an attribute value (quotes escaped unconditionally;
 /// harmless in text content).
+/// Characters XML 1.0 permits: tab, LF, CR, and everything from space
+/// up except the surrogate range and the U+FFFE/U+FFFF noncharacters.
+fn is_xml_char(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}'
+            | '\u{10000}'..='\u{10FFFF}'
+    )
+}
+
 pub(crate) fn esc(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -432,7 +444,10 @@ pub(crate) fn esc(s: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
-            _ => out.push(c),
+            // XML 1.0 forbids most control characters outright — drop
+            // them rather than emit a document no parser accepts.
+            c if is_xml_char(c) => out.push(c),
+            _ => {}
         }
     }
     out
@@ -491,7 +506,8 @@ mod tests {
         };
         let mut out = String::new();
         emit_field(&mut out, &item, &geom());
-        assert!(out.contains("<key>Name</key>:"), "{out}");
+        assert!(out.contains("<key>Name</key>"), "{out}");
+        assert!(!out.contains("</key>:"), "{out}");
         assert!(!out.contains("<key>Name:</key>"), "{out}");
     }
 
