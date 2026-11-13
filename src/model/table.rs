@@ -267,10 +267,10 @@ impl GridBuilder {
         // Clamp stored spans to the surviving grid so every claimed
         // position is backed by a covered marker (exactly-once invariant).
         let rows = self.grid.len();
-        for r in 0..rows {
-            let width = self.grid[r].len();
-            for c in 0..width {
-                if let CellSlot::Origin(cell) = &mut self.grid[r][c] {
+        for (r, row) in self.grid.iter_mut().enumerate() {
+            let width = row.len();
+            for (c, slot) in row.iter_mut().enumerate() {
+                if let CellSlot::Origin(cell) = slot {
                     cell.row_span = cell.row_span.min((rows - r) as u32);
                     cell.col_span = cell.col_span.min((width - c) as u32);
                 }
