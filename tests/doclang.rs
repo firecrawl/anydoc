@@ -56,7 +56,7 @@ fn scanned_pdf_exports_pages_as_pictures() {
         Err(anydoc::ConvertError::NeedsOcr { .. })
     ));
 
-    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf).unwrap();
+    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf, None).unwrap();
     let parts = unzip(&dclx);
     assert_opc(&parts);
     assert!(parts.contains_key("source"), "original bytes archived");
@@ -87,7 +87,7 @@ fn scanned_pdf_exports_pages_as_pictures() {
 #[test]
 fn mixed_pdf_keeps_text_and_pictures() {
     let bytes = std::fs::read(fixture_root().join("pdf/handmade-mixed.pdf")).unwrap();
-    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf).unwrap();
+    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf, None).unwrap();
     let parts = unzip(&dclx);
     assert_opc(&parts);
     let xml = document_xml(&parts);
@@ -99,7 +99,7 @@ fn mixed_pdf_keeps_text_and_pictures() {
 #[test]
 fn text_pdf_exports_text_with_locations() {
     let bytes = std::fs::read(fixture_root().join("pdf/text.pdf")).unwrap();
-    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf).unwrap();
+    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf, None).unwrap();
     let parts = unzip(&dclx);
     assert_opc(&parts);
     let xml = document_xml(&parts);
@@ -112,10 +112,161 @@ fn text_pdf_exports_text_with_locations() {
 }
 
 #[test]
+fn text_pdf_exports_list_structure() {
+    let bytes = std::fs::read(fixture_root().join("pdf/text.pdf")).unwrap();
+    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf, None).unwrap();
+    let xml = document_xml(&unzip(&dclx));
+    assert_well_formed(&xml);
+    // The fixture's list section: `1.`–`3.` decimal, `a)`/`b)` alpha, `i.`
+    // roman, `4.`/`IV.`/`V.` after a paragraph break, and `•`/`◦` bullets.
+    assert!(xml.contains("<list"), "list region flattened to text: {xml}");
+    assert!(xml.contains("class=\"ordered\""), "numbered list lost its class");
+    assert!(xml.contains("<ldiv>"), "list items missing ldiv markers");
+    assert!(xml.contains("1.</marker>"));
+    assert!(xml.contains("•</marker>"));
+    // The interrupting paragraph must not be absorbed into a list.
+    let para = xml.find("Interrupting paragraph").unwrap();
+    let lists: Vec<usize> = xml.match_indices("<list").map(|(i, _)| i).collect();
+    let ends: Vec<usize> = xml.match_indices("</list>").map(|(i, _)| i).collect();
+    assert!(lists.iter().zip(&ends).all(|(s, e)| !(para > *s && para < *e + 7)));
+}
+
+#[test]
+fn lists_hint_off_flattens_lists_to_text() {
+    let bytes = std::fs::read(fixture_root().join("pdf/text.pdf")).unwrap();
+    let hints = anydoc::DoclangHints { lists: false, ..Default::default() };
+    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf, Some(hints)).unwrap();
+    let xml = document_xml(&unzip(&dclx));
+    assert_well_formed(&xml);
+    assert!(!xml.contains("<list"), "lists hint off still emitted <list>");
+    assert!(xml.contains("1.First numbered"), "list text lost entirely");
+}
+
+/// A one-page PDF with a ruled 2×2 table (header row in Helvetica-Bold)
+/// plus a paragraph, built with lopdf.
+fn ruled_table_pdf() -> Vec<u8> {
+    use lopdf::content::{Content, Operation};
+    use lopdf::{Document, Object, Stream, dictionary};
+
+    fn text(ops: &mut Vec<Operation>, font: &str, x: i64, y: i64, s: &str) {
+        ops.extend([
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec![font.into(), 10.into()]),
+            Operation::new("Tm", vec![1.into(), 0.into(), 0.into(), 1.into(), x.into(), y.into()]),
+            Operation::new("Tj", vec![Object::string_literal(s)]),
+            Operation::new("ET", vec![]),
+        ]);
+    }
+    fn rule(ops: &mut Vec<Operation>, x0: i64, y0: i64, x1: i64, y1: i64) {
+        ops.extend([
+            Operation::new("m", vec![x0.into(), y0.into()]),
+            Operation::new("l", vec![x1.into(), y1.into()]),
+            Operation::new("S", vec![]),
+        ]);
+    }
+
+    let mut ops = Vec::new();
+    text(&mut ops, "F1", 60, 760, "Report");
+    // Header cells (bold), then body cells.
+    text(&mut ops, "F2", 70, 715, "Name");
+    text(&mut ops, "F2", 200, 715, "Age");
+    text(&mut ops, "F1", 70, 685, "Ada");
+    text(&mut ops, "F1", 200, 685, "36");
+    text(&mut ops, "F1", 60, 620, "After the table.");
+    // Grid: x boundaries 60/180/300, y 740/710/680.
+    for x in [60, 180, 300] {
+        rule(&mut ops, x, 680, x, 740);
+    }
+    for y in [740, 710, 680] {
+        rule(&mut ops, 60, y, 300, y);
+    }
+    let content = Content { operations: ops };
+
+    let mut doc = Document::with_version("1.5");
+    // Reserve all ids first — `new_object_id` bumps the counter without
+    // inserting, and `add_object` would otherwise collide with a
+    // not-yet-inserted forward reference.
+    let catalog_id = doc.new_object_id();
+    let pages_id = doc.new_object_id();
+    let regular = doc.new_object_id();
+    let bold = doc.new_object_id();
+    let contents_id = doc.new_object_id();
+    let page_id = doc.new_object_id();
+    doc.objects.insert(
+        catalog_id,
+        Object::Dictionary(dictionary! { "Type" => "Catalog", "Pages" => pages_id }),
+    );
+    doc.objects.insert(
+        regular,
+        Object::Dictionary(
+            dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica" },
+        ),
+    );
+    doc.objects.insert(
+        bold,
+        Object::Dictionary(
+            dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica-Bold" },
+        ),
+    );
+    doc.objects.insert(
+        contents_id,
+        Object::Stream(Stream::new(dictionary! {}, content.encode().unwrap())),
+    );
+    doc.objects.insert(
+        page_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Contents" => contents_id,
+            "Resources" => dictionary! { "Font" => dictionary! { "F1" => regular, "F2" => bold } },
+        }),
+    );
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(
+            dictionary! { "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1 },
+        ),
+    );
+    doc.trailer.set("Root", catalog_id);
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf).unwrap();
+    buf
+}
+
+#[test]
+fn ruled_table_exports_table_structure() {
+    let bytes = ruled_table_pdf();
+    std::fs::write("/tmp/ruled.pdf", &bytes).unwrap();
+    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf, None).unwrap();
+    let xml = document_xml(&unzip(&dclx));
+    assert_well_formed(&xml);
+    assert!(xml.contains("<table>"), "ruled grid not detected: {xml}");
+    assert!(xml.contains("<ched/>"), "bold header row not marked: {xml}");
+    assert!(xml.contains("<fcel/>"));
+    assert!(xml.contains("<nl/>"), "rows not separated: {xml}");
+    assert!(xml.contains("Ada"), "cell text lost: {xml}");
+    assert!(xml.contains("After the table."), "prose lost: {xml}");
+}
+
+#[test]
+fn pages_with_tables_scopes_ruled_detection() {
+    let bytes = ruled_table_pdf();
+    // Restrict detection to page 2 — the table is on page 1, so the grid
+    // is ignored and its text stays in <text> blocks.
+    let hints = anydoc::DoclangHints { pages_with_tables: Some(vec![2]), ..Default::default() };
+    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf, Some(hints)).unwrap();
+    let xml = document_xml(&unzip(&dclx));
+    assert_well_formed(&xml);
+    assert!(!xml.contains("<table>"), "out-of-scope page still detected: {xml}");
+    assert!(xml.contains("Ada"));
+}
+
+#[test]
 fn non_pdf_formats_reject_doclang_export() {
     let bytes = b"{\\rtf1 plain}".to_vec();
     assert!(matches!(
-        anydoc::to_doclang_bytes(&bytes, anydoc::Format::Rtf),
+        anydoc::to_doclang_bytes(&bytes, anydoc::Format::Rtf, None),
         Err(anydoc::ConvertError::Unsupported(_))
     ));
 }

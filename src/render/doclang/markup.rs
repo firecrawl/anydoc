@@ -5,7 +5,7 @@
 //! so y is flipped against the page crop box. Pages carrying a non-zero
 //! `/Rotate` skip locations entirely rather than emit wrong boxes.
 
-use super::layout::{BBox, Piece, TextBlock};
+use super::layout::{BBox, CellToken, ListBlock, Piece, TableBlock, TextBlock};
 use pdf_inspector::TextItem;
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -61,6 +61,14 @@ pub(crate) fn emit_page(
             Piece::Picture { item, name, full_page } => {
                 close_fields(out, &mut in_fields);
                 emit_picture(out, item, name, *full_page, geom, links, srcs);
+            }
+            Piece::List(list) => {
+                close_fields(out, &mut in_fields);
+                emit_list(out, list, geom, links);
+            }
+            Piece::Table(table) => {
+                close_fields(out, &mut in_fields);
+                emit_table(out, table, geom, links);
             }
         }
     }
@@ -240,13 +248,92 @@ fn checkbox_class(text: &str) -> Option<&'static str> {
     }
 }
 
+/// A `<list>` block: `<ldiv>` opens each item, carrying its `<marker>`;
+/// the item's text and nested lists follow as payload until the next
+/// `<ldiv>`.
+fn emit_list(out: &mut String, list: &ListBlock, geom: &PageGeom, links: &[(BBox, String)]) {
+    if list.ordered {
+        out.push_str("<list class=\"ordered\">");
+    } else {
+        out.push_str("<list>");
+    }
+    head_locations(out, list.bbox, geom);
+    for item in &list.items {
+        out.push_str("<ldiv><marker>");
+        head_locations(out, item.marker_bbox, geom);
+        if let Some(class) = checkbox_class(&item.marker) {
+            let _ = write!(out, "<checkbox class=\"{class}\"/>");
+        } else {
+            out.push_str(&esc(&item.marker));
+        }
+        out.push_str("</marker></ldiv>");
+        if !item.body.is_empty() {
+            out.push_str("<text>");
+            head_locations(out, items_bbox(&item.body), geom);
+            emit_runs(out, &item.body, links);
+            out.push_str("</text>");
+        }
+        for nested in &item.nested {
+            emit_list(out, nested, geom, links);
+        }
+    }
+    out.push_str("</list>");
+}
+
+/// OTSL separator token name for a cell.
+fn cell_token_name(token: CellToken) -> &'static str {
+    match token {
+        CellToken::Fcel => "fcel",
+        CellToken::Ecel => "ecel",
+        CellToken::Ched => "ched",
+        CellToken::Rhed => "rhed",
+        CellToken::Corn => "corn",
+        CellToken::Lcel => "lcel",
+        CellToken::Ucel => "ucel",
+        CellToken::Xcel => "xcel",
+    }
+}
+
+/// A `<table>` block: each cell starts with its OTSL separator token,
+/// followed by the cell's element head and inline content; `<nl/>` ends
+/// a row.
+fn emit_table(out: &mut String, table: &TableBlock, geom: &PageGeom, links: &[(BBox, String)]) {
+    out.push_str("<table>");
+    head_locations(out, table.bbox, geom);
+    for (r, row) in table.cells.iter().enumerate() {
+        if r > 0 {
+            out.push_str("<nl/>");
+        }
+        for cell in row {
+            let _ = write!(out, "<{}/>", cell_token_name(cell.token));
+            // Degenerate boxes (tagged cells whose content lives on
+            // another page) get no location — a 0×0 box at the origin
+            // would claim the page corner.
+            if cell.bbox.x1 > cell.bbox.x0 || cell.bbox.y1 > cell.bbox.y0 {
+                head_locations(out, cell.bbox, geom);
+            }
+            emit_runs(out, &cell.items, links);
+        }
+    }
+    out.push_str("</table>");
+}
+
+/// Union box of a slice of items.
+fn items_bbox(items: &[TextItem]) -> BBox {
+    let mut bbox = BBox::of(&items[0]);
+    for item in &items[1..] {
+        bbox.union(BBox::of(item));
+    }
+    bbox
+}
+
 fn emit_field(out: &mut String, item: &TextItem, geom: &PageGeom) {
     out.push_str("<field_item>");
     head_locations(out, BBox::of(item), geom);
     // pdf-inspector reports AcroForm widgets as `name: value`.
     match item.text.split_once(':') {
         Some((key, value)) => {
-            let _ = write!(out, "<key>{}:</key>", esc(key.trim_end()));
+            let _ = write!(out, "<key>{}</key>:", esc(key.trim_end()));
             emit_value(out, value.trim());
         }
         None => emit_value(out, item.text.trim()),
@@ -382,6 +469,30 @@ mod tests {
         let g = PageGeom { rotated: true, ..geom() };
         head_locations(&mut out, BBox { x0: 0.0, y0: 0.0, x1: 10.0, y1: 10.0 }, &g);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn field_key_excludes_separator() {
+        let item = TextItem {
+            text: "Name: Alice".into(),
+            x: 10.0,
+            y: 10.0,
+            width: 60.0,
+            height: 10.0,
+            font: "F1".into(),
+            font_size: 10.0,
+            page: 1,
+            is_bold: false,
+            is_italic: false,
+            is_underline: false,
+            is_strikeout: false,
+            item_type: pdf_inspector::types::ItemType::Text,
+            mcid: None,
+        };
+        let mut out = String::new();
+        emit_field(&mut out, &item, &geom());
+        assert!(out.contains("<key>Name</key>:"), "{out}");
+        assert!(!out.contains("<key>Name:</key>"), "{out}");
     }
 
     #[test]

@@ -77,7 +77,7 @@ fn run(
 
     let start = std::time::Instant::now();
     let payload = if doclang {
-        anydoc::to_doclang_bytes(&bytes, format)?
+        anydoc::to_doclang_bytes(&bytes, format, None)?
     } else {
         anydoc::to_markdown_bytes(&bytes, format)?.into_bytes()
     };
