@@ -164,12 +164,23 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
             instance_counter: &instance_counter,
             slide_anchors: &slide_anchors,
         };
+        // A slide is a container, not a page: its content must not run into
+        // the next slide's. A thematic break is the structural separator the
+        // model already has, and it is emitted BETWEEN slides only — never
+        // leading, never doubled by an empty slide.
+        let mut slide_blocks: Vec<Block> = Vec::new();
         if targeted.contains(slide_path)
             && let Some(anchor) = slide_anchors.get(slide_path)
         {
-            blocks.push(Block::Paragraph(vec![Inline::Anchor(anchor.clone())]));
+            slide_blocks.push(Block::Paragraph(vec![Inline::Anchor(anchor.clone())]));
         }
-        parse_shapes(sp_tree, &ctx, &mut blocks)?;
+        parse_shapes(sp_tree, &ctx, &mut slide_blocks)?;
+        if !slide_blocks.is_empty() {
+            if !blocks.is_empty() {
+                blocks.push(Block::Rule);
+            }
+            blocks.append(&mut slide_blocks);
+        }
 
         // Speaker notes, set off as a quote (fixed policy: included). The
         // tree is loaded before the `if let` so the package borrow is not
@@ -649,4 +660,118 @@ fn parse_table(tbl: &Element, ctx: &SlideCtx, blocks: &mut Vec<Block>) -> Result
     table.header_rows = resolve_header_rows(&table, header_rows);
     blocks.push(Block::Table(table));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    const PRES_NS: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
+    const DRAWING_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    const PKG_REL_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
+
+    /// A slide holding a single text box with `text`, or no shapes at all when
+    /// `text` is `None` — the "contributes nothing" case the separator must not
+    /// leave a dangling break for.
+    fn slide_xml(text: Option<&str>) -> String {
+        let body = match text {
+            Some(t) => format!(
+                r#"<p:sp><p:nvSpPr><p:cNvPr id="2" name="TextBox"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:txBody><a:bodyPr/><a:p><a:r><a:t>{t}</a:t></a:r></a:p></p:txBody></p:sp>"#
+            ),
+            None => String::new(),
+        };
+        format!(
+            r#"<?xml version="1.0"?><p:sld xmlns:p="{PRES_NS}" xmlns:a="{DRAWING_NS}"><p:cSld><p:spTree>{body}</p:spTree></p:cSld></p:sld>"#
+        )
+    }
+
+    /// Minimal .pptx whose slides carry the given text bodies, in order. No
+    /// layout or master parts: every slide is title-less, which is exactly the
+    /// shape whose boundary used to vanish.
+    fn pptx_with_slides(slides: &[Option<&str>]) -> Vec<u8> {
+        let ids: String = (0..slides.len())
+            .map(|i| format!(r#"<p:sldId id="{}" r:id="rId{}"/>"#, 256 + i, i + 1))
+            .collect();
+        let rels: String = (0..slides.len())
+            .map(|i| {
+                format!(
+                    r#"<Relationship Id="rId{}" Type="{REL_NS}/slide" Target="slides/slide{}.xml"/>"#,
+                    i + 1,
+                    i + 1
+                )
+            })
+            .collect();
+
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        let mut put = |name: &str, body: &str| {
+            w.start_file(name, opts).unwrap();
+            w.write_all(body.as_bytes()).unwrap();
+        };
+        put(
+            "_rels/.rels",
+            &format!(
+                r#"<?xml version="1.0"?><Relationships xmlns="{PKG_REL_NS}"><Relationship Id="rIdP" Type="{REL_NS}/officeDocument" Target="ppt/presentation.xml"/></Relationships>"#
+            ),
+        );
+        put(
+            "ppt/presentation.xml",
+            &format!(
+                r#"<?xml version="1.0"?><p:presentation xmlns:p="{PRES_NS}" xmlns:r="{REL_NS}"><p:sldIdLst>{ids}</p:sldIdLst></p:presentation>"#
+            ),
+        );
+        put(
+            "ppt/_rels/presentation.xml.rels",
+            &format!(
+                r#"<?xml version="1.0"?><Relationships xmlns="{PKG_REL_NS}">{rels}</Relationships>"#
+            ),
+        );
+        for (i, text) in slides.iter().enumerate() {
+            put(&format!("ppt/slides/slide{}.xml", i + 1), &slide_xml(*text));
+        }
+        w.finish().unwrap().into_inner()
+    }
+
+    fn blocks(slides: &[Option<&str>]) -> Vec<Block> {
+        parse(&pptx_with_slides(slides)).expect("minimal pptx should convert").blocks
+    }
+
+    #[test]
+    fn untitled_slides_are_separated() {
+        // The defect: with no title placeholder neither slide contributes a
+        // heading, so the two paragraphs used to be indistinguishable from two
+        // paragraphs of one slide.
+        let out = blocks(&[Some("first"), Some("second")]);
+        assert!(
+            matches!(out.as_slice(), [Block::Paragraph(_), Block::Rule, Block::Paragraph(_)]),
+            "expected a separator between the two slides, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn separator_never_leads() {
+        let out = blocks(&[Some("only")]);
+        assert!(
+            !matches!(out.first(), Some(Block::Rule)),
+            "a deck must not open with a separator, got {out:?}"
+        );
+        assert_eq!(out.len(), 1, "single slide should yield exactly its own content: {out:?}");
+    }
+
+    #[test]
+    fn empty_slides_leave_no_dangling_separator() {
+        // An empty slide contributes no blocks, so it must not push a break of
+        // its own — neither doubled between two real slides nor trailing.
+        let out = blocks(&[Some("first"), None, Some("second")]);
+        let rules = out.iter().filter(|b| matches!(b, Block::Rule)).count();
+        assert_eq!(rules, 1, "empty slide must not add a separator, got {out:?}");
+
+        let trailing = blocks(&[Some("first"), None]);
+        assert!(
+            !matches!(trailing.last(), Some(Block::Rule)),
+            "a trailing empty slide must not leave a dangling separator, got {trailing:?}"
+        );
+    }
 }

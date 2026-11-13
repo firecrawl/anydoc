@@ -343,6 +343,10 @@ impl Extractor {
         let mut used = vec![false; notes.len()];
         let mut out = Vec::new();
         for (sid, blocks) in slides {
+            // Separate slides with a thematic break — see the pptx parser.
+            if !blocks.is_empty() && !out.is_empty() {
+                out.push(Block::Rule);
+            }
             out.extend(blocks);
             for (i, (nid, nblocks)) in notes.iter_mut().enumerate() {
                 if !used[i] && sid.is_some() && *nid == sid {
