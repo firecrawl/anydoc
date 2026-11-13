@@ -11,6 +11,7 @@ mod images;
 mod layout;
 mod markup;
 mod package;
+mod streams;
 mod tables;
 
 use crate::error::ConvertError;
@@ -81,10 +82,7 @@ pub(crate) fn to_doclang(
         // Page resources + decoded content are shared by the rule walk
         // and the image walk so the page stream is decoded once.
         let resources = tables::page_resources(&doc, *page_id);
-        let content = doc
-            .get_page_content(*page_id)
-            .ok()
-            .and_then(|b| lopdf::content::Content::decode(&b).ok());
+        let content = page_content(&doc, *page_id);
         let ruled = hints.tables
             && hints.pages_with_tables.as_deref().is_none_or(|pp| pp.contains(page_no));
         // Form XObjects decode once per page for both walks.
@@ -104,13 +102,25 @@ pub(crate) fn to_doclang(
         let placed = images::placed_images(&doc, &resources, content.as_ref(), &mut forms);
         let mut used = vec![false; placed.len()];
         let mut page_slot_free = true;
-        let mut srcs: HashMap<String, String> = HashMap::new();
+        // XObject names are only unique within one resources dict —
+        // nested Forms can each draw an `Im1`. Pictures that share a
+        // name get occurrence-qualified keys so each picks up its own
+        // matched raster instead of the last one written.
+        let mut name_counts: HashMap<String, usize> = HashMap::new();
         for piece in &pieces {
+            if let Piece::Picture { name, .. } = piece {
+                *name_counts.entry(name.clone()).or_default() += 1;
+            }
+        }
+        let mut occurrences: HashMap<String, usize> = HashMap::new();
+        let mut srcs: HashMap<String, String> = HashMap::new();
+        for piece in &mut pieces {
             let Piece::Picture { item: _, name, full_page } = piece else { continue };
+            let orig = name.clone();
             let Some(idx) = placed
                 .iter()
                 .enumerate()
-                .position(|(i, p)| !used[i] && p.name == *name)
+                .position(|(i, p)| !used[i] && p.name == orig)
                 .or_else(|| used.iter().position(|u| !*u))
             else {
                 continue;
@@ -119,6 +129,11 @@ pub(crate) fn to_doclang(
             if let Some(path) =
                 rasters.part(&doc, placed[idx].id, *page_no, *full_page, &mut page_slot_free)?
             {
+                if name_counts[&orig] > 1 {
+                    let occ = occurrences.entry(orig.clone()).or_default();
+                    *name = format!("{orig}\u{1}{occ}");
+                    *occ += 1;
+                }
                 srcs.insert(name.clone(), path);
             }
         }
@@ -161,7 +176,9 @@ impl RasterStore {
             return Ok(Some(path.clone()));
         }
         let Some(raster) = images::raster(doc, id) else { return Ok(None) };
-        if self.parts.len() >= limits::MAX_ENTRY_COUNT {
+        // Reserve four entries for the OPC plumbing + `/source` the pack
+        // step always adds, or the emitted archive exceeds the read cap.
+        if self.parts.len() >= limits::MAX_ENTRY_COUNT - 4 {
             return Err(ConvertError::ResourceLimit {
                 limit: "max_entry_count",
                 detail: format!("DocLang archive would exceed {} parts", limits::MAX_ENTRY_COUNT),
@@ -216,8 +233,9 @@ fn geom_area(geom: &markup::PageGeom) -> f32 {
     ((geom.x1 - geom.x0) * (geom.y1 - geom.y0)).max(0.0)
 }
 
-/// `/Info /Title`, honoring the UTF-16BE BOM convention; `None` when the
-/// entry is absent or not a string.
+/// `/Info /Title`, honoring the UTF-16BE BOM convention and decoding the
+/// fallback as PDFDocEncoding (Latin-1 superset — high bytes like `é`
+/// survive); `None` when the entry is absent or not a string.
 fn document_title(doc: &LopdfDocument) -> Option<String> {
     let info_ref = doc.trailer.get(b"Info").ok()?.as_reference().ok()?;
     let info = doc.get_dictionary(info_ref).ok()?;
@@ -227,8 +245,29 @@ fn document_title(doc: &LopdfDocument) -> Option<String> {
         let utf16: Vec<u16> = pairs.iter().map(|c| u16::from_be_bytes(*c)).collect();
         Some(String::from_utf16_lossy(&utf16))
     } else {
-        Some(String::from_utf8_lossy(bytes).to_string())
+        Some(bytes.iter().map(|&b| b as char).collect())
     }
+}
+
+/// The page's concatenated content streams, each bounded-decoded. A
+/// stream past `MAX_ENTRY_BYTES` (or with an unsupported filter) falls
+/// back to its raw bytes, as `get_page_content` does — malformed or
+/// oversized streams degrade the walk rather than abort the page.
+fn page_content(doc: &LopdfDocument, page_id: ObjectId) -> Option<Content> {
+    let mut bytes = Vec::new();
+    let mut any = false;
+    for id in doc.get_page_contents(page_id) {
+        let Ok(stream) = doc.get_object(id).and_then(Object::as_stream) else { continue };
+        let data = streams::decompressed(stream, limits::MAX_ENTRY_BYTES)
+            .unwrap_or_else(|| stream.content.clone());
+        bytes.extend_from_slice(&data);
+        bytes.push(b'\n');
+        any = true;
+    }
+    if !any {
+        return None;
+    }
+    Content::decode(&bytes).ok()
 }
 
 /// Decoded Form-XObject contents shared by the rule and image walks:
@@ -244,9 +283,7 @@ impl FormCache {
         self.map
             .entry(id)
             .or_insert_with(|| {
-                stream
-                    .decompressed_content()
-                    .ok()
+                streams::decompressed(stream, limits::MAX_ENTRY_BYTES)
                     .and_then(|b| Content::decode(&b).ok())
                     .map(Rc::new)
             })
@@ -259,7 +296,7 @@ impl FormCache {
 fn page_geometry(doc: &LopdfDocument, page_id: ObjectId) -> markup::PageGeom {
     let mut crop = None;
     let mut media = None;
-    let mut rotate = 0i64;
+    let mut rotate: Option<i64> = None;
     let mut id = Some(page_id);
     let mut seen = HashSet::new();
     while let Some(pid) = id {
@@ -273,13 +310,15 @@ fn page_geometry(doc: &LopdfDocument, page_id: ObjectId) -> markup::PageGeom {
         if media.is_none() {
             media = get_box(doc, dict, b"MediaBox");
         }
-        if rotate == 0 {
-            rotate = dict.get(b"Rotate").ok().and_then(|o| o.as_i64().ok()).unwrap_or(0);
+        // An explicit `/Rotate 0` overrides a rotated ancestor — track
+        // whether the key was found, not just its value.
+        if rotate.is_none() {
+            rotate = dict.get(b"Rotate").ok().and_then(|o| o.as_i64().ok());
         }
         id = dict.get(b"Parent").ok().and_then(|o| o.as_reference().ok());
     }
     let [x0, y0, x1, y1] = crop.or(media).unwrap_or([0.0, 0.0, 612.0, 792.0]);
-    markup::PageGeom { x0, y0, x1, y1, rotated: rotate % 360 != 0 }
+    markup::PageGeom { x0, y0, x1, y1, rotated: rotate.unwrap_or(0) % 360 != 0 }
 }
 
 /// A page box from a page dict, resolving an indirect array.

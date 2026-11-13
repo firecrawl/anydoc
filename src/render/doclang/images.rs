@@ -14,6 +14,8 @@ use std::collections::HashSet;
 use std::io::Write;
 
 use super::FormCache;
+use super::streams;
+use crate::package::limits;
 
 /// An image XObject a page draws, in content-stream order.
 pub struct PlacedImage {
@@ -145,8 +147,11 @@ pub fn raster(doc: &Document, id: ObjectId) -> Option<Raster> {
         }
         b"CCITTFaxDecode" if prefix_decodable => {
             let params = decode_parms(doc, stream, filters.len() - 1);
+            let height =
+                stream.dict.get(b"Height").ok().and_then(|o| o.as_i64().ok()).unwrap_or(0).max(0)
+                    as u32;
             decode_prefix(doc, stream, prefix.len())
-                .and_then(|coded| ccitt_to_tiff(&coded, params.as_ref()))
+                .and_then(|coded| ccitt_to_tiff(&coded, params.as_ref(), height))
                 .map(|bytes| Raster { ext: "tif", bytes })
         }
         _ => {
@@ -158,10 +163,26 @@ pub fn raster(doc: &Document, id: ObjectId) -> Option<Raster> {
             {
                 return None;
             }
-            let raw = stream.decompressed_content().ok()?;
+            // Bound the decode by the declared dimensions before any
+            // decompression runs — a Flate stream cannot expand past it.
+            let bound = pixel_bound(&stream.dict)?;
+            let raw = streams::decompressed(stream, bound)?;
             image_to_png(doc, &stream.dict, &raw).map(|bytes| Raster { ext: "png", bytes })
         }
     }
+}
+
+/// Upper bound on decoded sample bytes, derived from the declared
+/// dimensions: at most 4 components × 16 bits = 8 B/px, plus one
+/// predictor filter byte per row and a little slack. `None` when the
+/// dimensions are missing or exceed `MAX_PIXELS`.
+fn pixel_bound(dict: &Dictionary) -> Option<u64> {
+    let w = dict.get(b"Width").ok()?.as_i64().ok()?;
+    let h = dict.get(b"Height").ok()?.as_i64().ok()?;
+    if w <= 0 || h <= 0 || w as u64 * h as u64 > MAX_PIXELS {
+        return None;
+    }
+    Some(((w as u64) * (h as u64) * 8 + h as u64 + 4_096).min(limits::MAX_ENTRY_BYTES))
 }
 
 /// Decode all but the last filter by masking it out of the stream dict, so
@@ -173,7 +194,7 @@ fn decode_prefix(doc: &Document, stream: &Stream, kept: usize) -> Option<Vec<u8>
     let mut stripped = stream.clone();
     truncate_list(doc, &mut stripped.dict, b"Filter", kept)?;
     truncate_list(doc, &mut stripped.dict, b"DecodeParms", kept)?;
-    stripped.decompressed_content().ok()
+    streams::decompressed(&stripped, limits::MAX_ENTRY_BYTES)
 }
 
 /// Keep the first `kept` entries of a stream-dict filter/params list. An
@@ -245,19 +266,23 @@ fn color_space(doc: &Document, obj: Option<&Object>) -> Option<(Kind, Option<Vec
                 b"ICCBased" => {
                     let id = a.get(1).and_then(|o| o.as_reference().ok())?;
                     let stream = doc.get_object(id).and_then(Object::as_stream).ok()?;
-                    let n = stream.dict.get(b"N").ok().and_then(|o| o.as_i64().ok()).unwrap_or(3);
-                    Some((if n == 1 { Kind::Gray } else { Kind::Rgb }, None))
+                    match stream.dict.get(b"N").ok().and_then(|o| o.as_i64().ok()) {
+                        Some(1) | None => Some((Kind::Gray, None)),
+                        Some(3) => Some((Kind::Rgb, None)),
+                        Some(4) => Some((Kind::Cmyk, None)),
+                        Some(_) => None,
+                    }
                 }
                 b"Indexed" | b"I" => {
                     let (base, _) = color_space(doc, a.get(1))?;
                     let palette = match a.get(3)? {
                         Object::String(s, _) => s.clone(),
-                        Object::Reference(id) => doc
-                            .get_object(*id)
-                            .and_then(Object::as_stream)
-                            .ok()?
-                            .decompressed_content()
-                            .ok()?,
+                        Object::Reference(id) => {
+                            let stream = doc.get_object(*id).and_then(Object::as_stream).ok()?;
+                            // A palette is at most a few KiB of base-space
+                            // samples; cap the decode accordingly.
+                            streams::decompressed(stream, 65_536)?
+                        }
                         _ => return None,
                     };
                     if palette.len() < base.components() {
@@ -265,8 +290,9 @@ fn color_space(doc: &Document, obj: Option<&Object>) -> Option<(Kind, Option<Vec
                     }
                     Some((base, Some(palette)))
                 }
-                // Single-channel spaces map onto gray for review rasters.
-                b"Separation" | b"DeviceN" | b"Pattern" => Some((Kind::Gray, None)),
+                // Separation/DeviceN/Pattern need tint or tiling
+                // transforms we do not apply — no raster over wrong colors.
+                b"Separation" | b"DeviceN" | b"Pattern" => None,
                 _ => None,
             }
         }
@@ -274,22 +300,35 @@ fn color_space(doc: &Document, obj: Option<&Object>) -> Option<(Kind, Option<Vec
     }
 }
 
+/// Decoded-pixel cap: 32M pixels is 128 MiB of RGBA, matching the
+/// archive asset cap.
+const MAX_PIXELS: u64 = 32_000_000;
+
 /// PNG-encode decoded image samples, resolving the color space and an
 /// optional soft mask.
 fn image_to_png(doc: &Document, dict: &Dictionary, raw: &[u8]) -> Option<Vec<u8>> {
     let w = dict.get(b"Width").ok()?.as_i64().ok()? as u32;
     let h = dict.get(b"Height").ok()?.as_i64().ok()? as u32;
-    // Bound decoded memory before allocation: 32M pixels is 128 MiB of
-    // RGBA, matching the archive asset cap.
-    if w == 0 || h == 0 || w as u64 * h as u64 > 32_000_000 {
+    // Bound decoded memory before allocation.
+    if w == 0 || h == 0 || w as u64 * h as u64 > MAX_PIXELS {
         return None;
     }
     let bpc = dict.get(b"BitsPerComponent").ok().and_then(|o| o.as_i64().ok()).unwrap_or(8);
     let (kind, palette) = color_space(doc, dict.get(b"ColorSpace").ok())?;
+    let decode = decode_ranges(dict);
 
     let samples = match palette {
         Some(palette) => {
-            let indices = unpack_indices(raw, w, h, bpc)?;
+            let mut indices = unpack_indices(raw, w, h, bpc)?;
+            if let Some(ranges) = &decode {
+                // For Indexed the Decode pair remaps the index itself,
+                // in index units (0..2^bpc−1).
+                let (dmin, dmax) = ranges[0];
+                let max = ((1u32 << bpc.max(1)) - 1) as f32;
+                for i in &mut indices {
+                    *i = (dmin + (*i as f32 / max) * (dmax - dmin)).round().clamp(0.0, max) as u8;
+                }
+            }
             let comps = kind.components();
             let mut out = Vec::with_capacity((w * h) as usize * comps);
             for idx in indices {
@@ -302,7 +341,13 @@ fn image_to_png(doc: &Document, dict: &Dictionary, raw: &[u8]) -> Option<Vec<u8>
             }
             out
         }
-        None => expand_bpc(raw, w, h, bpc, kind.components())?,
+        None => {
+            let mut samples = expand_bpc(raw, w, h, bpc, kind.components())?;
+            if let Some(ranges) = &decode {
+                apply_decode(&mut samples, ranges, kind.components());
+            }
+            samples
+        }
     };
 
     let (mut color_type, mut pixels) = match kind {
@@ -385,13 +430,48 @@ fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+/// `/Decode` min/max pairs (`None` when the key is absent — the default
+/// mapping is then the identity for every color space we emit).
+fn decode_ranges(dict: &Dictionary) -> Option<Vec<(f32, f32)>> {
+    let Object::Array(a) = dict.get(b"Decode").ok()? else { return None };
+    let mut ranges = Vec::with_capacity(a.len() / 2);
+    for pair in a.as_chunks::<2>().0 {
+        ranges.push((as_f32(&pair[0])?, as_f32(&pair[1])?));
+    }
+    (!ranges.is_empty()).then_some(ranges)
+}
+
+fn as_f32(o: &Object) -> Option<f32> {
+    match o {
+        Object::Real(v) => Some(*v),
+        Object::Integer(v) => Some(*v as f32),
+        _ => None,
+    }
+}
+
+/// Apply per-component `/Decode` ranges to 8-bit samples:
+/// `out = dmin + s/255·(dmax − dmin)`, clamped back to a byte.
+fn apply_decode(samples: &mut [u8], ranges: &[(f32, f32)], comps: usize) {
+    for (c, &(dmin, dmax)) in ranges.iter().enumerate().take(comps) {
+        for s in samples.iter_mut().skip(c).step_by(comps) {
+            let v = dmin + (*s as f32 / 255.0) * (dmax - dmin);
+            *s = (v * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
 /// Decode the `/SMask` soft mask to per-pixel alpha, if present and usable.
 fn soft_mask_alpha(doc: &Document, dict: &Dictionary, w: u32, h: u32) -> Option<Vec<u8>> {
     let id = dict.get(b"SMask").ok()?.as_reference().ok()?;
     let stream = doc.get_object(id).and_then(Object::as_stream).ok()?;
-    let raw = stream.decompressed_content().ok()?;
+    let bound = ((w as u64) * (h as u64) * 2 + h as u64 + 4_096).min(limits::MAX_ENTRY_BYTES);
+    let raw = streams::decompressed(stream, bound)?;
     let bpc = stream.dict.get(b"BitsPerComponent").ok().and_then(|o| o.as_i64().ok()).unwrap_or(8);
-    expand_bpc(&raw, w, h, bpc, 1)
+    let mut alpha = expand_bpc(&raw, w, h, bpc, 1)?;
+    if let Some(ranges) = decode_ranges(&stream.dict) {
+        apply_decode(&mut alpha, &ranges, 1);
+    }
+    Some(alpha)
 }
 
 fn interleave_alpha(pixels: &[u8], alpha: &[u8], comps: usize) -> Vec<u8> {
@@ -446,14 +526,18 @@ fn chunk(out: &mut Vec<u8>, name: &[u8; 4], data: &[u8]) {
 }
 
 /// Wrap raw CCITT fax data in a minimal single-strip TIFF so any image
-/// reader can decode it.
-fn ccitt_to_tiff(coded: &[u8], params: Option<&Dictionary>) -> Option<Vec<u8>> {
+/// reader can decode it. `image_height` fills in when the optional
+/// `/DecodeParms /Rows` is absent — the XObject `/Height` is reliable.
+fn ccitt_to_tiff(coded: &[u8], params: Option<&Dictionary>, image_height: u32) -> Option<Vec<u8>> {
     let get = |key: &[u8], default: i64| {
         params.and_then(|p| p.get(key).ok()).and_then(|o| o.as_i64().ok()).unwrap_or(default)
     };
     let k = get(b"K", 0);
     let width = get(b"Columns", 1728).max(1) as u32;
-    let height = get(b"Rows", 0).max(0) as u32;
+    let mut height = get(b"Rows", 0).max(0) as u32;
+    if height == 0 {
+        height = image_height;
+    }
     if height == 0 {
         // A stream whose row count is left to the decoder cannot be framed
         // as a single-strip TIFF without decoding the data.
@@ -558,10 +642,12 @@ mod tests {
         let mut params = Dictionary::new();
         params.set("Columns", 8i64);
         params.set("Rows", 10i64);
-        let tiff = ccitt_to_tiff(&[0xAA; 10], Some(&params)).unwrap();
+        let tiff = ccitt_to_tiff(&[0xAA; 10], Some(&params), 10).unwrap();
         assert_eq!(&tiff[..4], b"II\x2a\x00");
         // A stream with no declared row count cannot be framed.
-        assert!(ccitt_to_tiff(&[0xAA; 10], None).is_none());
+        assert!(ccitt_to_tiff(&[0xAA; 10], None, 0).is_none());
+        // …unless the image XObject's /Height supplies it.
+        assert!(ccitt_to_tiff(&[0xAA; 10], None, 10).is_some());
     }
 
     #[test]

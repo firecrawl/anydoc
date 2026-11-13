@@ -31,6 +31,7 @@ pdf-inspector = "1.14.2"
 sha2 = "0.11"
 quick-xml = "0.41.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+weezl = "0.1"
 
 [profile.release]
 lto = "thin"

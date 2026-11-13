@@ -298,8 +298,11 @@ fn merge_line(pieces: &mut Vec<Piece>, line: Line, roles: &Roles, tagged: bool, 
     let cls = classify(&line.items, roles, tagged, median);
     if let Some(Piece::Text(block)) = pieces.last_mut() {
         let gap = block.bbox.y0 - line.bbox.y1;
-        let same_kind =
-            block.level == cls.level && block.footnote == cls.footnote && !cls.furniture;
+        // Furniture merges only with furniture — ordinary content must
+        // never land inside an Artifact block's `<layer value="furniture"/>`.
+        let same_kind = block.level == cls.level
+            && block.footnote == cls.footnote
+            && block.furniture == cls.furniture;
         // A continuation sits directly below the block and shares its
         // column; overlapping or side-by-side lines (multi-column text,
         // captions) start a new piece instead.
@@ -474,6 +477,16 @@ fn marker_prefix(text: &str) -> Option<(usize, ListKind, Vec<u32>)> {
         || (SOFT_BULLETS.contains(&c) && text[c.len_utf8()..].starts_with(char::is_whitespace))
     {
         return Some((c.len_utf8(), ListKind::Bullet, Vec::new()));
+    }
+    // Parenthesized ordered markers fused to their text: `(iv)Next`.
+    if c == '(' {
+        let close = text.find(')')?;
+        let rest = &text[close + 1..];
+        return if rest.is_empty() {
+            None
+        } else {
+            ordered_token(&text[..=close]).map(|o| (close + 1, ListKind::Ordered, o))
+        };
     }
     let token_len: usize =
         text.chars().take_while(|c| c.is_ascii_alphanumeric()).map(char::len_utf8).sum();

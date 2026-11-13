@@ -1,12 +1,12 @@
 //! Convert a document to Markdown (or DocLang with `--doclang`):
-//! `cargo run --example convert -- <file> [-f csv] [-o out.md] [--assets dir] [--doclang]`
+//! `cargo run --example convert -- <file> [-f csv] [-o out] [--assets dir] [--doclang]`
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anydoc::{ConvertError, Format};
 
-const USAGE: &str = "usage: convert <file> [-f csv] [-o out.md] [--assets dir] [--doclang]";
+const USAGE: &str = "usage: convert <file> [-f csv] [-o out] [--assets dir] [--doclang]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
