@@ -598,14 +598,25 @@ fn valid_run(run: &[(Line, Option<Marker>)]) -> bool {
     if top.len() < 2 {
         return false;
     }
-    let mut last: HashMap<OrdinalFamily, u32> = HashMap::new();
+    // Ambiguous markers keep every plausible ordinal (`(i)` is alpha 9
+    // and roman 1); committing to one — e.g. the minimum — would break
+    // alpha runs like `(i) (j) (k)` and roman runs like `(i) (ii)`.
+    let mut last: HashMap<OrdinalFamily, Vec<u32>> = HashMap::new();
     for marker in top.iter().filter(|m| m.kind == ListKind::Ordered) {
         let family = ordinal_family(&marker.text);
-        let prev = last.get(&family).copied();
-        let reached: Vec<u32> =
-            marker.ordinals.iter().copied().filter(|n| prev.is_none_or(|p| *n <= p + 1)).collect();
-        let Some(&ordinal) = reached.iter().min() else { return false };
-        last.insert(family, ordinal);
+        let reached: Vec<u32> = match last.get(&family) {
+            None => marker.ordinals.clone(),
+            Some(prevs) => marker
+                .ordinals
+                .iter()
+                .copied()
+                .filter(|n| prevs.iter().any(|p| *n <= p + 1))
+                .collect(),
+        };
+        if reached.is_empty() {
+            return false;
+        }
+        last.insert(family, reached);
     }
     true
 }
@@ -820,6 +831,16 @@ mod tests {
         ]);
         let lists = pieces.iter().filter(|p| matches!(p, Piece::List(_))).count();
         assert_eq!(lists, 2);
+    }
+
+    #[test]
+    fn parenthesized_alpha_run_starting_at_i_stays_a_list() {
+        // `(i)` is both alpha 9 and roman 1; the run must keep the
+        // alpha reading so `(j) (k)` continue it.
+        let pieces = lay(&[("(i)ninth", 50.0), ("(j)tenth", 50.0), ("(k)eleventh", 50.0)]);
+        let list = first_list(&pieces);
+        assert_eq!(list.items.len(), 3);
+        assert_eq!(list.items[0].marker, "(i)");
     }
 
     #[test]

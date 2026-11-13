@@ -258,7 +258,7 @@ fn page_content(doc: &LopdfDocument, page_id: ObjectId) -> Option<Content> {
     let mut any = false;
     for id in doc.get_page_contents(page_id) {
         let Ok(stream) = doc.get_object(id).and_then(Object::as_stream) else { continue };
-        let data = streams::decompressed(stream, limits::MAX_ENTRY_BYTES)
+        let data = streams::decompressed(doc, stream, limits::MAX_ENTRY_BYTES)
             .unwrap_or_else(|| stream.content.clone());
         bytes.extend_from_slice(&data);
         bytes.push(b'\n');
@@ -279,11 +279,16 @@ pub(crate) struct FormCache {
 }
 
 impl FormCache {
-    pub(crate) fn content(&mut self, id: ObjectId, stream: &Stream) -> Option<Rc<Content>> {
+    pub(crate) fn content(
+        &mut self,
+        doc: &LopdfDocument,
+        id: ObjectId,
+        stream: &Stream,
+    ) -> Option<Rc<Content>> {
         self.map
             .entry(id)
             .or_insert_with(|| {
-                streams::decompressed(stream, limits::MAX_ENTRY_BYTES)
+                streams::decompressed(doc, stream, limits::MAX_ENTRY_BYTES)
                     .and_then(|b| Content::decode(&b).ok())
                     .map(Rc::new)
             })

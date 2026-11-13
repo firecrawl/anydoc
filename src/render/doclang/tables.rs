@@ -526,7 +526,7 @@ fn collect_rules(
                     }
                     _ => {}
                 }
-                if let Some(inner) = cache.content(id, form) {
+                if let Some(inner) = cache.content(doc, id, form) {
                     collect_rules(
                         doc,
                         &form_resources,
@@ -1159,8 +1159,9 @@ mod tests {
         let mut dict = Dictionary::new();
         dict.set("Subtype", Object::Name(b"Form".to_vec()));
         let stream = Stream::new(dict, b"0 0 m 10 10 l S".to_vec());
-        let a = cache.content((7, 0), &stream).unwrap();
-        let b = cache.content((7, 0), &stream).unwrap();
+        let doc = Document::new();
+        let a = cache.content(&doc, (7, 0), &stream).unwrap();
+        let b = cache.content(&doc, (7, 0), &stream).unwrap();
         // Same object id → the same decoded content, decoded once.
         assert!(std::rc::Rc::ptr_eq(&a, &b));
     }

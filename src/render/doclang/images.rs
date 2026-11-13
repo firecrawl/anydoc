@@ -97,7 +97,7 @@ fn collect_drawn_images(
                     }
                     _ => {}
                 }
-                if let Some(inner) = cache.content(id, stream) {
+                if let Some(inner) = cache.content(doc, id, stream) {
                     collect_drawn_images(doc, &form_resources, &inner, out, seen, depth + 1, cache);
                 }
                 seen.remove(&id);
@@ -166,7 +166,7 @@ pub fn raster(doc: &Document, id: ObjectId) -> Option<Raster> {
             // Bound the decode by the declared dimensions before any
             // decompression runs — a Flate stream cannot expand past it.
             let bound = pixel_bound(&stream.dict)?;
-            let raw = streams::decompressed(stream, bound)?;
+            let raw = streams::decompressed(doc, stream, bound)?;
             image_to_png(doc, &stream.dict, &raw).map(|bytes| Raster { ext: "png", bytes })
         }
     }
@@ -179,10 +179,18 @@ pub fn raster(doc: &Document, id: ObjectId) -> Option<Raster> {
 fn pixel_bound(dict: &Dictionary) -> Option<u64> {
     let w = dict.get(b"Width").ok()?.as_i64().ok()?;
     let h = dict.get(b"Height").ok()?.as_i64().ok()?;
-    if w <= 0 || h <= 0 || w as u64 * h as u64 > MAX_PIXELS {
+    if w <= 0 || h <= 0 {
         return None;
     }
-    Some(((w as u64) * (h as u64) * 8 + h as u64 + 4_096).min(limits::MAX_ENTRY_BYTES))
+    let pixels = (w as u64).checked_mul(h as u64)?;
+    if pixels > MAX_PIXELS {
+        return None;
+    }
+    pixels
+        .checked_mul(8)?
+        .checked_add(h as u64)?
+        .checked_add(4_096)
+        .map(|b| b.min(limits::MAX_ENTRY_BYTES))
 }
 
 /// Decode all but the last filter by masking it out of the stream dict, so
@@ -194,7 +202,7 @@ fn decode_prefix(doc: &Document, stream: &Stream, kept: usize) -> Option<Vec<u8>
     let mut stripped = stream.clone();
     truncate_list(doc, &mut stripped.dict, b"Filter", kept)?;
     truncate_list(doc, &mut stripped.dict, b"DecodeParms", kept)?;
-    streams::decompressed(&stripped, limits::MAX_ENTRY_BYTES)
+    streams::decompressed(doc, &stripped, limits::MAX_ENTRY_BYTES)
 }
 
 /// Keep the first `kept` entries of a stream-dict filter/params list. An
@@ -281,7 +289,7 @@ fn color_space(doc: &Document, obj: Option<&Object>) -> Option<(Kind, Option<Vec
                             let stream = doc.get_object(*id).and_then(Object::as_stream).ok()?;
                             // A palette is at most a few KiB of base-space
                             // samples; cap the decode accordingly.
-                            streams::decompressed(stream, 65_536)?
+                            streams::decompressed(doc, stream, 65_536)?
                         }
                         _ => return None,
                     };
@@ -465,7 +473,7 @@ fn soft_mask_alpha(doc: &Document, dict: &Dictionary, w: u32, h: u32) -> Option<
     let id = dict.get(b"SMask").ok()?.as_reference().ok()?;
     let stream = doc.get_object(id).and_then(Object::as_stream).ok()?;
     let bound = ((w as u64) * (h as u64) * 2 + h as u64 + 4_096).min(limits::MAX_ENTRY_BYTES);
-    let raw = streams::decompressed(stream, bound)?;
+    let raw = streams::decompressed(doc, stream, bound)?;
     let bpc = stream.dict.get(b"BitsPerComponent").ok().and_then(|o| o.as_i64().ok()).unwrap_or(8);
     let mut alpha = expand_bpc(&raw, w, h, bpc, 1)?;
     if let Some(ranges) = decode_ranges(&stream.dict) {
