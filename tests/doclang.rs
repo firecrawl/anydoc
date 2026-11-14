@@ -14,7 +14,7 @@ fn unzip(bytes: &[u8]) -> std::collections::HashMap<String, Vec<u8>> {
         let mut f = zip.by_index(i).unwrap();
         let mut buf = Vec::new();
         f.read_to_end(&mut buf).unwrap();
-        out.insert(f.name().to_string(), buf);
+        out.insert(f.name().unwrap().to_string(), buf);
     }
     out
 }
