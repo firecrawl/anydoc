@@ -326,6 +326,9 @@ fn walk_inlines(
                 }
             }
             Node::Elem(child) => {
+                if child.is(ns::OFFICE, "annotation") {
+                    continue;
+                }
                 let in_text = child.ns.as_deref().is_some_and(|n| n == ns::TEXT);
                 if in_text {
                     match child.local.as_str() {
@@ -396,7 +399,7 @@ fn walk_inlines(
                             out.push(Inline::NoteRef(id));
                             continue;
                         }
-                        "annotation" | "tracked-changes" | "soft-page-break" => continue,
+                        "tracked-changes" | "soft-page-break" => continue,
                         _ => {}
                     }
                 }
