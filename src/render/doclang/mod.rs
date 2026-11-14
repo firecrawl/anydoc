@@ -233,20 +233,13 @@ fn geom_area(geom: &markup::PageGeom) -> f32 {
     ((geom.x1 - geom.x0) * (geom.y1 - geom.y0)).max(0.0)
 }
 
-/// `/Info /Title`, honoring the UTF-16BE BOM convention and decoding the
-/// fallback as PDFDocEncoding (Latin-1 superset — high bytes like `é`
-/// survive); `None` when the entry is absent or not a string.
+/// `/Info /Title`, decoded per the PDF text-string rules — UTF-16BE or
+/// UTF-8 when a BOM is present, PDFDocEncoding otherwise; `None` when the
+/// entry is absent or not a string.
 fn document_title(doc: &LopdfDocument) -> Option<String> {
     let info_ref = doc.trailer.get(b"Info").ok()?.as_reference().ok()?;
     let info = doc.get_dictionary(info_ref).ok()?;
-    let Object::String(bytes, _) = info.get(b"Title").ok()? else { return None };
-    if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
-        let (pairs, _) = bytes[2..].as_chunks::<2>();
-        let utf16: Vec<u16> = pairs.iter().map(|c| u16::from_be_bytes(*c)).collect();
-        Some(String::from_utf16_lossy(&utf16))
-    } else {
-        Some(bytes.iter().map(|&b| b as char).collect())
-    }
+    lopdf::decode_text_string(info.get(b"Title").ok()?).ok()
 }
 
 /// The page's concatenated content streams, each bounded-decoded. A
@@ -352,4 +345,22 @@ fn as_rect(obj: &Object) -> Option<[f32; 4]> {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lopdf::{StringFormat, dictionary};
+
+    /// A `/Title` with no BOM decodes as PDFDocEncoding — 0x80 is the
+    /// bullet, not a C1 control.
+    #[test]
+    fn title_uses_pdf_doc_encoding_without_bom() {
+        let mut doc = LopdfDocument::with_version("1.5");
+        let info_id = doc.add_object(dictionary! {
+            "Title" => Object::String(vec![b'a', 0x80, b'b'], StringFormat::Literal),
+        });
+        doc.trailer.set("Info", info_id);
+        assert_eq!(document_title(&doc).as_deref(), Some("a\u{2022}b"));
+    }
 }
