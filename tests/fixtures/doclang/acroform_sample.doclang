@@ -1,0 +1,80 @@
+<doclang version="0.9">
+  <field_region>
+    <location value="60"/>
+    <location value="53"/>
+    <location value="335"/>
+    <location value="138"/>
+    <field_item>
+      <key>
+        <location value="60"/>
+        <location value="57"/>
+        <location value="107"/>
+        <location value="64"/>
+        Full name:
+      </key>
+      <value class="fillable">
+        <location value="125"/>
+        <location value="53"/>
+        <location value="335"/>
+        <location value="66"/>
+        Ada Lovelace
+      </value>
+    </field_item>
+    <field_item>
+      <key>
+        <location value="79"/>
+        <location value="91"/>
+        <location value="167"/>
+        <location value="98"/>
+        I agree to the terms
+      </key>
+      <value class="fillable">
+        <location value="60"/>
+        <location value="91"/>
+        <location value="72"/>
+        <location value="100"/>
+        <checkbox class="selected"/>
+      </value>
+    </field_item>
+    <field_item>
+      <key>
+        <location value="79"/>
+        <location value="110"/>
+        <location value="184"/>
+        <location value="117"/>
+        Subscribe to newsletter
+      </key>
+      <value class="fillable">
+        <location value="60"/>
+        <location value="110"/>
+        <location value="72"/>
+        <location value="119"/>
+        <checkbox class="unselected"/>
+      </value>
+    </field_item>
+    <field_item>
+      <key>
+        <location value="79"/>
+        <location value="130"/>
+        <location value="165"/>
+        <location value="137"/>
+        Monthly mail digest
+      </key>
+      <value class="fillable">
+        <location value="60"/>
+        <location value="129"/>
+        <location value="72"/>
+        <location value="138"/>
+        <checkbox class="selected"/>
+      </value>
+    </field_item>
+  </field_region>
+  <text>
+    <href uri="https://example.org/"/>
+    <location value="60"/>
+    <location value="142"/>
+    <location value="182"/>
+    <location value="150"/>
+    See example.org for details
+  </text>
+</doclang>

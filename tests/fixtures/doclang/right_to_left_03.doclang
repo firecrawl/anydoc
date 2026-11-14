@@ -1,0 +1,168 @@
+<doclang version="0.9">
+  <heading level="2">
+    <location value="59"/>
+    <location value="38"/>
+    <location value="230"/>
+    <location value="49"/>
+    <rtl>اميد نامه پذيرش در بازار اصلی - کالا ی داخلی</rtl>
+  </heading>
+  <picture>
+    <location value="335"/>
+    <location value="22"/>
+    <location value="415"/>
+    <location value="62"/>
+    <heading level="2">
+      <location value="335"/>
+      <location value="56"/>
+      <location value="414"/>
+      <location value="64"/>
+      <rtl>شرکت بورس کالای ايران</rtl>
+    </heading>
+  </picture>
+  <heading level="2">
+    <location value="324"/>
+    <location value="84"/>
+    <location value="412"/>
+    <location value="95"/>
+    <rtl>2-5 - استاندارد ک الا</rtl>
+  </heading>
+  <text>
+    <location value="60"/>
+    <location value="98"/>
+    <location value="228"/>
+    <location value="128"/>
+    <rtl>شمشه و شمشال توليد شده به روش ريخته گری پيوسته مورد مصرف در فولادهای سازه ای - مطابق آناليز پيوست</rtl>
+  </text>
+  <text>
+    <location value="204"/>
+    <location value="131"/>
+    <location value="228"/>
+    <location value="139"/>
+    20300
+  </text>
+  <text>
+    <location value="202"/>
+    <location value="143"/>
+    <location value="230"/>
+    <location value="153"/>
+    <checkbox class="unselected"/><rtl>بلی</rtl>
+  </text>
+  <text>
+    <location value="170"/>
+    <location value="144"/>
+    <location value="196"/>
+    <location value="153"/>
+    <checkbox class="selected"/><rtl>خير</rtl>
+  </text>
+  <text>
+    <location value="143"/>
+    <location value="158"/>
+    <location value="228"/>
+    <location value="167"/>
+    <rtl>سازمان ملی استاندارد ايران</rtl>
+  </text>
+  <text>
+    <location value="170"/>
+    <location value="171"/>
+    <location value="213"/>
+    <location value="180"/>
+    <checkbox class="selected"/><rtl>بلی خير</rtl>
+  </text>
+  <list>
+    <ldiv/>
+    <location value="395"/>
+    <location value="99"/>
+    <location value="447"/>
+    <location value="109"/>
+    <rtl>نام استاندارد</rtl>
+  </list>
+  <text>
+    <location value="362"/>
+    <location value="132"/>
+    <location value="446"/>
+    <location value="142"/>
+    <rtl>شماره استاندارد ملی</rtl>
+  </text>
+  <text>
+    <location value="350"/>
+    <location value="145"/>
+    <location value="446"/>
+    <location value="156"/>
+    <rtl>استاندارد اجباری است؟</rtl>
+  </text>
+  <text>
+    <location value="335"/>
+    <location value="159"/>
+    <location value="447"/>
+    <location value="169"/>
+    <rtl>مرجع صادرکننده استاندارد</rtl>
+  </text>
+  <text>
+    <location value="254"/>
+    <location value="173"/>
+    <location value="447"/>
+    <location value="197"/>
+    <rtl>آيا توليدکننده محصول، استاندارد مذکور را اخذ نموده است؟</rtl>
+  </text>
+  <heading level="2">
+    <location value="352"/>
+    <location value="214"/>
+    <location value="435"/>
+    <location value="224"/>
+    <rtl>3 - پذيرش در بورس</rtl>
+  </heading>
+  <table>
+    <location value="61"/>
+    <location value="223"/>
+    <location value="431"/>
+    <location value="363"/>
+    <fcel/>
+    19 / 09 / 1403
+    <fcel/>
+    مدارک ارائه تاريخ
+    <nl/>
+    <fcel/>
+    04 / 10 / 1403
+    <fcel/>
+    پذيرش تاريخ
+    <nl/>
+    <fcel/>
+    436
+    <fcel/>
+    جلسه شماره عرضه کميته
+    <nl/>
+    <fcel/>
+    05 / 10 / 1403
+    <fcel/>
+    اميدنامه درج تاريخ
+    <nl/>
+    <fcel/>
+    کارگزاری آ رمون بورس
+    <fcel/>
+    پذيرش مشاور
+    <nl/>
+    <fcel/>
+    بر قيمت اساس های جهانی
+    <fcel/>
+    در کالا پذيرش از پس پايه قيمت تعيين نحوة بورس
+    <nl/>
+    <fcel/>
+    حداقل 50 % يا ساليانه توليد از 47.500 تن
+    <fcel/>
+    توليد از عرضه درصد حداقل / کل فروش / فروش داخلی
+    <nl/>
+    <fcel/>
+    5% تحويل قابل محموله آخرين
+    <fcel/>
+    تحويل مجاز خطای
+    <nl/>
+  </table>
+  <page_footer>
+    <layer value="furniture"/>
+    <location value="230"/>
+    <location value="475"/>
+    <location value="252"/>
+    <location value="480"/>
+    Page 7
+  </page_footer>
+</doclang>
