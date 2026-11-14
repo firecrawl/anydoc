@@ -54,7 +54,8 @@ create_exception!(
     ResourceLimitError,
     ConvertError,
     "A fixed safety limit was crossed: decompression, nesting depth, node \
-     count, repeat expansion, or retained asset bytes. `limit` names it."
+     count, repeat expansion, or retained asset bytes; or an allocation failed \
+     recoverably. `limit` names the limit or is `memory_allocation`."
 );
 
 create_exception!(
