@@ -502,6 +502,9 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
                     }
                 }
                 "tab" | "ptab" => self.push(Inline::Text { text: " ".into(), style: Style::PLAIN }),
+                // A non-breaking hyphen is a visible hyphen, the one the
+                // binary and RTF readers emit for the same character.
+                "noBreakHyphen" => self.push(Inline::Text { text: "-".into(), style }),
                 // Markdown has no pages or columns, but every w:br still
                 // separates the runs around it: dropping a page break
                 // outright would join the words on either side. One left at
