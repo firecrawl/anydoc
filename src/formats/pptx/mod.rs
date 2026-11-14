@@ -36,7 +36,7 @@ const SLIDE_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/r
 
 /// Namespaces whose markup this frontend understands; `mc:Choice` branches
 /// requiring anything else fall back to `mc:Fallback`.
-const SUPPORTED_NS: &[&str] = &[ns::P, ns::A, ns::R, ns::MC, ns::A14];
+const SUPPORTED_NS: &[&str] = &[ns::P, ns::A, ns::R, ns::MC, ns::A14, ns::CHART, ns::DGM];
 
 struct LayoutInfo {
     placeholders: Vec<Placeholder>,
@@ -349,6 +349,7 @@ fn parse_shapes(
             "sp" | "cxnSp" => parse_shape(child, ctx, blocks)?,
             "grpSp" => parse_shapes(child, ctx, blocks)?,
             "graphicFrame" => parse_graphic_frame(child, ctx, blocks)?,
+            "oleObj" => parse_ole_object(child, ctx, blocks)?,
             "pic" => {
                 let descr = child
                     .first_descendant(ns::P, "cNvPr")
@@ -563,34 +564,14 @@ fn parse_graphic_frame(
     ctx: &SlideCtx,
     blocks: &mut Vec<Block>,
 ) -> Result<(), ConvertError> {
-    if let Some(tbl) = frame.first_descendant(ns::A, "tbl") {
+    if let Some(tbl) = supported_descendant(frame, ns::A, "tbl") {
         parse_table(tbl, ctx, blocks)?;
         return Ok(());
     }
-    // Embedded OLE objects: retain identity, media type, and payload.
-    if let Some(ole) = frame.first_descendant(ns::P, "oleObj") {
-        let prog_id = ole.attr(ns::P, "progId").unwrap_or("object");
-        let name = ole.attr(ns::P, "name").unwrap_or("").trim();
-        let alt =
-            if name.is_empty() { format!("Embedded object: {prog_id}") } else { name.to_string() };
-        let source = match ole.attr_qualified(ns::R, "id") {
-            Some(rid) => match ctx.rel_part(rid)? {
-                Some((part, bytes)) => Some(ImageSource::Asset(ctx.assets.borrow_mut().add(
-                    "application/vnd.ms-ole-object".into(),
-                    part,
-                    &bytes,
-                )?)),
-                None => None,
-            },
-            None => None,
-        };
-        blocks.push(Block::Paragraph(vec![Inline::Image {
-            alt,
-            source: source.unwrap_or(ImageSource::Unavailable),
-        }]));
-        return Ok(());
+    if let Some(ole) = supported_descendant(frame, ns::P, "oleObj") {
+        return parse_ole_object(ole, ctx, blocks);
     }
-    if let Some(chart_ref) = frame.first_descendant(ns::CHART, "chart")
+    if let Some(chart_ref) = supported_descendant(frame, ns::CHART, "chart")
         && let Some(rid) = chart_ref.attr_qualified(ns::R, "id")
         && let Some((part, bytes)) = ctx.rel_part(rid)?
     {
@@ -601,7 +582,7 @@ fn parse_graphic_frame(
         }
         return Ok(());
     }
-    if let Some(rel_ids) = frame.first_descendant(ns::DGM, "relIds")
+    if let Some(rel_ids) = supported_descendant(frame, ns::DGM, "relIds")
         && let Some(rid) = rel_ids.attr_qualified(ns::R, "dm")
         && let Some((part, bytes)) = ctx.rel_part(rid)?
     {
@@ -611,6 +592,72 @@ fn parse_graphic_frame(
             Err(e) => log::warn!("skipping corrupt diagram part {part}: {e}"),
         }
     }
+    Ok(())
+}
+
+/// Search in document order, descending only into the selected MC branch.
+/// A frame can contain nested or sibling alternatives; selecting its first
+/// `AlternateContent` as the whole search scope would lose later content.
+fn supported_descendant<'e>(parent: &'e Element, ns: &str, local: &str) -> Option<&'e Element> {
+    let mut stack = vec![parent.child_elems()];
+    while let Some(children) = stack.last_mut() {
+        let Some(child) = children.next() else {
+            stack.pop();
+            continue;
+        };
+        if child.is(ns::MC, "AlternateContent") {
+            if let Some(branch) = crate::shared::mc::alternate_branch(child, SUPPORTED_NS) {
+                stack.push(branch.child_elems());
+            }
+        } else {
+            if child.is(ns, local) {
+                return Some(child);
+            }
+            stack.push(child.child_elems());
+        }
+    }
+    None
+}
+
+fn parse_ole_object(
+    ole: &Element,
+    ctx: &SlideCtx,
+    blocks: &mut Vec<Block>,
+) -> Result<(), ConvertError> {
+    let prog_id = ole.attr(ns::P, "progId").unwrap_or("object");
+    let name = ole.attr(ns::P, "name").unwrap_or("").trim();
+    let alt =
+        if name.is_empty() { format!("Embedded object: {prog_id}") } else { name.to_string() };
+    // The original object remains an asset even when a preview is available.
+    let payload = match ole.attr_qualified(ns::R, "id") {
+        Some(rid) => match ctx.rel_part(rid)? {
+            Some((part, bytes)) => Some(ImageSource::Asset(ctx.assets.borrow_mut().add(
+                "application/vnd.ms-ole-object".into(),
+                part,
+                &bytes,
+            )?)),
+            None => None,
+        },
+        None => None,
+    };
+    // The preview is what a slide displays. Feeding the OLE compound document
+    // to an image consumer loses that content and cannot be decoded as an image.
+    let rid = supported_descendant(ole, ns::A, "blip")
+        .and_then(|b| b.attr_qualified(ns::R, "embed").or_else(|| b.attr_qualified(ns::R, "link")));
+    let preview = match rid {
+        Some(rid) => crate::shared::assets::rel_image_source(
+            ctx.pkg,
+            ctx.rels,
+            ctx.base_part,
+            ctx.assets,
+            rid,
+        )?,
+        None => None,
+    };
+    blocks.push(Block::Paragraph(vec![Inline::Image {
+        alt,
+        source: preview.or(payload).unwrap_or(ImageSource::Unavailable),
+    }]));
     Ok(())
 }
 
