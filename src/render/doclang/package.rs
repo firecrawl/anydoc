@@ -155,8 +155,11 @@ mod tests {
         let parts = vec![Part { path: "assets/a.png".into(), bytes: vec![1, 2, 3] }];
         let zip_bytes = pack(b"<doclang/>", &parts, Some(b"%PDF")).unwrap();
         let mut zip = zip::ZipArchive::new(Cursor::new(&zip_bytes[..])).unwrap();
-        let names: Vec<String> =
-            (0..zip.len()).filter_map(|i| zip.name_for_index(i)).map(String::from).collect();
+        let names: Vec<String> = (0..zip.len())
+            .filter_map(|i| zip.name_for_index(i))
+            .filter_map(|n| n.ok())
+            .map(|n| n.into_owned())
+            .collect();
         for required in
             ["[Content_Types].xml", "_rels/.rels", "document.xml", "assets/a.png", "source"]
         {
