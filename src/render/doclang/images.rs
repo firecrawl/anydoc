@@ -408,7 +408,7 @@ fn unpack_indices(raw: &[u8], w: u32, h: u32, bpc: i64) -> Option<Vec<u8>> {
     if raw.len() < stride * h as usize {
         return None;
     }
-    let mask = (1u8 << bpc) - 1;
+    let mask = 0xFFu8 >> (8 - bpc);
     let mut out = Vec::with_capacity((w * h) as usize);
     for row in 0..h as usize {
         let mut produced = 0usize;
@@ -662,6 +662,8 @@ mod tests {
     fn unpack_indices_reads_subbyte_samples() {
         assert_eq!(unpack_indices(&[0b1010_0000], 4, 1, 1), Some(vec![1, 0, 1, 0]));
         assert_eq!(unpack_indices(&[0b11_00_10_01], 4, 1, 2), Some(vec![3, 0, 2, 1]));
+        // 8-bit indexes are whole bytes — the mask must not overflow.
+        assert_eq!(unpack_indices(&[0x00, 0x7F, 0xFF], 3, 1, 8), Some(vec![0, 127, 255]));
     }
 
     #[test]
