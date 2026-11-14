@@ -50,7 +50,10 @@ pub(crate) fn resolve_anchors(doc: &Document) -> AnchorMap {
     // inside the heading content) to those slugs.
     walk_blocks(&doc.blocks, &mut |block| {
         if let Block::Heading { anchor, content, .. } = block {
-            let Some(slug) = ids.claim(gfm_slug(&inlines_to_plain_text(content))) else {
+            // A line break renders as a space in a heading, and the slug is
+            // taken from the rendered text.
+            let text = inlines_to_plain_text(content).replace('\n', " ");
+            let Some(slug) = ids.claim(gfm_slug(&text)) else {
                 return;
             };
             let mut bind = |id: &str| {
