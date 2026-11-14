@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Café accounts
+
+**From:** jose@example.com
+
+Café costs 5£, noted.

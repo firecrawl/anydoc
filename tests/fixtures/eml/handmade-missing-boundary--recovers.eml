@@ -1,0 +1,5 @@
+From: sender@example.com
+Subject: Boundary never appears
+Content-Type: multipart/alternative; boundary="nope"
+
+Text sitting where parts should be.

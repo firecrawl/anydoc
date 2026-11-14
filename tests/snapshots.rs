@@ -96,6 +96,7 @@ fn fixtures_detect_from_content() {
         ("xlsb", Some(Format::Excel)),
         ("xlsx", Some(Format::Excel)),
         ("csv", None),
+        ("eml", None),
     ];
     let root = fixture_root();
     for (dir, format) in expected {

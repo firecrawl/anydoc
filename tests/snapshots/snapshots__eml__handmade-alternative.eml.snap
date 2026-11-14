@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Engine notes
+
+**From:** Ada Lovelace \<ada@example.com>\
+**To:** Charles Babbage \<charles@example.org>\
+**Cc:** notes@example.net\
+**Date:** Tue, 4 Mar 2025 09:15:00 +1100
+
+The difference engine needs a wider carriage — twenty digits, not sixteen.
+
+Second paragraph, after a blank line.

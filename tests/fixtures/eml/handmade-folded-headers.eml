@@ -1,0 +1,9 @@
+From: sender@example.com
+Subject: A subject that continues
+  onto a second line
+  and a third
+To: one@example.com,
+ two@example.com
+Content-Type: text/plain
+
+Short body.
