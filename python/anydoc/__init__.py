@@ -35,6 +35,8 @@ from anydoc._anydoc import (
     format_from_path,
     to_document,
 )
+from anydoc._anydoc import to_doclang as _to_doclang
+from anydoc._anydoc import to_doclang_bytes as _to_doclang_bytes
 from anydoc._anydoc import to_markdown as _to_markdown
 from anydoc._anydoc import to_markdown_bytes as _to_markdown_bytes
 
@@ -107,6 +109,38 @@ def to_markdown_bytes(
         if ocr != "hosted":
             raise
     return _parse_hosted(bytes(data), "document.pdf", parse_mode, api_key, api_url)
+
+
+def to_doclang(
+    path: "str | os.PathLike[str]",
+    *,
+    lists: bool = True,
+    tables: bool = True,
+    pages_with_tables: "list[int] | None" = None,
+) -> bytes:
+    """Convert a document file to a DocLang `.dclx` archive (OPC ZIP,
+    returned as bytes). Only PDF has a DocLang exporter; scanned pages
+    export as `<picture>` elements with extracted rasters, so no OCR is
+    needed. `lists` and `tables` steer structure detection, and
+    `pages_with_tables` restricts the ruled-table detector to those
+    1-indexed pages."""
+    return _to_doclang(path, lists=lists, tables=tables, pages_with_tables=pages_with_tables)
+
+
+def to_doclang_bytes(
+    data: "bytes | bytearray",
+    format: "Format | None" = None,
+    *,
+    lists: bool = True,
+    tables: bool = True,
+    pages_with_tables: "list[int] | None" = None,
+) -> bytes:
+    """Convert an in-memory document to a DocLang `.dclx` archive. Without
+    a format, it is detected from the content. Hints are as for
+    `to_doclang`."""
+    return _to_doclang_bytes(
+        data, format, lists=lists, tables=tables, pages_with_tables=pages_with_tables
+    )
 
 
 _API_URL = "https://api.firecrawl.dev"
@@ -226,6 +260,8 @@ __all__ = [
     "format_from_bytes",
     "format_from_extension",
     "format_from_path",
+    "to_doclang",
+    "to_doclang_bytes",
     "to_document",
     "to_markdown",
     "to_markdown_bytes",
