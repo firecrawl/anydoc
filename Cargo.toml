@@ -19,7 +19,6 @@ include = ["/src", "/examples/convert.rs", "/README.md", "/LICENSE"]
 
 [dev-dependencies]
 insta = "1"
-sha2 = "0.11"
 
 [dependencies]
 cfb = "0.14.0"
@@ -27,9 +26,12 @@ csv = "1.4.0"
 flate2 = "1"
 encoding_rs = "0.8.35"
 log = "0.4"
+lopdf = "0.42"
 pdf-inspector = "1.14.2"
+sha2 = "0.11"
 quick-xml = "0.41.0"
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
+weezl = "0.1"
 
 [profile.release]
 lto = "thin"

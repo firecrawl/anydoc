@@ -130,6 +130,9 @@ let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Csv)?;
 
 // Or stop at the document model, which also carries embedded assets:
 let document = anydoc::to_document(&bytes, None)?;
+
+// PDFs (including scanned pages) also export to DocLang `.dclx` archives:
+let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf, None)?;
 ```
 
 ## OCR
@@ -143,6 +146,14 @@ anydoc reads text-based PDFs locally but does no OCR, so a PDF with scanned or i
 | Python | `anydoc.to_markdown("scan.pdf", ocr="hosted")` | `api_key`                     |
 
 Only documents that need OCR leave the machine, and the whole document goes, since Parse has no page selection. If Parse cannot convert it, Node rejects with `code: 'hosted'` and Python raises `HostedError`. `--api-url`, `apiUrl` and `api_url`, else `FIRECRAWL_API_URL`, point at another Parse deployment. `--parse-mode`, `parseMode` and `parse_mode` pick the Parse PDF mode: `auto` (the default) extracts text and falls back to OCR, `fast` extracts text only, `ocr` OCRs every page. The Rust crate has no `ocr` option and never makes network calls.
+
+## DocLang export
+
+The Rust crate can also export PDFs to [DocLang](https://github.com/doclang-project/doclang) `.dclx` archives (DocLang 0.9, OPC ZIP): `to_doclang(path, hints)` and `to_doclang_bytes(bytes, format, hints)` return the archive bytes. Text pages become positioned `<text>`/`<heading>` runs with inline formatting, links, and AcroForm fields; list markers (`•`, `1.`, `a)`, `iv.`) become `<list>`/`<ldiv>`/`<marker>` structure; tables become OTSL `<table>` grids — from `Table`/`TR`/`TD` elements when the PDF is tagged, and from drawn rules (stroked lines and thin `re` rects, including inside Form XObjects) otherwise, with missing interior rules resolving to `lcel`/`ucel`/`xcel` spans. Scanned or image-only pages export as `<picture>` elements backed by extracted raster parts under `pages/` or `assets/` for the supported encodings (JPEG, JPEG 2000, CCITT fax, and Flate/LZW/ASCII85 samples repackaged as PNG) — no OCR required; unsupported encodings still emit a positioned `<picture>` without a raster. The original PDF travels inside the archive as the `/source` part. `DoclangHints` toggles structure detection: `lists`, `tables`, and `pages_with_tables` (restrict the ruled-table detector to 1-indexed pages you know contain tables) — pass `None` for the defaults.
+
+```bash
+cargo run --example convert -- scan.pdf --doclang -o scan.dclx
+```
 
 ## Features
 

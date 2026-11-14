@@ -97,9 +97,11 @@ dependencies = [
  "flate2",
  "insta",
  "log",
+ "lopdf",
  "pdf-inspector",
  "quick-xml",
  "sha2 0.11.0",
+ "weezl",
  "zip",
 ]
 

@@ -7,6 +7,9 @@
 *.snap.new
 __pycache__/
 .venv/
+# maturin develop drops the built extension next to the package
+python/anydoc/_anydoc*.so
+python/anydoc/_anydoc*.pyd
 # maturin build output from the CI python job
 /python/wheels/
 # wasm-pack build output: pkg/ is the npm package, www/pkg/ the demo site copy
