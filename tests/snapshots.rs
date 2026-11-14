@@ -142,19 +142,63 @@ fn embedded_ole_payload_is_retained() {
     assert_eq!(ole.bytes, b"OLE-PAYLOAD-STAND-IN".repeat(4));
 }
 
-/// Standard Word OLE markup places a VML preview image next to the
-/// `o:OLEObject`; the object payload (not the preview) must be retained.
+/// Word renders the preview in place, while the object remains extractable.
 #[test]
-fn docx_ole_payload_wins_over_its_preview_image() {
-    let path = fixture_root().join("docx").join("handmade-ole.docx");
-    let bytes = std::fs::read(&path).unwrap();
+fn docx_ole_retains_payload_and_selects_preview_by_shape_id() {
+    use anydoc::model::{Block, ImageSource, Inline};
+
+    let bytes = std::fs::read(fixture_root().join("docx/handmade-ole.docx")).unwrap();
     let doc = anydoc::to_document(&bytes, anydoc::Format::Docx).unwrap();
     let ole = doc
         .assets
         .iter()
         .find(|a| a.media_type == "application/vnd.ms-ole-object")
         .expect("OLE payload retained as an asset");
+    assert_eq!(ole.origin_part, "word/embeddings/oleObject1.bin");
     assert_eq!(ole.bytes, b"DOCX-OLE-PAYLOAD".repeat(4));
+
+    let preview = doc
+        .assets
+        .iter()
+        .find(|a| a.origin_part == "word/media/preview.png")
+        .expect("preview retained as a separate asset");
+    assert_eq!(preview.media_type, "image/png");
+    assert_eq!(preview.bytes, b"\x89PNG\r\n\x1a\nfakepreview");
+    assert_eq!(doc.assets.len(), 2, "unrelated shape is not extracted");
+    assert!(doc.blocks.iter().any(|block| {
+        matches!(block, Block::Paragraph(inlines) if inlines.iter().any(|inline| {
+            matches!(inline, Inline::Image { source: ImageSource::Asset(id), .. } if *id == preview.id)
+        }))
+    }));
+}
+
+/// A missing preview keeps the existing inline target and object payload.
+#[test]
+fn docx_ole_missing_preview_falls_back_to_payload() {
+    use anydoc::model::{Block, ImageSource, Inline};
+    use std::io::Cursor;
+    use zip::{ZipArchive, ZipWriter};
+
+    let bytes = std::fs::read(fixture_root().join("docx/handmade-ole.docx")).unwrap();
+    let mut source = ZipArchive::new(Cursor::new(bytes)).unwrap();
+    let mut output = ZipWriter::new(Cursor::new(Vec::new()));
+    for index in 0..source.len() {
+        let member = source.by_index(index).unwrap();
+        if member.name() != "word/media/preview.png" {
+            output.raw_copy_file(member).unwrap();
+        }
+    }
+    let bytes = output.finish().unwrap().into_inner();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Docx).unwrap();
+    assert_eq!(doc.assets.len(), 1);
+    let ole = &doc.assets[0];
+    assert_eq!(ole.media_type, "application/vnd.ms-ole-object");
+    assert_eq!(ole.bytes, b"DOCX-OLE-PAYLOAD".repeat(4));
+    assert!(doc.blocks.iter().any(|block| {
+        matches!(block, Block::Paragraph(inlines) if inlines.iter().any(|inline| {
+            matches!(inline, Inline::Image { source: ImageSource::Asset(id), .. } if *id == ole.id)
+        }))
+    }));
 }
 
 /// Repeated references to one part must neither re-decompress against the
