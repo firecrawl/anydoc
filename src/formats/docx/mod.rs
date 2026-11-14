@@ -6,6 +6,7 @@
 mod content;
 mod numbering;
 mod styles;
+mod symbols;
 
 use crate::error::ConvertError;
 use crate::model::{Document, Note, NoteKind};
@@ -245,6 +246,95 @@ mod tests {
             crate::model::MarkerKind::LowerAlpha,
             "level 1 of the style's numbering"
         );
+    }
+
+    #[test]
+    fn symbol_glyphs_load_from_the_font_code_page() {
+        // Word's legacy round bullet is Symbol F0B7 (#193); Wingdings'
+        // bullet squares and arrowheads, and Symbol's operators, come from
+        // the same code-page tables. Both the byte form and the U+F000..F0FF
+        // form must load, and the font name is case-insensitive.
+        for (font, form, expected) in [
+            ("Symbol", "F0B7", "\u{2022}"),
+            ("Symbol", "00B7", "\u{2022}"),
+            ("symbol", "f0b7", "\u{2022}"),
+            ("Wingdings", "F0A7", "\u{25aa}"),
+            ("WINGDINGS", "00A7", "\u{25aa}"),
+            ("Wingdings", "F0D8", "\u{27a2}"),
+            ("Wingdings", "F0B7", "\u{1f550}"),
+            ("Symbol", "F0A3", "\u{2264}"),
+            ("Symbol", "F0B3", "\u{2265}"),
+            ("Symbol", "F0BA", "\u{2261}"),
+            ("Symbol", "F0BB", "\u{2248}"),
+        ] {
+            let document = format!(
+                r#"<w:document {W}><w:body><w:p><w:r>
+                <w:t>before </w:t><w:sym w:font="{font}" w:char="{form}"/><w:t> after</w:t>
+                </w:r></w:p></w:body></w:document>"#
+            );
+            let bytes = docx_parts(&[("word/document.xml", &document)]);
+            let doc = parse(&bytes).unwrap();
+            let Some(Block::Paragraph(inlines)) = doc.blocks.first() else { panic!() };
+            assert_eq!(
+                crate::model::inlines_to_plain_text(inlines),
+                format!("before {expected} after"),
+            );
+        }
+    }
+
+    #[test]
+    fn symbol_glyphs_accept_a_unicode_valued_w_char() {
+        // Converters that store the character itself in w:char keep working
+        // for the symbol fonts (#193's Symbol operators). A value too large
+        // to be a font code is the character; private-use values never load.
+        for (form, expected) in [("2264", "\u{2264}"), ("2248", "\u{2248}")] {
+            let document = format!(
+                r#"<w:document {W}><w:body><w:p><w:r>
+                <w:t>p </w:t><w:sym w:font="Symbol" w:char="{form}"/><w:t> q</w:t>
+                </w:r></w:p></w:body></w:document>"#
+            );
+            let bytes = docx_parts(&[("word/document.xml", &document)]);
+            let doc = parse(&bytes).unwrap();
+            let Some(Block::Paragraph(inlines)) = doc.blocks.first() else { panic!() };
+            assert_eq!(crate::model::inlines_to_plain_text(inlines), format!("p {expected} q"));
+        }
+        for font in ["Wingdings", "Symbol"] {
+            let document = format!(
+                r#"<w:document {W}><w:body><w:p><w:r>
+                <w:t>before</w:t><w:sym w:font="{font}" w:char="E06F"/><w:t>after</w:t>
+                </w:r></w:p></w:body></w:document>"#
+            );
+            let bytes = docx_parts(&[("word/document.xml", &document)]);
+            let doc = parse(&bytes).unwrap();
+            let Some(Block::Paragraph(inlines)) = doc.blocks.first() else { panic!() };
+            assert_eq!(crate::model::inlines_to_plain_text(inlines), "beforeafter");
+        }
+    }
+
+    #[test]
+    fn unknown_or_malformed_symbol_glyphs_stay_dropped() {
+        for attrs in [
+            r#"w:font="Arial" w:char="2013""#,
+            r#"w:font="Wingdings" w:char="0010""#,
+            r#"w:font="Wingdings" w:char="not-hex""#,
+            r#"w:font="Wingdings" w:char="+00A7""#,
+            r#"w:font="Wingdings" w:char="""#,
+            r#"w:font="Wingdings" w:char="100A7""#,
+            r#"w:font="Wingdings""#,
+            r#"w:char="F0A7""#,
+        ] {
+            let document = format!(
+                r#"<w:document {W}><w:body><w:p><w:r>
+                <w:t>before</w:t><w:sym {attrs}/><w:t>after</w:t>
+                </w:r></w:p></w:body></w:document>"#
+            );
+            let bytes = docx_parts(&[("word/document.xml", &document)]);
+            assert_eq!(
+                crate::to_markdown_bytes(&bytes, crate::Format::Docx).unwrap().trim(),
+                "beforeafter",
+                "attrs: {attrs}",
+            );
+        }
     }
 
     #[test]
