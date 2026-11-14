@@ -77,6 +77,9 @@ struct CharState {
     /// Emphasis the paragraph style itself carries, subtracted from headings.
     style_base: Style,
     suppress: bool,
+    /// Inside a `\deleted` revision: text a viewer shows struck out as
+    /// removed, not part of the document's current text.
+    deleted: bool,
     capture: Capture,
     note: Option<NoteKind>,
 }
@@ -96,6 +99,7 @@ impl Default for CharState {
             block: None,
             style_base: Style::PLAIN,
             suppress: false,
+            deleted: false,
             capture: Capture::None,
             note: None,
         }
@@ -781,6 +785,10 @@ impl<'a> Parser<'a> {
             "b" => self.set_style(|s| s.bold = on),
             "i" => self.set_style(|s| s.italic = on),
             "strike" | "striked" => self.set_style(|s| s.strike = on),
+            "deleted" => {
+                self.flush_pending();
+                self.state.deleted = on;
+            }
             "plain" => {
                 self.flush_pending();
                 let font = self.state.font;
@@ -803,6 +811,11 @@ impl<'a> Parser<'a> {
                 self.flush_pending();
                 if self.state.note.is_some() {
                     self.inlines.push(Inline::LineBreak);
+                } else if self.state.deleted {
+                    // A deleted paragraph mark joins this paragraph to the
+                    // next, as accepting the revision does; a wholly deleted
+                    // paragraph leaves nothing, not even its list marker.
+                    self.dest.listtext = None;
                 } else if !self.state.suppress {
                     self.end_paragraph()?;
                 }
@@ -823,7 +836,7 @@ impl<'a> Parser<'a> {
             // boundary they carry is not.
             "line" | "lbr" | "page" | "column" => {
                 self.flush_pending();
-                if !self.state.suppress {
+                if !self.state.suppress && !self.state.deleted {
                     self.inlines.push(Inline::LineBreak);
                 }
             }
@@ -1047,6 +1060,10 @@ impl<'a> Parser<'a> {
         let Some(math) = self.dest.math.take() else {
             return;
         };
+        // Runs after the group closes: the state is the enclosing one.
+        if self.state.deleted {
+            return;
+        }
         let (lines, display) = math.finish();
         for (i, tex) in lines.into_iter().enumerate() {
             if i > 0 {
@@ -1074,6 +1091,9 @@ impl<'a> Parser<'a> {
         let Some(pict) = self.dest.pict.take() else {
             return Ok(());
         };
+        if self.state.deleted {
+            return Ok(());
+        }
         let Some((media_type, extension)) = pict.format else {
             log::debug!("skipping picture in an unsupported format");
             return Ok(());
@@ -1151,7 +1171,7 @@ impl<'a> Parser<'a> {
                 }
             }
             Capture::None => {
-                if !self.state.suppress {
+                if !self.state.suppress && !self.state.deleted {
                     self.inlines.push(Inline::Text { text, style: self.state.style });
                 }
             }
@@ -1340,6 +1360,38 @@ mod tests {
         let Block::List(list) = &doc.blocks[0] else { panic!("{:?}", doc.blocks) };
         assert_eq!(list.items[0].marker_label.as_deref(), Some("1."));
         assert_eq!(list.items[1].marker_label.as_deref(), Some("2."));
+    }
+
+    #[test]
+    fn deleted_revision_text_is_omitted() {
+        // #202: a tracked deletion is removed text; the insertion stays.
+        for src in [
+            r"{\rtf1 The parties agreed {\deleted\revauthdel1 OLDTERM }{\revised\revauth1 NEWTERM }terms.\par}",
+            r"{\rtf1 The parties agreed \deleted OLDTERM \deleted0 NEWTERM terms.\par}",
+            r"{\rtf1 The parties agreed {\deleted OLD\line TERM {\pict\pngblip 89504e470d0a1a0a}}NEWTERM terms.\par}",
+        ] {
+            let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+            assert_eq!(markdown, "The parties agreed NEWTERM terms.\n", "source: {src}");
+        }
+    }
+
+    #[test]
+    fn deleted_paragraph_mark_joins_the_paragraphs_and_drops_its_list_marker() {
+        let src = r"{\rtf1 Kept{\deleted\par} text.\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(markdown, "Kept text.\n");
+
+        let src = r"{\rtf1 \pard{\listtext 1.\tab}one\par {\deleted{\listtext 2.\tab}two\par}\pard plain\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert!(!markdown.contains("two") && !markdown.contains("2."), "{markdown}");
+        assert!(markdown.contains("plain"), "{markdown}");
+    }
+
+    #[test]
+    fn deleted_paragraph_leaves_no_blank_line_in_a_code_block() {
+        let src = r"{\rtf1{\stylesheet{\s1 Source Code;}}\pard\s1 a = 1\par {\deleted b = 2\par}c = 3\par}";
+        let markdown = crate::to_markdown_bytes(src.as_bytes(), crate::Format::Rtf).unwrap();
+        assert_eq!(markdown, "```\na = 1\nc = 3\n```\n");
     }
 
     #[test]
