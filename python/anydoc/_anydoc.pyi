@@ -71,6 +71,32 @@ def to_markdown_bytes(data: bytes | bytearray, format: Format | None = None) -> 
     detected from the content, which signature-less formats (CSV) have to
     name explicitly."""
 
+def to_doclang(
+    path: str | os.PathLike[str],
+    *,
+    lists: bool = True,
+    tables: bool = True,
+    pages_with_tables: list[int] | None = None,
+) -> bytes:
+    """Convert a document file to a DocLang `.dclx` archive (OPC ZIP,
+    returned as bytes). Only PDF has a DocLang exporter; scanned pages
+    export as `<picture>` elements with extracted rasters, so no OCR is
+    needed. `lists` and `tables` steer structure detection, and
+    `pages_with_tables` restricts the ruled-table detector to those
+    1-indexed pages."""
+
+def to_doclang_bytes(
+    data: bytes | bytearray,
+    format: Format | None = None,
+    *,
+    lists: bool = True,
+    tables: bool = True,
+    pages_with_tables: list[int] | None = None,
+) -> bytes:
+    """Convert an in-memory document to a DocLang `.dclx` archive. Without
+    a format, it is detected from the content. Hints are as for
+    `to_doclang`."""
+
 def to_document(data: bytes | bytearray, format: Format | None = None) -> Document:
     """Parse an in-memory document into the document model, which also
     carries the embedded assets. Without a format, it is detected from the
