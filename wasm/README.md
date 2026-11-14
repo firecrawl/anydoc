@@ -54,7 +54,7 @@ try {
 | `code`          | Meaning                                                             |
 | --------------- | ------------------------------------------------------------------- |
 | `unsupported`   | Unknown format, or one that cannot be converted                     |
-| `needsOcr`      | Pages of a PDF are scanned or image-only; `pages` names them        |
+| `needsOcr`      | PDF or OFD pages are scanned or image-only; `pages` names them        |
 | `malformed`     | Structurally unusable: no meaningful content could be extracted     |
 | `encrypted`     | Encrypted or password-protected                                     |
 | `resourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |

@@ -38,6 +38,8 @@ pub enum Format {
     ///
     /// [pdf-inspector]: https://github.com/firecrawl/pdf-inspector
     Pdf,
+    /// Open Fixed-layout Document (`.ofd`). Text is extracted from page objects.
+    Ofd,
     /// Binary PowerPoint 97-2003 (`.ppt`, `.pps`, `.pot`).
     Ppt,
     /// PresentationML (`.pptx`, `.pptm`, `.ppsx`, `.ppsm`).
@@ -61,7 +63,8 @@ pub enum Format {
 impl Format {
     /// Detect the format from the content itself: the signature and identity
     /// each container specification designates (PDF header, RTF open group,
-    /// OLE stream names, ZIP package mimetype/content types). Plain-text
+    /// OLE stream names, ZIP package mimetype/content types, OFD.xml or
+    /// Encryptions.xml descriptors). Plain-text
     /// formats (CSV) carry no signature and return `None`; so does anything
     /// unrecognized.
     pub fn from_bytes(bytes: &[u8]) -> Option<Format> {
@@ -76,6 +79,7 @@ impl Format {
             "docx" | "docm" => Format::Docx,
             "odt" => Format::Odt,
             "pdf" => Format::Pdf,
+            "ofd" => Format::Ofd,
             "pptx" | "pptm" | "ppsx" | "ppsm" => Format::Pptx,
             "ppt" | "pps" | "pot" => Format::Ppt,
             "rtf" => Format::Rtf,

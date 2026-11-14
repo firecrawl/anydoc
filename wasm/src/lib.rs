@@ -24,6 +24,7 @@ pub enum Format {
     /// need OCR, which anydoc does not do: the document throws `needsOcr`
     /// naming them.
     Pdf = "pdf",
+    Ofd = "ofd",
     Ppt = "ppt",
     Pptx = "pptx",
     Rtf = "rtf",
@@ -41,6 +42,7 @@ impl From<Format> for anydoc::Format {
             Format::Docx => anydoc::Format::Docx,
             Format::Odt => anydoc::Format::Odt,
             Format::Pdf => anydoc::Format::Pdf,
+            Format::Ofd => anydoc::Format::Ofd,
             Format::Ppt => anydoc::Format::Ppt,
             Format::Pptx => anydoc::Format::Pptx,
             Format::Rtf => anydoc::Format::Rtf,
@@ -61,6 +63,7 @@ impl From<anydoc::Format> for Format {
             anydoc::Format::Docx => Format::Docx,
             anydoc::Format::Odt => Format::Odt,
             anydoc::Format::Pdf => Format::Pdf,
+            anydoc::Format::Ofd => Format::Ofd,
             anydoc::Format::Ppt => Format::Ppt,
             anydoc::Format::Pptx => Format::Pptx,
             anydoc::Format::Rtf => Format::Rtf,

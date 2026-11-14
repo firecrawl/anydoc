@@ -28,7 +28,7 @@ create_exception!(
     anydoc,
     NeedsOcrError,
     ConvertError,
-    "Pages of a PDF are scanned or image-only and need OCR, which anydoc does \
+    "PDF or OFD pages are scanned or image-only and need OCR, which anydoc does \
      not do. `pages` lists them (1-indexed) and `page_count` is the length of \
      the document."
 );
@@ -67,11 +67,12 @@ create_exception!(
 /// Format names, as the extension that identifies each format. Container
 /// variants that share a parser (`.docm`, `.xlsm`, `.ppsx`, ...) map onto
 /// these via `format_from_bytes` or `format_from_extension`.
-const FORMATS: [(&str, anydoc::Format); 12] = [
+const FORMATS: [(&str, anydoc::Format); 13] = [
     ("doc", anydoc::Format::Doc),
     ("docx", anydoc::Format::Docx),
     ("odt", anydoc::Format::Odt),
     ("pdf", anydoc::Format::Pdf),
+    ("ofd", anydoc::Format::Ofd),
     ("ppt", anydoc::Format::Ppt),
     ("pptx", anydoc::Format::Pptx),
     ("rtf", anydoc::Format::Rtf),

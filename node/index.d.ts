@@ -9,7 +9,7 @@ export type ConvertErrorCode =
   /** Unknown format, or one that cannot be converted. */
   | 'unsupported'
   /**
-   * Pages of a PDF are scanned or image-only and need OCR, which anydoc does
+   * PDF or OFD pages are scanned or image-only and need OCR, which anydoc does
    * not do. The error is a `NeedsOcrError` naming them.
    */
   | 'needsOcr'
@@ -124,6 +124,7 @@ export declare const enum Format {
    * `needsOcr` naming them.
    */
   pdf = 'pdf',
+  ofd = 'ofd',
   ppt = 'ppt',
   pptx = 'pptx',
   rtf = 'rtf',

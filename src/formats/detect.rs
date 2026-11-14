@@ -74,6 +74,27 @@ fn detect_ole(bytes: &[u8]) -> Option<Format> {
 fn detect_zip(bytes: &[u8]) -> Option<Format> {
     let mut pkg = Package::open(bytes).ok()?;
 
+    // OFD's root descriptor is the package identity. Inspect its root to
+    // avoid classifying an arbitrary ZIP that happens to contain OFD.xml.
+    if let Ok(Some(tree)) = pkg.optional_xml_part("OFD.xml")
+        && tree
+            .child_elems()
+            .next()
+            .is_some_and(|root| root.is("http://www.ofdspec.org/2016", "OFD"))
+    {
+        return Some(Format::Ofd);
+    }
+    // Encrypted OFD replaces OFD.xml with encrypted entries; its encryption
+    // descriptor remains in clear text.
+    if let Ok(Some(tree)) = pkg.optional_xml_part("Encryptions.xml")
+        && tree
+            .child_elems()
+            .next()
+            .is_some_and(|root| root.is("http://www.ofdspec.org/2016", "Encryptions"))
+    {
+        return Some(Format::Ofd);
+    }
+
     // ODF and EPUB designate the `mimetype` part as the package identity.
     if let Ok(Some(mime)) = pkg.optional_part("mimetype") {
         let mime = std::str::from_utf8(&mime).ok()?.trim();

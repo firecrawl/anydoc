@@ -4,7 +4,7 @@ import os
 from typing import Literal, final
 
 Format = Literal[
-    "doc", "docx", "odt", "pdf", "ppt", "pptx", "rtf", "epub", "xlsx", "ods", "odp", "csv"
+    "doc", "docx", "odt", "pdf", "ofd", "ppt", "pptx", "rtf", "epub", "xlsx", "ods", "odp", "csv"
 ]
 
 class ConvertError(Exception):
@@ -16,7 +16,7 @@ class UnsupportedError(ConvertError):
     """The format is unknown, or cannot be converted at all."""
 
 class NeedsOcrError(ConvertError):
-    """Pages of a PDF are scanned or image-only and need OCR, which anydoc
+    """PDF or OFD pages are scanned or image-only and need OCR, which anydoc
     does not do."""
 
     pages: list[int]

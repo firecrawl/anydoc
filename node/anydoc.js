@@ -22,7 +22,9 @@ async function toMarkdown(path, options) {
     return await native.toMarkdown(path)
   } catch (error) {
     if (!sendsToHosted(error, options)) throw error
-    return parseHosted(await readFile(path), basename(path), options)
+    const bytes = await readFile(path)
+    if ((native.formatFromBytes(bytes) ?? native.formatFromPath(path)) !== 'pdf') throw error
+    return parseHosted(bytes, basename(path), options)
   }
 }
 
@@ -33,6 +35,7 @@ async function toMarkdownBytes(bytes, format, options) {
     return await native.toMarkdownBytes(bytes, format)
   } catch (error) {
     if (!sendsToHosted(error, options)) throw error
+    if ((format ?? native.formatFromBytes(bytes)) !== 'pdf') throw error
     return parseHosted(bytes, 'document.pdf', options)
   }
 }

@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://skills.sh/b/firecrawl/anydoc)](https://skills.sh/firecrawl/anydoc)
 
-Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
+Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, PDF, and OFD) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
 
 Built by [Firecrawl](https://firecrawl.dev) to turn any office document into LLM-ready Markdown in single-digit milliseconds, with one consistent output no matter which format goes in. It powers [Firecrawl Parse](https://firecrawl.dev/parse), so if you'd rather not run it yourself, the hosted API gives you the same conversion plus our OCR models for the scanned pages anydoc can't read on its own.
 
@@ -134,7 +134,7 @@ let document = anydoc::to_document(&bytes, None)?;
 
 ## OCR
 
-anydoc reads text-based PDFs locally but does no OCR, so a PDF with scanned or image-only pages fails with `NeedsOcr`. Opt in and those documents go to [Firecrawl Parse](https://firecrawl.dev/parse), which OCRs them and returns the same Markdown. No signup needed; set `FIRECRAWL_API_KEY` for higher limits.
+anydoc reads text-based PDFs and OFDs locally but does no OCR, so scanned or image-only pages fail with `NeedsOcr`. For PDFs, opt in and those documents go to [Firecrawl Parse](https://firecrawl.dev/parse), which OCRs them and returns the same Markdown. The hosted PDF parser does not accept OFD; scanned OFD pages still return `NeedsOcr`. No signup needed; set `FIRECRAWL_API_KEY` for higher limits.
 
 |        | Opt in                                         | Key, else `FIRECRAWL_API_KEY` |
 | ------ | ---------------------------------------------- | ----------------------------- |
@@ -168,6 +168,9 @@ Only documents that need OCR leave the machine, and the whole document goes, sin
 | EPUB             | `.epub`                                                    |
 | CSV              | `.csv`                                                     |
 | PDF              | `.pdf`                                                     |
+| OFD              | `.ofd` (text objects)                                    |
+
+OFD conversion preserves outline headings, large-font headings, bold and italic text, URI links, printed lists, and complete bordered table grids. Tables and large-font headings are inferred from fixed-page geometry; pages without those cues remain paragraphs. Image-only pages return `NeedsOcr`; images, vector drawings, and non-link annotations are not included in Markdown.
 
 ## Benchmark
 
@@ -242,7 +245,7 @@ match anydoc::to_markdown(path) {
 | Variant         | Meaning                                                             |
 | --------------- | ------------------------------------------------------------------- |
 | `Unsupported`   | Unknown format, or one that cannot be converted                     |
-| `NeedsOcr`      | Scanned or image-only pages of a PDF, listed in `pages`             |
+| `NeedsOcr`      | Scanned or image-only PDF/OFD pages, listed in `pages`             |
 | `Malformed`     | Structurally unusable: no meaningful content could be extracted     |
 | `Encrypted`     | Encrypted or password-protected                                     |
 | `ResourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |
@@ -251,7 +254,7 @@ match anydoc::to_markdown(path) {
 
 Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per variant, or `OSError` when the file cannot be read.
 
-anydoc converts locally and does not do OCR, so a PDF with scanned pages fails with `NeedsOcr`. Opt in with `ocr: 'hosted'` in Node, `ocr="hosted"` in Python or `--ocr hosted` on the CLI to send that document to [Firecrawl Parse](https://firecrawl.dev/parse). No signup needed. Set `FIRECRAWL_API_KEY` for higher limits.
+anydoc converts locally and does not do OCR, so a PDF or OFD with scanned pages fails with `NeedsOcr`. For PDFs, opt in with `ocr: 'hosted'` in Node, `ocr="hosted"` in Python or `--ocr hosted` on the CLI to send that document to [Firecrawl Parse](https://firecrawl.dev/parse). OFD pages continue to return `NeedsOcr` because this hosted mode uses a PDF parser. No signup needed. Set `FIRECRAWL_API_KEY` for higher limits.
 
 ## How it works
 

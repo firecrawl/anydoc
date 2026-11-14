@@ -19,7 +19,7 @@ export type ConvertErrorCode =
   /** Unknown format, or one that cannot be converted. */
   | 'unsupported'
   /**
-   * Pages of a PDF are scanned or image-only and need OCR, which anydoc does
+   * PDF or OFD pages are scanned or image-only and need OCR, which anydoc does
    * not do. The error is a `NeedsOcrError` naming them.
    */
   | 'needsOcr'
@@ -32,7 +32,7 @@ export type ConvertErrorCode =
   /** A part required for any meaningful output is absent. */
   | 'missingPart'
 
-/** The error thrown for a PDF with pages that need OCR. */
+/** The error thrown for a PDF or OFD with pages that need OCR. */
 export interface NeedsOcrError extends Error {
   code: 'needsOcr'
   /** 1-indexed pages that need OCR. */

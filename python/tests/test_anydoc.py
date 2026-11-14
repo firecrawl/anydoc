@@ -4,6 +4,7 @@ import ast
 import io
 import json
 import os
+import tempfile
 import threading
 import unittest
 import zipfile
@@ -20,6 +21,7 @@ CSV = FIXTURES / "csv" / "sheet.csv"
 ENCRYPTED = FIXTURES / "malformed" / "encrypted--errors.odt"
 ZIPBOMB = FIXTURES / "abuse" / "zipbomb--errors.docx"
 MIXED = FIXTURES / "pdf" / "handmade-mixed.pdf"
+SCANNED_OFD = FIXTURES / "ofd" / "image-only.ofd"
 
 HOSTED_MARKDOWN = "# Read by the hosted parser\n"
 
@@ -107,6 +109,7 @@ class AnydocTest(unittest.TestCase):
         self.assertIsNone(anydoc.format_from_bytes(CSV.read_bytes()))
         self.assertEqual(anydoc.format_from_extension(".pptm"), "pptx")
         self.assertEqual(anydoc.format_from_extension("xls"), "xlsx")
+        self.assertEqual(anydoc.format_from_extension("ofd"), "ofd")
         self.assertEqual(anydoc.format_from_path("report.odt"), "odt")
         self.assertIsNone(anydoc.format_from_path("report.unknown"))
 
@@ -148,6 +151,32 @@ class AnydocTest(unittest.TestCase):
             self.assertEqual(hits, [("/v2/parse", True)])
             self.assertRegex(anydoc.to_markdown(OUTLINE, ocr="hosted"), r"(?m)^# ")
             self.assertEqual(hits, [("/v2/parse", True)])
+
+    def test_ocr_hosted_keeps_image_only_ofd_as_needs_ocr(self):
+        reply = {"success": True, "data": {"markdown": HOSTED_MARKDOWN}}
+        with hosted_stub(200, reply) as hits:
+            for convert in (
+                lambda: anydoc.to_markdown(SCANNED_OFD, ocr="hosted"),
+                lambda: anydoc.to_markdown_bytes(SCANNED_OFD.read_bytes(), "ofd", ocr="hosted"),
+                lambda: anydoc.to_markdown_bytes(SCANNED_OFD.read_bytes(), ocr="hosted"),
+            ):
+                with self.assertRaises(anydoc.NeedsOcrError):
+                    convert()
+            self.assertEqual(hits, [])
+
+    def test_hosted_fallback_uses_content_before_a_misleading_extension(self):
+        reply = {"success": True, "data": {"markdown": HOSTED_MARKDOWN}}
+        with tempfile.TemporaryDirectory() as directory:
+            ofd_named_pdf = Path(directory) / "scan.pdf"
+            pdf_named_ofd = Path(directory) / "scan.ofd"
+            ofd_named_pdf.write_bytes(SCANNED_OFD.read_bytes())
+            pdf_named_ofd.write_bytes(MIXED.read_bytes())
+            with hosted_stub(200, reply) as hits:
+                with self.assertRaises(anydoc.NeedsOcrError):
+                    anydoc.to_markdown(ofd_named_pdf, ocr="hosted")
+                self.assertEqual(hits, [])
+                self.assertEqual(anydoc.to_markdown(pdf_named_ofd, ocr="hosted"), HOSTED_MARKDOWN)
+                self.assertEqual(hits, [("/v2/parse", True)])
 
     def test_parse_mode_picks_the_parse_pdf_mode_auto_by_default(self):
         reply = {"success": True, "data": {"markdown": HOSTED_MARKDOWN}}
