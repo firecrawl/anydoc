@@ -538,6 +538,14 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
                         f.instr.push_str(&child.text());
                     }
                 }
+                "commentReference" => {
+                    // The comment's body is loaded from the comments part and
+                    // renders as a note, so the anchor becomes its reference
+                    // (#191: before, the whole comment layer vanished).
+                    if let Some(id) = child.attr(ns::W, "id") {
+                        self.push(Inline::NoteRef(format!("c{id}")));
+                    }
+                }
                 _ => {}
             }
         }

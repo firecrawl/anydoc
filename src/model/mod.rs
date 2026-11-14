@@ -55,4 +55,6 @@ pub enum NoteKind {
     Footnote,
     /// Collected at the end of the document or section.
     Endnote,
+    /// A reviewer comment anchored in the body by its comment reference.
+    Comment,
 }

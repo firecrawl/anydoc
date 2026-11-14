@@ -61,6 +61,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let footnotes_part =
         typed_part_path(&doc_rels, &main_part, rel_type::FOOTNOTES, "footnotes.xml");
     let endnotes_part = typed_part_path(&doc_rels, &main_part, rel_type::ENDNOTES, "endnotes.xml");
+    let comments_part = typed_part_path(&doc_rels, &main_part, rel_type::COMMENTS, "comments.xml");
 
     let ctx = Ctx {
         pkg: &pkg,
@@ -77,6 +78,7 @@ pub fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     for (part, root_name, elem_name, prefix, kind) in [
         (footnotes_part, "footnotes", "footnote", "fn", NoteKind::Footnote),
         (endnotes_part, "endnotes", "endnote", "en", NoteKind::Endnote),
+        (comments_part, "comments", "comment", "c", NoteKind::Comment),
     ] {
         let Some(tree) = pkg.borrow_mut().optional_xml_part(&part)? else {
             continue;
@@ -148,6 +150,50 @@ mod tests {
             Block::Paragraph(inlines) => inlines.iter().find(|i| matches!(i, Inline::Image { .. })),
             _ => None,
         })
+    }
+
+    /// #191: the review layer — commentRangeStart/End anchors plus the comments part — must
+    /// survive conversion: the comment loads as a note and its reference renders as one.
+    #[test]
+    fn comments_load_as_notes_and_render() {
+        let document = format!(
+            r#"<w:document {W}><w:body><w:p>
+                <w:r><w:t>Priceless </w:t></w:r>
+                <w:commentRangeStart w:id="1"/>
+                <w:r><w:t>artefact</w:t></w:r>
+                <w:commentRangeEnd w:id="1"/>
+                <w:r><w:commentReference w:id="1"/></w:r>
+            </w:p></w:body></w:document>"#
+        );
+        let comments = format!(
+            r#"<w:comments {W}>
+            <w:comment w:id="1" w:author="Reviewer" w:date="2026-10-27T00:00:00Z">
+                <w:p><w:r><w:t>This section needs a citation.</w:t></w:r></w:p>
+            </w:comment>
+            </w:comments>"#
+        );
+        let rels = r#"<Relationships
+            xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+            <Relationship Id="rId7"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
+                Target="comments.xml"/>
+            </Relationships>"#;
+        let bytes = docx_parts(&[
+            ("word/document.xml", &document),
+            ("word/comments.xml", &comments),
+            ("word/_rels/document.xml.rels", rels),
+        ]);
+        let doc = parse(&bytes).unwrap();
+        let Block::Paragraph(inlines) = &doc.blocks[0] else { unreachable!() };
+        assert!(
+            inlines.iter().any(|i| matches!(i, Inline::NoteRef(id) if id == "c1")),
+            "the comment reference becomes a note reference: {inlines:?}"
+        );
+        assert_eq!(doc.notes.len(), 1);
+        assert_eq!((doc.notes[0].id.as_str(), doc.notes[0].kind), ("c1", NoteKind::Comment));
+        let markdown = crate::to_markdown_bytes(&bytes, crate::Format::Docx).unwrap();
+        assert!(markdown.contains("Priceless artefact"), "the anchored text stays: {markdown}");
+        assert!(markdown.contains("[^1]: This section needs a citation."), "the comment renders as a note: {markdown}");
     }
 
     #[test]
