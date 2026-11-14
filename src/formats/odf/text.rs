@@ -195,6 +195,12 @@ fn parse_list(
             }
         }
         let number = current.start.saturating_add(current.items.len() as u64);
+        if !header {
+            // A new item at this level restarts the levels below it, so a
+            // `continue-numbering` sublist under it starts afresh.
+            // Every style: a sublist may name its own list style.
+            ctx.list_counters.borrow_mut().retain(|(_, d), _| *d <= depth);
+        }
         let mut chain = ancestors.to_vec();
         chain.push(number);
         let mut item_blocks = Vec::new();
