@@ -5,6 +5,14 @@
 use crate::model::Style;
 use crate::shared::binary::{get_u16, get_u32};
 
+/// DOC character properties. Revision visibility is resolved before emitting
+/// the shared document model; it is not a visual strikethrough style.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Chp {
+    pub style: Style,
+    pub deleted: bool,
+}
+
 fn sprm_operand_len(sprm: u16, operand: &[u8]) -> usize {
     match sprm >> 13 {
         0 | 1 => 1,
@@ -71,28 +79,36 @@ pub fn chpx_pic_location(grpprl: &[u8]) -> Option<u32> {
 
 /// Apply a CHPX grpprl over `current`, resolving toggle operands against the
 /// style chain's value (`style_base`), per the published algorithm.
-pub fn apply_chpx(grpprl: &[u8], current: Style, style_base: Style) -> Style {
-    let mut style = current;
+pub fn apply_chpx(grpprl: &[u8], current: Chp, style_base: Style) -> Chp {
+    let mut chp = current;
     walk_sprms(grpprl, |sprm, operand| match sprm {
+        // MS-DOC 2.6.1: sprmCFRMarkDel uses ToggleOperand too. UpxChpx
+        // forbids revision properties in styles, so its style base is the
+        // default false, including for 0x80 and 0x81 after direct formatting.
+        0x0800 => {
+            if let Some(v) = toggle(operand, false) {
+                chp.deleted = v;
+            }
+        }
         // sprmCFBold / sprmCFItalic / sprmCFStrike are toggles.
         0x0835 => {
             if let Some(v) = toggle(operand, style_base.bold) {
-                style.bold = v;
+                chp.style.bold = v;
             }
         }
         0x0836 => {
             if let Some(v) = toggle(operand, style_base.italic) {
-                style.italic = v;
+                chp.style.italic = v;
             }
         }
         0x0837 => {
             if let Some(v) = toggle(operand, style_base.strike) {
-                style.strike = v;
+                chp.style.strike = v;
             }
         }
         _ => {}
     });
-    style
+    chp
 }
 
 /// A row's table properties from `sprmTDefTable` and its companion table
@@ -247,5 +263,5 @@ fn parse_tdef_table(operand: &[u8]) -> Option<Tap> {
 /// A CHPX grpprl interpreted as a character-style *definition* layer: the
 /// parent's value is the base for its toggles.
 pub fn apply_style_chpx(grpprl: &[u8], parent: Style) -> Style {
-    apply_chpx(grpprl, parent, parent)
+    apply_chpx(grpprl, Chp { style: parent, deleted: false }, parent).style
 }
