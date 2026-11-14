@@ -345,6 +345,46 @@ def numbering_docx():
     ])
 
 
+def bare_number_docx():
+    """Bare `lvlText=%1` decimal numbering, including an interrupted restart."""
+    styles = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles {W}><w:docDefaults><w:rPrDefault><w:rPr/></w:rPrDefault></w:docDefaults></w:styles>"""
+    numbering = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering {W}>
+<w:abstractNum w:abstractNumId="0">
+  <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl>
+</w:abstractNum>
+<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+<w:num w:numId="2"><w:abstractNumId w:val="0"/>
+  <w:lvlOverride w:ilvl="0"><w:startOverride w:val="9"/></w:lvlOverride>
+</w:num>
+</w:numbering>"""
+    body = "".join([
+        numpara("First numbered paragraph.", 1),
+        numpara("Second numbered paragraph.", 1),
+        para("Heading break"),
+        numpara("Ninth numbered paragraph.", 2),
+    ])
+    document = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                f'<w:document {W} {R}><w:body>{body}</w:body></w:document>')
+    doc_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
+</Relationships>"""
+    ct = CONTENT_TYPES_BASE.format(extra=(
+        '<Override PartName="/word/numbering.xml" ContentType='
+        '"application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>'))
+    write_zip(OUT / "docx" / "handmade-bare-number.docx", [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/document.xml", document),
+        ("word/_rels/document.xml.rels", doc_rels),
+        ("word/styles.xml", styles),
+        ("word/numbering.xml", numbering),
+    ])
+
+
 # ---------------------------------------------------------------------------
 # Handmade DOCX: chart + SmartArt + image rel (P7.5, P7.10, M4)
 
@@ -2265,6 +2305,7 @@ def main():
              "--resource-path", str(SRC)])
 
     numbering_docx()
+    bare_number_docx()
     rich_docx()
     inherit_pptx()
     strict_alt_ooxml()
