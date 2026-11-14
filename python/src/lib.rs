@@ -180,9 +180,10 @@ fn to_markdown_bytes(py: Python<'_>, data: Vec<u8>, format: Option<&str>) -> PyR
 /// Convert a document file to a DocLang `.dclx` archive (OPC ZIP, returned
 /// as bytes). Only PDF has a DocLang exporter; scanned pages export as
 /// `<picture>` elements with extracted rasters, so no OCR is needed. The
-/// format is detected from the file content; `lists` and `tables` steer
-/// structure detection, and `pages_with_tables` restricts the ruled-table
-/// detector to those 1-indexed pages.
+/// format is detected from the file content; the extension is the
+/// fallback. `lists` and `tables` steer structure detection, and
+/// `pages_with_tables` restricts the ruled-table detector to those
+/// 1-indexed pages.
 #[pyfunction]
 #[pyo3(signature = (path, *, lists=true, tables=true, pages_with_tables=None))]
 fn to_doclang(
