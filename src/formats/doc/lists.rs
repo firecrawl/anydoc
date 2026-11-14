@@ -190,11 +190,19 @@ fn parse_lvl(plf: &[u8], pos: usize) -> Option<(LevelDef, usize)> {
 
 const LFO_SIZE: usize = 16;
 
+/// How many LFO records to reserve for. `count` is an untrusted u32, so reserve
+/// only for records the table can actually hold: a short table declaring
+/// 0xFFFF_FFFF otherwise asks for ~64 GB up front, which aborts the process
+/// wherever the allocator refuses it.
+fn lfo_capacity(plf: &[u8], count: usize) -> usize {
+    count.min(plf.len().saturating_sub(4) / LFO_SIZE)
+}
+
 fn parse_plf_lfo(plf: &[u8], by_lsid: &HashMap<u32, [LevelDef; LEVELS]>, lists: &mut Lists) {
     let Some(count) = get_u32(plf, 0).map(|v| v as usize) else {
         return;
     };
-    let mut lfos: Vec<(u32, usize)> = Vec::with_capacity(count);
+    let mut lfos: Vec<(u32, usize)> = Vec::with_capacity(lfo_capacity(plf, count));
     let mut pos = 4;
     for _ in 0..count {
         let Some(record) = plf.get(pos..).and_then(|rest| rest.get(..LFO_SIZE)) else {
@@ -315,5 +323,21 @@ mod tests {
         lvl.extend_from_slice(&0u16.to_le_bytes());
         let (def, _) = parse_lvl(&lvl, 0).unwrap();
         assert_eq!(def.restart, None);
+    }
+
+    /// A count far beyond the records present reserves only for those
+    /// records, and the short table resolves nothing. (Asserted on the
+    /// capacity, not by allocating: an overcommitting allocator would let
+    /// the unbounded reservation "succeed" and hide the bug.)
+    #[test]
+    fn oversized_lfo_count_reserves_only_the_records_present() {
+        let mut plf = u32::MAX.to_le_bytes().to_vec();
+        plf.extend_from_slice(&[0u8; LFO_SIZE]);
+        assert_eq!(lfo_capacity(&plf, u32::MAX as usize), 1);
+        assert_eq!(lfo_capacity(&plf[..3], u32::MAX as usize), 0);
+        assert_eq!(lfo_capacity(&plf, 0), 0);
+        let mut lists = Lists::default();
+        parse_plf_lfo(&plf, &HashMap::new(), &mut lists);
+        assert!(lists.get(1).is_none());
     }
 }
