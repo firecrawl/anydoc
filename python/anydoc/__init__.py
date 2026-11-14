@@ -121,7 +121,8 @@ def to_doclang(
     """Convert a document file to a DocLang `.dclx` archive (OPC ZIP,
     returned as bytes). Only PDF has a DocLang exporter; scanned pages
     export as `<picture>` elements with extracted rasters, so no OCR is
-    needed. `lists` and `tables` steer structure detection, and
+    needed. The format is detected from the file content; the extension
+    is the fallback. `lists` and `tables` steer structure detection, and
     `pages_with_tables` restricts the ruled-table detector to those
     1-indexed pages."""
     return _to_doclang(path, lists=lists, tables=tables, pages_with_tables=pages_with_tables)
