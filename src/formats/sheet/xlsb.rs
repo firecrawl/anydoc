@@ -77,9 +77,12 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
     let mut failed = 0usize;
     // One budget for the workbook, so sheets cannot multiply the cap.
     let mut slots = 0u64;
-    for (name, part) in &sheets {
+    for (idx, (name, part)) in sheets.iter().enumerate() {
         let content =
             pkg.optional_part(part)?.map(|bytes| read_sheet(&bytes, &shared, &xfs, date1904));
+        if !sheets[idx + 1..].iter().any(|(_, later)| later == part) {
+            pkg.evict(part);
+        }
         let mut content = match content {
             Some(Ok(c)) => c,
             Some(Err(e)) if e.is_fatal() => return Err(e),
@@ -272,7 +275,7 @@ fn read_sheet(
                 }
                 let fmt = xfs.get(style as usize).unwrap_or(&CellFormat::General);
                 let text = cell_text(id, &mut f, fmt, shared, date1904)?;
-                if !text.is_empty() {
+                if !text.trim().is_empty() {
                     out.cells.insert((r, col), text);
                 }
             }

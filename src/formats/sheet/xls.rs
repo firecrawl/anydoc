@@ -821,9 +821,9 @@ fn txo_text(segs: &[&[u8]]) -> Option<String> {
     Some(String::from_utf16_lossy(&units))
 }
 
-/// Record only non-empty cell text, like the xlsx reader.
+/// Record only cells with visible text, like the xlsx reader.
 fn put(out: &mut SheetContent, row: u32, col: u32, text: String) {
-    if !text.is_empty() {
+    if !text.trim().is_empty() {
         out.cells.insert((row, col), text);
     }
 }
