@@ -177,6 +177,43 @@ fn to_markdown_bytes(py: Python<'_>, data: Vec<u8>, format: Option<&str>) -> PyR
     py.detach(|| anydoc::to_markdown_bytes(&data, format)).map_err(|e| convert_error(py, e))
 }
 
+/// Convert a document file to a DocLang `.dclx` archive (OPC ZIP, returned
+/// as bytes). Only PDF has a DocLang exporter; scanned pages export as
+/// `<picture>` elements with extracted rasters, so no OCR is needed. The
+/// format is detected from the file content; the extension is the
+/// fallback. `lists` and `tables` steer structure detection, and
+/// `pages_with_tables` restricts the ruled-table detector to those
+/// 1-indexed pages.
+#[pyfunction]
+#[pyo3(signature = (path, *, lists=true, tables=true, pages_with_tables=None))]
+fn to_doclang(
+    py: Python<'_>,
+    path: PathBuf,
+    lists: bool,
+    tables: bool,
+    pages_with_tables: Option<Vec<u32>>,
+) -> PyResult<Vec<u8>> {
+    let hints = anydoc::DoclangHints { lists, tables, pages_with_tables };
+    py.detach(|| anydoc::to_doclang(&path, hints)).map_err(|e| convert_error(py, e))
+}
+
+/// Convert an in-memory document to a DocLang `.dclx` archive. Without a
+/// format, it is detected from the content. Hints are as for `to_doclang`.
+#[pyfunction]
+#[pyo3(signature = (data, format=None, *, lists=true, tables=true, pages_with_tables=None))]
+fn to_doclang_bytes(
+    py: Python<'_>,
+    data: Vec<u8>,
+    format: Option<&str>,
+    lists: bool,
+    tables: bool,
+    pages_with_tables: Option<Vec<u32>>,
+) -> PyResult<Vec<u8>> {
+    let format = format.map(parse_format).transpose()?;
+    let hints = anydoc::DoclangHints { lists, tables, pages_with_tables };
+    py.detach(|| anydoc::to_doclang_bytes(&data, format, hints)).map_err(|e| convert_error(py, e))
+}
+
 /// Parse an in-memory document into the document model, which also carries
 /// the embedded assets. Without a format, it is detected from the content.
 ///
@@ -203,6 +240,8 @@ fn _anydoc(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(format_from_path, m)?)?;
     m.add_function(wrap_pyfunction!(to_markdown, m)?)?;
     m.add_function(wrap_pyfunction!(to_markdown_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(to_doclang, m)?)?;
+    m.add_function(wrap_pyfunction!(to_doclang_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(to_document, m)?)?;
     m.add_class::<document::Asset>()?;
     m.add_class::<document::Block>()?;

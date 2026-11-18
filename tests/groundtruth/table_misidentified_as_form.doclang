@@ -1,0 +1,489 @@
+<doclang version="0.9">
+  <page_header>
+    <layer value="furniture"/>
+    <location value="46"/>
+    <location value="39"/>
+    <location value="157"/>
+    <location value="43"/>
+    aaaaaa aaaaaaaaaaa aaaaaa
+  </page_header>
+  <text>
+    <location value="69"/>
+    <location value="477"/>
+    <location value="128"/>
+    <location value="483"/>
+    K Medical Corp.
+  </text>
+  <heading level="2">
+    <location value="401"/>
+    <location value="28"/>
+    <location value="495"/>
+    <location value="37"/>
+    aaaaaaaaas$
+  </heading>
+  <text>
+    <location value="46"/>
+    <location value="47"/>
+    <location value="380"/>
+    <location value="51"/>
+    aaaa aaaaaaa aaaaaa aaaaaaaaa aaa aaaaa aAaaaAaAAaaaaaaa AAAAAAAaAaaAa aaaaaaaa
+  </text>
+  <text>
+    <location value="355"/>
+    <location value="54"/>
+    <location value="492"/>
+    <location value="59"/>
+    aaaa. aaa. # aaa-aa-0000000000 \.
+  </text>
+  <list>
+    <ldiv/>
+    <location value="46"/>
+    <location value="61"/>
+    <location value="358"/>
+    <location value="90"/>
+    22 | aaaaa aaa aaaaaaaaa aaaaaaaaaaa (aaaa aaaa aa aaaaa aaaaa, aaa aaaa aaa aa aaaaaa, aaaaaaaaa aaaaaaaaaa aaa aaaaaaaaaa aaaaa aa aaa aaaaaaaa aaaaaa: aaaaa aaaaaa) aaa aaaaaa aaa aaaaaaa aaaaa aaa aaaaaaaaaa:
+  </list>
+  <table>
+    <location value="67"/>
+    <location value="99"/>
+    <location value="366"/>
+    <location value="173"/>
+    <ecel/>
+    <ched/>
+    aaaaa aaaaaa
+    <ched/>
+    aaa aaaaaa
+    <ched/>
+    aaa aaaaaa
+    <nl/>
+    <rhed/>
+    aaaaaaaa aaaaaa: 00 aa
+    <fcel/>
+    000.0
+    <fcel/>
+    000
+    <fcel/>
+    000.0
+    <nl/>
+    <rhed/>
+    aaaaaaaa aaaa: 00 aa/aaaa
+    <fcel/>
+    00
+    <fcel/>
+    00
+    <fcel/>
+    00
+    <nl/>
+    <rhed/>
+    aaaaaaaa aaaaaa: aaaaa
+    <fcel/>
+    0.0
+    <fcel/>
+    00
+    <fcel/>
+    0.0
+    <nl/>
+  </table>
+  <list>
+    <ldiv/>
+    <location value="46"/>
+    <location value="178"/>
+    <location value="357"/>
+    <location value="191"/>
+    23 | aaaaaa aaaa aaa aaaaaaaa aaaa aaaaaaa aaaaaaa 00.00, 00.00, aaa 00.00 00 aa/aaaa
+    <ldiv/>
+    <location value="45"/>
+    <location value="193"/>
+    <location value="339"/>
+    <location value="207"/>
+    24 | aaaaa 00% aa aaa aaaaa aaa aaa aaaa aaaaaaaaaa aa aaa aaaa aaaaaaa aaaa aaa, aaaaaa aaaaaa aaaaaaa
+    <ldiv/>
+    <location value="45"/>
+    <location value="210"/>
+    <location value="360"/>
+    <location value="224"/>
+    25 | aaaaaa aaaa aaa aaaaaaaa aaaa aaa aaa aaaaa aaa aaa aaaaaaa aaaaaaaaaaa aa 00.00 00 aa/aaaa aaaa
+    <ldiv/>
+    <location value="45"/>
+    <location value="226"/>
+    <location value="349"/>
+    <location value="241"/>
+    26 | aaaaaa aaaa aaa aaaaaaaa aaaa aaa aaa aaaaa, aaa aaa aaa aaaa aaaa aaaaa aaa aaaaaa aaa aaaaaa aa aaaaaa
+    <ldiv/>
+    <location value="45"/>
+    <location value="243"/>
+    <location value="334"/>
+    <location value="257"/>
+    27 | aaaaa 0% aa aaa aaaaa aaa aaa aaaa aaaaaaaaaa aa aaa aaaa aaaaaaa aaaa aaa, aaaaaa aaaaaa aaaaaaa
+    <ldiv/>
+    <location value="45"/>
+    <location value="262"/>
+    <location value="220"/>
+    <location value="267"/>
+    28 | aaaaa aaa aaaaaaaaa aaaaaaaaaaa:
+  </list>
+  <table>
+    <location value="65"/>
+    <location value="275"/>
+    <location value="365"/>
+    <location value="300"/>
+    <ecel/>
+    <ched/>
+    aaaaa aaaaaa
+    <ched/>
+    aaa aaaaaa
+    <ched/>
+    aaa aaaaaa
+    <nl/>
+    <rhed/>
+    aaaaaaaa aaaaaa: 00 aa
+    <fcel/>
+    0
+    <fcel/>
+    a)
+    <fcel/>
+    0
+    <nl/>
+  </table>
+  <list>
+    <ldiv/>
+    <location value="45"/>
+    <location value="312"/>
+    <location value="220"/>
+    <location value="317"/>
+    29 | aaaaa aaa aaaaaaaaa aaaaaaaaaaa:
+  </list>
+  <table>
+    <location value="66"/>
+    <location value="325"/>
+    <location value="365"/>
+    <location value="375"/>
+    <ecel/>
+    <ched/>
+    aaaaa aaaaaa
+    <ched/>
+    aaa aaaaaa
+    <ched/>
+    aaa aaaaaa
+    <nl/>
+    <rhed/>
+    aaaaaaaa aaaaaa: 00 aa
+    <fcel/>
+    000
+    <fcel/>
+    000
+    <fcel/>
+    000
+    <nl/>
+    <rhed/>
+    aaaaaaaa aaaa: 00 aa/aaaa
+    <fcel/>
+    00.0
+    <fcel/>
+    00
+    <fcel/>
+    00.0
+    <nl/>
+  </table>
+  <list>
+    <ldiv/>
+    <location value="45"/>
+    <location value="395"/>
+    <location value="363"/>
+    <location value="408"/>
+    30 | aaaaaa aaaa aaa aaaaaaaaa aaaaaaaa aaaaaa aaaaa aaa aaaaaaaaaa aaa aaaaaaaaa aaaaaaaaaaa:
+  </list>
+  <text>
+    <location value="72"/>
+    <location value="412"/>
+    <location value="112"/>
+    <location value="426"/>
+    aaaaaaaa
+  </text>
+  <text>
+    <location value="175"/>
+    <location value="412"/>
+    <location value="179"/>
+    <location value="426"/>
+    0
+  </text>
+  <text>
+    <location value="247"/>
+    <location value="412"/>
+    <location value="256"/>
+    <location value="426"/>
+    00
+  </text>
+  <text>
+    <location value="325"/>
+    <location value="412"/>
+    <location value="329"/>
+    <location value="426"/>
+    0
+  </text>
+  <text>
+    <location value="373"/>
+    <location value="193"/>
+    <location value="374"/>
+    <location value="199"/>
+    <![CDATA[']]>
+  </text>
+  <text>
+    <location value="384"/>
+    <location value="178"/>
+    <location value="458"/>
+    <location value="183"/>
+    aaa-aa-000 p
+  </text>
+  <text>
+    <location value="384"/>
+    <location value="186"/>
+    <location value="430"/>
+    <location value="191"/>
+    aaa-aa-000
+  </text>
+  <text>
+    <location value="386"/>
+    <location value="193"/>
+    <location value="389"/>
+    <location value="199"/>
+    /
+  </text>
+  <text>
+    <location value="374"/>
+    <location value="203"/>
+    <location value="381"/>
+    <location value="207"/>
+    4
+  </text>
+  <text>
+    <location value="372"/>
+    <location value="251"/>
+    <location value="383"/>
+    <location value="257"/>
+    VV
+  </text>
+  <text>
+    <location value="374"/>
+    <location value="286"/>
+    <location value="383"/>
+    <location value="292"/>
+    V
+  </text>
+  <text>
+    <thread thread_id="1"/>
+    <location value="373"/>
+    <location value="353"/>
+    <location value="383"/>
+    <location value="358"/>
+    iv,
+  </text>
+  <text>
+    <thread thread_id="1"/>
+    <location value="384"/>
+    <location value="210"/>
+    <location value="463"/>
+    <location value="216"/>
+    aaa-aa-000 /
+  </text>
+  <text>
+    <location value="384"/>
+    <location value="226"/>
+    <location value="462"/>
+    <location value="233"/>
+    aaa-da-000 /
+  </text>
+  <text>
+    <location value="392"/>
+    <location value="234"/>
+    <location value="400"/>
+    <location value="241"/>
+    /
+  </text>
+  <text>
+    <location value="384"/>
+    <location value="243"/>
+    <location value="392"/>
+    <location value="249"/>
+    7
+  </text>
+  <text>
+    <location value="383"/>
+    <location value="340"/>
+    <location value="392"/>
+    <location value="352"/>
+    /
+  </text>
+  <text>
+    <location value="387"/>
+    <location value="412"/>
+    <location value="464"/>
+    <location value="426"/>
+    aaa-aa-000 F
+  </text>
+  <text>
+    <location value="72"/>
+    <location value="428"/>
+    <location value="132"/>
+    <location value="432"/>
+    aaaaaa: aaaaa
+  </text>
+  <picture>
+    <location value="99"/>
+    <location value="453"/>
+    <location value="121"/>
+    <location value="467"/>
+  </picture>
+  <text>
+    <location value="44"/>
+    <location value="457"/>
+    <location value="429"/>
+    <location value="470"/>
+    Tested By: id /M Date: If -7-25 Approved By: D ke Date: WA OSS 2S
+  </text>
+  <picture>
+    <location value="372"/>
+    <location value="456"/>
+    <location value="430"/>
+    <location value="468"/>
+  </picture>
+  <text>
+    <location value="385"/>
+    <location value="62"/>
+    <location value="431"/>
+    <location value="67"/>
+    aaa-aa-000
+  </text>
+  <text>
+    <location value="385"/>
+    <location value="69"/>
+    <location value="431"/>
+    <location value="74"/>
+    aaa-aa-000
+  </text>
+  <text>
+    <location value="485"/>
+    <location value="69"/>
+    <location value="490"/>
+    <location value="74"/>
+    ny
+  </text>
+  <text>
+    <location value="385"/>
+    <location value="78"/>
+    <location value="431"/>
+    <location value="84"/>
+    aaa-aa-000
+  </text>
+  <text>
+    <location value="486"/>
+    <location value="78"/>
+    <location value="488"/>
+    <location value="84"/>
+    4
+  </text>
+  <text>
+    <location value="462"/>
+    <location value="93"/>
+    <location value="489"/>
+    <location value="102"/>
+    P\s
+  </text>
+  <text>
+    <location value="464"/>
+    <location value="103"/>
+    <location value="464"/>
+    <location value="107"/>
+    |
+  </text>
+  <text>
+    <location value="484"/>
+    <location value="103"/>
+    <location value="485"/>
+    <location value="107"/>
+    5
+  </text>
+  <text>
+    <location value="443"/>
+    <location value="109"/>
+    <location value="486"/>
+    <location value="116"/>
+    KF »
+  </text>
+  <text>
+    <location value="483"/>
+    <location value="119"/>
+    <location value="486"/>
+    <location value="124"/>
+    )
+  </text>
+  <text>
+    <location value="479"/>
+    <location value="127"/>
+    <location value="487"/>
+    <location value="132"/>
+    <![CDATA[<]]>
+  </text>
+  <text>
+    <location value="477"/>
+    <location value="134"/>
+    <location value="487"/>
+    <location value="141"/>
+    ~
+  </text>
+  <picture>
+    <location value="450"/>
+    <location value="407"/>
+    <location value="464"/>
+    <location value="425"/>
+  </picture>
+  <text>
+    <location value="436"/>
+    <location value="477"/>
+    <location value="478"/>
+    <location value="481"/>
+    Page 3 of 8
+  </text>
+  <text>
+    <location value="219"/>
+    <location value="476"/>
+    <location value="280"/>
+    <location value="482"/>
+    CONFIDENTIAL
+  </text>
+  <picture>
+    <location value="476"/>
+    <location value="17"/>
+    <location value="503"/>
+    <location value="60"/>
+    <text>
+      <location value="476"/>
+      <location value="19"/>
+      <location value="502"/>
+      <location value="25"/>
+      YY
+    </text>
+    <text>
+      <location value="481"/>
+      <location value="41"/>
+      <location value="492"/>
+      <location value="46"/>
+      ~!
+    </text>
+    <text>
+      <location value="486"/>
+      <location value="51"/>
+      <location value="491"/>
+      <location value="54"/>
+      AN
+    </text>
+  </picture>
+  <page_footer>
+    <layer value="furniture"/>
+    <location value="45"/>
+    <location value="496"/>
+    <location value="464"/>
+    <location value="503"/>
+    Document No.: 2152167.9.55 - Version: 5.0 - Document ID: ESIG-CORP-2152167 Date/Time Printed/Viewed: 2025-06-10 14:50/CET)
+  </page_footer>
+</doclang>

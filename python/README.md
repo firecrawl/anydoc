@@ -58,6 +58,22 @@ markdown = anydoc.to_markdown("scan.pdf", ocr="hosted")
 markdown = anydoc.to_markdown("scan.pdf", ocr="hosted", parse_mode="ocr")
 ```
 
+## DocLang export
+
+`to_doclang` and `to_doclang_bytes` export a PDF to DocLang, returned as the `.dclx` OPC ZIP archive: `document.xml` plus the extracted raster parts and the original PDF as the `source` part. Scanned pages export as `<picture>` elements with extracted rasters, so no OCR is needed. Non-PDF formats raise `UnsupportedError`.
+
+```python
+# From a file path, or from bytes with the format detected:
+dclx = anydoc.to_doclang("report.pdf")
+dclx = anydoc.to_doclang_bytes(pdf_bytes)
+```
+
+`lists` and `tables` steer structure detection (both on by default); `pages_with_tables` restricts the ruled-table detector to those 1-indexed pages.
+
+```python
+dclx = anydoc.to_doclang("report.pdf", lists=False, pages_with_tables=[1, 3])
+```
+
 ## Errors
 
 A conversion raises only when no complete Markdown could come out of the file. The exception type names what went wrong:

@@ -41,7 +41,7 @@ pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
     }
 }
 
-fn map_error(e: PdfError) -> ConvertError {
+pub(crate) fn map_error(e: PdfError) -> ConvertError {
     match e {
         PdfError::Encrypted => ConvertError::Encrypted,
         PdfError::Io(e) => ConvertError::Io(e),

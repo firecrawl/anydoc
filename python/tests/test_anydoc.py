@@ -20,6 +20,7 @@ CSV = FIXTURES / "csv" / "sheet.csv"
 ENCRYPTED = FIXTURES / "malformed" / "encrypted--errors.odt"
 ZIPBOMB = FIXTURES / "abuse" / "zipbomb--errors.docx"
 MIXED = FIXTURES / "pdf" / "handmade-mixed.pdf"
+TEXT_PDF = FIXTURES / "pdf" / "text.pdf"
 
 HOSTED_MARKDOWN = "# Read by the hosted parser\n"
 
@@ -85,6 +86,32 @@ class AnydocTest(unittest.TestCase):
         with self.assertRaisesRegex(anydoc.ConvertError, "unrecognized file content"):
             anydoc.to_markdown_bytes(CSV.read_bytes())
         self.assertIn("| --- |", anydoc.to_markdown_bytes(CSV.read_bytes(), "csv"))
+
+    def test_to_doclang_exports_a_dclx_archive(self):
+        dclx = anydoc.to_doclang_bytes(MIXED.read_bytes(), "pdf")
+        self.assertIsInstance(dclx, bytes)
+        with zipfile.ZipFile(io.BytesIO(dclx)) as archive:
+            self.assertIn("document.xml", archive.namelist())
+            xml = archive.read("document.xml").decode()
+        self.assertIn("<doclang", xml)
+        self.assertIn("<picture", xml)  # the mixed fixture's image
+
+    def test_to_doclang_detects_the_format_and_steers_lists(self):
+        with zipfile.ZipFile(io.BytesIO(anydoc.to_doclang(TEXT_PDF))) as archive:
+            xml = archive.read("document.xml").decode()
+        self.assertIn("<list", xml)
+        dclx = anydoc.to_doclang_bytes(TEXT_PDF.read_bytes())
+        with zipfile.ZipFile(io.BytesIO(dclx)) as archive:
+            xml = archive.read("document.xml").decode()
+        self.assertIn("<list", xml)
+        dclx = anydoc.to_doclang_bytes(TEXT_PDF.read_bytes(), "pdf", lists=False)
+        with zipfile.ZipFile(io.BytesIO(dclx)) as archive:
+            xml = archive.read("document.xml").decode()
+        self.assertNotIn("<list", xml)
+
+    def test_to_doclang_rejects_non_pdf_formats(self):
+        with self.assertRaises(anydoc.UnsupportedError):
+            anydoc.to_doclang_bytes(RICH.read_bytes(), "docx")
 
     def test_to_document_exposes_the_document_model(self):
         document = anydoc.to_document(OUTLINE.read_bytes(), "docx")
