@@ -77,12 +77,19 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
     let mut doc = Document::default();
     let mut failed = 0usize;
     // One budget for the workbook, so sheets cannot multiply the cap.
+    let mut remaining: HashMap<&str, usize> = HashMap::with_capacity(sheets.len());
+    for (_, part) in &sheets {
+        *remaining.entry(part.as_str()).or_insert(0) += 1;
+    }
     let mut slots = 0u64;
-    for (idx, (name, part)) in sheets.iter().enumerate() {
+    for (name, part) in &sheets {
         let content =
             pkg.optional_part(part)?.map(|bytes| read_sheet(&bytes, &shared, &styles, date1904));
-        if !sheets[idx + 1..].iter().any(|(_, later)| later == part) {
-            pkg.evict(part);
+        if let Some(left) = remaining.get_mut(part.as_str()) {
+            *left -= 1;
+            if *left == 0 {
+                pkg.evict(part);
+            }
         }
         let mut content = match content {
             Some(Ok(c)) => c,
@@ -358,7 +365,6 @@ fn read_sheet(
 ) -> Result<SheetContent, ConvertError> {
     let utf8 = to_utf8(bytes);
     let mut reader = NsReader::from_reader(utf8.as_ref());
-    reader.config_mut().check_end_names = false;
 
     let mut out = SheetContent::default();
     let mut stack: Vec<Tag> = Vec::new();
@@ -1446,5 +1452,50 @@ mod tests {
         let bytes = zip.finish().unwrap().into_inner();
         let doc = parse(&bytes).unwrap();
         assert_eq!(texts(first_table(&doc)), vec![vec!["東京"]]);
+    }
+
+    #[test]
+    fn mismatched_closing_tags_are_rejected_and_shared_sheet_parts_evict_once() {
+        let bad = r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>wrong</c></t></is></row></sheetData>"#;
+        let err = parse(&one_sheet(bad).build()).unwrap_err();
+        assert!(matches!(err, ConvertError::Malformed { .. }), "got {err:?}");
+
+        // Two workbook sheet entries pointing at the same worksheet part must
+        // both succeed before the part is evicted when its reference count hits 0.
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        let mut add = |name: &str, body: &str| {
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(body.as_bytes()).unwrap();
+        };
+        add(
+            "xl/workbook.xml",
+            &format!(
+                r#"<?xml version="1.0"?><workbook xmlns="{SML}" xmlns:r="{R}"><sheets><sheet name="First" sheetId="1" r:id="rId1"/><sheet name="Second" sheetId="2" r:id="rId1"/></sheets></workbook>"#
+            ),
+        );
+        add(
+            "xl/_rels/workbook.xml.rels",
+            &format!(
+                r#"<?xml version="1.0"?><Relationships xmlns="{PKG_RELS}"><Relationship Id="rId1" Type="{WS_REL}" Target="worksheets/sheet1.xml"/></Relationships>"#
+            ),
+        );
+        add(
+            "xl/worksheets/sheet1.xml",
+            &format!(
+                r#"<?xml version="1.0"?><worksheet xmlns="{SML}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>shared</t></is></c></row></sheetData></worksheet>"#
+            ),
+        );
+        let bytes = zip.finish().unwrap().into_inner();
+        let doc = parse(&bytes).unwrap();
+        let tables: Vec<_> = doc
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Table(t) => Some(texts(t)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tables, vec![vec![vec!["shared"]], vec![vec!["shared"]]]);
     }
 }
