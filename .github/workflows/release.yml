@@ -1,5 +1,5 @@
-# PyPI trusted publishing is registered against this exact filename (release.yml);
-# renaming the file breaks the PyPI publisher.
+# PyPI and npm trusted publishing are registered against this exact filename
+# (release.yml); renaming the file breaks both publishers.
 name: Release
 
 on:
@@ -161,12 +161,12 @@ jobs:
   publish-npm:
     name: Publish npm
     needs: [gate, test-node]
-    # npm rejects provenance attestations minted on self-hosted runners
-    # (Blacksmith counts as self-hosted), so publishing runs GitHub-hosted.
+    # npm accepts trusted publishing and provenance only from GitHub-hosted
+    # runners (Blacksmith counts as self-hosted), so publishing runs GitHub-hosted.
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing and provenance
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -198,7 +198,6 @@ jobs:
         run: npm publish --access public
         working-directory: node
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
       - name: Publish (dry run)
         # Skipped when the version is live: npm refuses even a --dry-run
@@ -208,18 +207,16 @@ jobs:
         # would otherwise publish the per-platform packages and cut a GitHub release.
         run: npm publish --dry-run --ignore-scripts --access public
         working-directory: node
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-npm-wasm:
     name: Publish npm (wasm)
     needs: [gate, test-rust]
-    # npm rejects provenance attestations minted on self-hosted runners
-    # (Blacksmith counts as self-hosted), so build and publish run GitHub-hosted.
+    # npm accepts trusted publishing and provenance only from GitHub-hosted
+    # runners (Blacksmith counts as self-hosted), so build and publish run GitHub-hosted.
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing and provenance
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -255,14 +252,11 @@ jobs:
         run: npm publish --access public
         working-directory: wasm/pkg
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
       - name: Publish (dry run)
         if: github.event_name == 'workflow_dispatch' && steps.probe.outputs.published == 'false'
         run: npm publish --dry-run --access public
         working-directory: wasm/pkg
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-crates:
     name: Publish crates.io
