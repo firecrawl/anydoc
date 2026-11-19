@@ -501,6 +501,11 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
                         self.push(Inline::Text { text, style });
                     }
                 }
+                "sym" => {
+                    if let Some(glyph) = super::symbols::checkbox(child) {
+                        self.push(Inline::Text { text: glyph.to_string(), style });
+                    }
+                }
                 "tab" | "ptab" => self.push(Inline::Text { text: " ".into(), style: Style::PLAIN }),
                 // Markdown has no pages or columns, but every w:br still
                 // separates the runs around it: dropping a page break
