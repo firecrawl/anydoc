@@ -204,6 +204,12 @@ pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
     let utf8 = to_utf8(bytes);
     let mut reader = NsReader::from_reader(utf8.as_ref());
     reader.config_mut().check_end_names = false;
+    // A bare `&` is common in real XHTML and HTML-ish parts ("R&D", "50% &
+    // rising"). Rejecting it would discard the whole part - and the scan for
+    // the missing `;` runs to end of input, so one stray ampersand costs
+    // every element after it. Dangling ampersands stay literal text instead;
+    // well-formed references still arrive as `GeneralRef`.
+    reader.config_mut().allow_dangling_amp = true;
 
     let mut interner: HashMap<Vec<u8>, Rc<str>> = HashMap::new();
     let mut root =
@@ -626,5 +632,30 @@ mod tests {
         let root = parse_xml(&xml).unwrap();
         assert_eq!(root.text(), "leaf");
         assert_eq!(root.descendants("", "never").count(), 0);
+    }
+
+    #[test]
+    fn dangling_ampersand_stays_literal_text() {
+        // A `&` with no reference after it is not well-formed XML, but real
+        // XHTML carries it constantly. It must not cost the rest of the part:
+        // the scan for the missing `;` runs to end of input, so rejecting
+        // here would drop every element that follows.
+        for (xml, want) in [
+            (&br#"<r><p>Tom & Jerry</p><p>after</p></r>"#[..], "Tom & Jerryafter"),
+            (&br#"<r><p>R&D</p><p>after</p></r>"#[..], "R&Dafter"),
+            (&br#"<r><p>50% & rising</p><p>after</p></r>"#[..], "50% & risingafter"),
+            (&br#"<r><p>trailing &</p></r>"#[..], "trailing &"),
+        ] {
+            let root = parse_xml(xml).unwrap();
+            assert_eq!(root.text(), want, "{}", String::from_utf8_lossy(xml));
+        }
+    }
+
+    #[test]
+    fn well_formed_references_still_resolve_beside_a_dangling_one() {
+        // Leniency for the bare `&` must not stop the real references on
+        // either side of it from expanding.
+        let root = parse_xml(br#"<r><p>a &amp; b & c &#65; d &nbsp;e</p></r>"#).unwrap();
+        assert_eq!(root.text(), "a & b & c A d \u{a0}e");
     }
 }
