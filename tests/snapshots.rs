@@ -142,6 +142,32 @@ fn embedded_ole_payload_is_retained() {
     assert_eq!(ole.bytes, b"OLE-PAYLOAD-STAND-IN".repeat(4));
 }
 
+/// Every slide carries a start anchor in the document model, so downstream
+/// chunkers can find where one slide ends and the next begins (issue #94).
+/// An anchor nothing links to renders as nothing in Markdown, so the flat
+/// `to_markdown` output is unchanged; the boundary signal is only visible
+/// through `to_document`.
+#[test]
+fn pptx_slide_boundaries_are_exposed() {
+    let path = fixture_root().join("pptx").join("handmade-links.pptx");
+    let bytes = std::fs::read(&path).unwrap();
+    let doc = anydoc::to_document(&bytes, anydoc::Format::Pptx).unwrap();
+
+    let anchors: Vec<&str> = doc
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            anydoc::model::Block::Paragraph(inlines) => match inlines.as_slice() {
+                [anydoc::model::Inline::Anchor(id)] => Some(id.as_str()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(anchors, ["slide-1", "slide-2"]);
+}
+
 /// Standard Word OLE markup places a VML preview image next to the
 /// `o:OLEObject`; the object payload (not the preview) must be retained.
 #[test]
