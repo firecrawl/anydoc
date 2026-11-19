@@ -56,6 +56,8 @@ pub enum Format {
     /// Delimiter-separated text (`.csv`). Carries no signature, so it has to
     /// be named rather than detected.
     Csv,
+    /// reStructuredText (`.rst`).
+    Rst,
 }
 
 impl Format {
@@ -84,6 +86,7 @@ impl Format {
             "ods" => Format::Ods,
             "odp" => Format::Odp,
             "csv" => Format::Csv,
+            "rst" => Format::Rst,
             _ => return None,
         })
     }
