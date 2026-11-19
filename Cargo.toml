@@ -23,6 +23,7 @@ sha2 = "0.11"
 
 [dependencies]
 cfb = "0.14.0"
+office-crypto = "0.3.0"
 csv = "1.4.0"
 flate2 = "1"
 encoding_rs = "0.8.35"
