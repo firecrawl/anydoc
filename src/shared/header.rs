@@ -83,8 +83,11 @@ pub fn resolve_header_rows(table: &Table, declared: usize) -> usize {
             }
             return 0;
         }
-        // A label is one line; a cell holding several is data.
-        if value.contains('\n') {
+        // A label may wrap across lines ("Start\nEnd"), whereas a stacked
+        // number, date or boolean line marks a multi-line data cell.
+        if value.contains('\n')
+            && value.lines().any(|l| !matches!(classify(l), None | Some(Kind::Text)))
+        {
             return 0;
         }
         // Repeated values are what a data row looks like, not a header.
@@ -100,6 +103,12 @@ pub fn resolve_header_rows(table: &Table, declared: usize) -> usize {
     // under a text label.
     let mut repeat_votes = 0usize;
     for (c, label) in head.iter().enumerate().take(width) {
+        // A wrapped label abstains: it is accepted above, but the vote is
+        // left to the single-line labels, since a wrapped value over a typed
+        // column is also what a data row with a note in it looks like.
+        if label.contains('\n') {
+            continue;
+        }
         let values: Vec<&str> = body
             .iter()
             .filter_map(|row| row.get(c))
@@ -141,7 +150,8 @@ pub fn resolve_header_rows(table: &Table, declared: usize) -> usize {
     // Text above text, with no value repeated: only the shape of the row is
     // left to go on. Short single-line entries read as labels, and the
     // alternative is the empty header row every such table renders today.
-    let labelled = head.iter().take(width).all(|v| v.chars().count() <= MAX_LABEL);
+    let labelled =
+        head.iter().take(width).all(|v| !v.contains('\n') && v.chars().count() <= MAX_LABEL);
     usize::from(labelled)
 }
 
@@ -307,6 +317,26 @@ mod tests {
             detect(&[&["kind", "value"], &["percent", "15.5%"], &["date", "2026-03-15"]]),
             1
         );
+    }
+
+    #[test]
+    fn multiline_label_abstains_and_defers_to_single_line_votes() {
+        assert_eq!(
+            detect(&[
+                &["Date", "Start\nEnd", "Room"],
+                &["2026-11-01", "9:00", "A"],
+                &["2026-11-02", "10:00", "B"],
+            ]),
+            1
+        );
+        assert_eq!(
+            detect(&[&["Alice", "N/A\n(not measured)"], &["Bob", "12"], &["Carol", "15"]]),
+            0
+        );
+        assert_eq!(detect(&[&["name", "12\n13"], &["a", "1"], &["b", "2"]]), 0);
+        // Text above text with a wrapped label: the row-shape fallback wants
+        // single-line labels.
+        assert_eq!(detect(&[&["col1", "col\ntwo"], &["a", "b"], &["c", "d"]]), 0);
     }
 
     #[test]
