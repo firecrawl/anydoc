@@ -580,9 +580,8 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
             return Ok(());
         }
 
-        // Embedded OLE objects come before images: standard Word OLE markup
-        // carries a VML preview image next to the o:OLEObject, and the
-        // object's identity and payload must win over its preview.
+        // Retain the OLE payload for extraction, but render its VML preview
+        // in place when the package contains one.
         if let Some(ole) = elem.first_descendant(ns::O_VML, "OLEObject") {
             let prog_id = ole.attr(ns::O_VML, "ProgID").unwrap_or("object").to_string();
             let alt = if descr.trim().is_empty() {
@@ -590,7 +589,7 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
             } else {
                 descr.clone()
             };
-            let source = match ole.attr_qualified(ns::R, "id") {
+            let payload = match ole.attr_qualified(ns::R, "id") {
                 Some(rel_id) => match self.ctx.rel_part(rel_id)? {
                     Some((part, bytes)) => Some(ImageSource::Asset(self.ctx.add_asset(
                         "application/vnd.ms-ole-object".into(),
@@ -601,7 +600,27 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
                 },
                 None => None,
             };
-            self.push(Inline::Image { alt, source: source.unwrap_or(ImageSource::Unavailable) });
+            let shape_id = ole.attr(ns::O_VML, "ShapeID");
+            let preview_rel = elem
+                .descendants(ns::VML, "shape")
+                .filter(|shape| shape_id.is_none_or(|id| shape.attr(ns::VML, "id") == Some(id)))
+                .find_map(|shape| shape.first_descendant(ns::VML, "imagedata"))
+                .and_then(|image| image.attr_qualified(ns::R, "id"));
+            let preview = match preview_rel {
+                Some(rel_id) => crate::shared::assets::rel_image_source(
+                    self.ctx.pkg,
+                    &self.ctx.rels,
+                    &self.ctx.base_part,
+                    self.ctx.assets,
+                    rel_id,
+                )?,
+                None => None,
+            };
+            let source = preview
+                .filter(|source| matches!(source, ImageSource::Asset(_)))
+                .or(payload)
+                .unwrap_or(ImageSource::Unavailable);
+            self.push(Inline::Image { alt, source });
             return Ok(());
         }
 
