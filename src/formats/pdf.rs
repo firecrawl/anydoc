@@ -12,6 +12,13 @@ use crate::error::ConvertError;
 use pdf_inspector::PdfError;
 
 pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
+    // A dependency panic must not unwind across a native binding and abort
+    // its host. No partial conversion state escapes this boundary.
+    std::panic::catch_unwind(|| convert_pdf(bytes))
+        .unwrap_or_else(|_| Err(ConvertError::malformed("PDF parser panicked during conversion")))
+}
+
+fn convert_pdf(bytes: &[u8]) -> Result<String, ConvertError> {
     let result = pdf_inspector::process_pdf_mem(bytes).map_err(map_error)?;
     if !result.pages_needing_ocr.is_empty() {
         // Detection samples content streams and over-reports short or
