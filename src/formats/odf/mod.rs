@@ -237,6 +237,50 @@ mod tests {
     }
 
     #[test]
+    fn continued_sublist_restarts_when_its_parent_advances() {
+        // Word saves nested lists as ODT with continue-numbering on every
+        // level; item 2's sublist must read 2.1, not 2.3.
+        let content = r#"<office:document-content
+            xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+            xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+            xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+            <office:automatic-styles><text:list-style style:name="L1">
+              <text:list-level-style-number text:level="1" style:num-format="1" style:num-suffix="."/>
+              <text:list-level-style-number text:level="2" style:num-format="1" style:num-suffix="." text:display-levels="2"/>
+            </text:list-style></office:automatic-styles>
+            <office:body><office:text>
+            <text:list text:style-name="L1" text:continue-numbering="true">
+              <text:list-item><text:p>Subject</text:p><text:list text:continue-numbering="true">
+                <text:list-item><text:p>Duty A</text:p></text:list-item>
+                <text:list-item><text:p>Duty B</text:p></text:list-item>
+              </text:list></text:list-item>
+              <text:list-item><text:p>Price</text:p><text:list text:continue-numbering="true">
+                <text:list-item><text:p>Payment</text:p></text:list-item>
+              </text:list></text:list-item>
+            </text:list>
+            </office:text></office:body></office:document-content>"#;
+        let md = crate::document_to_markdown(&parse(&odt_with_content(content)).unwrap());
+        assert!(md.contains("1.2. Duty B"), "{md}");
+        assert!(md.contains("2.1. Payment"), "{md}");
+
+        // The same when each sublist names its own list style.
+        let styled = content
+            .replace(
+                "</text:list-style></office:automatic-styles>",
+                r#"</text:list-style><text:list-style style:name="L2">
+              <text:list-level-style-number text:level="2" style:num-format="1" style:num-suffix="."/>
+            </text:list-style></office:automatic-styles>"#,
+            )
+            .replace(
+                r#"<text:list text:continue-numbering="true">"#,
+                r#"<text:list text:style-name="L2" text:continue-numbering="true">"#,
+            );
+        let md = crate::document_to_markdown(&parse(&odt_with_content(&styled)).unwrap());
+        assert!(md.contains("1. Payment"), "{md}");
+        assert!(!md.contains("3. Payment"), "{md}");
+    }
+
+    #[test]
     fn repeated_rows_parse_content_once() {
         // A note inside a repeated row must register once, not per copy.
         let rows = r#"<table:table-row table:number-rows-repeated="3">
