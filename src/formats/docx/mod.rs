@@ -288,6 +288,18 @@ mod tests {
     }
 
     #[test]
+    fn non_breaking_hyphen_renders_as_a_hyphen() {
+        // Word writes a non-breaking hyphen as its own run element; dropping
+        // it joins the text on either side.
+        let document = format!(
+            r#"<w:document {W}><w:body><w:p><w:r><w:t>Call 555</w:t><w:noBreakHyphen/><w:t>0123 by e</w:t><w:noBreakHyphen/><w:t>mail</w:t></w:r></w:p></w:body></w:document>"#
+        );
+        let bytes = docx_parts(&[("word/document.xml", &document)]);
+        let markdown = crate::to_markdown_bytes(&bytes, crate::Format::Docx).unwrap();
+        assert_eq!(markdown, "Call 555-0123 by e-mail\n");
+    }
+
+    #[test]
     fn numbered_heading_keeps_its_number() {
         // H1: a heading style with numbering shows its label and advances
         // the sequence.
