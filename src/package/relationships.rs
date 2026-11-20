@@ -20,6 +20,8 @@ pub mod rel_type {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes";
     pub const ENDNOTES: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes";
+    pub const COMMENTS: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
