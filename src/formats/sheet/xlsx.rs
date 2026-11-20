@@ -10,10 +10,13 @@ use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, Table, TableKind};
 use crate::package::limits;
 use crate::package::relationships::{Relationships, read_rels, rel_type, rels_part_for};
-use crate::package::xml::{Element, ns};
+use crate::package::xml::{Element, ns, resolve_entity, to_utf8};
 use crate::package::{Package, path};
 use crate::shared::header::resolve_header_rows;
 use crate::shared::text::clean_text;
+use quick_xml::NsReader;
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::name::ResolveResult;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -74,15 +77,34 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
     let mut doc = Document::default();
     let mut failed = 0usize;
     // One budget for the workbook, so sheets cannot multiply the cap.
+    let mut remaining: HashMap<&str, usize> = HashMap::with_capacity(sheets.len());
+    for (_, part) in &sheets {
+        *remaining.entry(part.as_str()).or_insert(0) += 1;
+    }
     let mut slots = 0u64;
     for (name, part) in &sheets {
-        let worksheet = pkg.optional_xml_part(part)?;
-        let Some(worksheet) = worksheet.as_ref().and_then(|r| r.find(ns::SML, "worksheet")) else {
-            log::warn!("skipping unreadable sheet {name:?}");
-            failed += 1;
-            continue;
+        let content =
+            pkg.optional_part(part)?.map(|bytes| read_sheet(&bytes, &shared, &styles, date1904));
+        if let Some(left) = remaining.get_mut(part.as_str()) {
+            *left -= 1;
+            if *left == 0 {
+                pkg.evict(part);
+            }
+        }
+        let mut content = match content {
+            Some(Ok(c)) => c,
+            Some(Err(e)) if e.is_fatal() => return Err(e),
+            Some(Err(e)) => {
+                log::warn!("skipping unreadable sheet {name:?}: {e}");
+                failed += 1;
+                continue;
+            }
+            None => {
+                log::warn!("skipping unreadable sheet {name:?}");
+                failed += 1;
+                continue;
+            }
         };
-        let mut content = read_sheet(worksheet, &shared, &styles, date1904);
         content.checkboxes = read_vml_checkboxes(pkg, part)?;
         let Some(table) = build_table(content, &mut slots)? else {
             continue;
@@ -200,10 +222,8 @@ impl Styles {
         Styles { xfs }
     }
 
-    /// The format for a cell's `s` attribute, an index into `cellXfs`
-    /// (default 0).
-    fn for_cell(&self, s: Option<&str>) -> &CellFormat {
-        let i = s.and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+    /// The format for a cell's `s` index into `cellXfs` (default 0).
+    fn for_index(&self, i: usize) -> &CellFormat {
         self.xfs.get(i).unwrap_or(&CellFormat::General)
     }
 }
@@ -245,106 +265,372 @@ pub(super) struct SheetContent {
     pub(super) merges: Vec<(u32, u32, u32, u32)>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tag {
+    Worksheet,
+    Cols,
+    SheetData,
+    Row,
+    Cell,
+    Value,
+    InlineStr,
+    RichRun,
+    InlineText,
+    MergeCells,
+    Other,
+}
+
+#[derive(Clone, Copy, Default)]
+enum CellKind {
+    #[default]
+    Number,
+    SharedStr,
+    FormulaStr,
+    InlineStr,
+    Bool,
+    Literal,
+}
+
+#[derive(Default)]
+struct ActiveCell {
+    active: bool,
+    row: u32,
+    col: u32,
+    style: usize,
+    kind: CellKind,
+    has_v: bool,
+    has_is: bool,
+    r_has_t: bool,
+    v_buf: String,
+    is_buf: String,
+}
+
+impl ActiveCell {
+    fn reset(&mut self, row: u32, col: u32, style: usize, kind: CellKind) {
+        self.active = true;
+        self.row = row;
+        self.col = col;
+        self.style = style;
+        self.kind = kind;
+        self.has_v = false;
+        self.has_is = false;
+        self.r_has_t = false;
+        self.v_buf.clear();
+        self.is_buf.clear();
+    }
+}
+
+/// Transitional or ISO/IEC 29500 Strict SpreadsheetML namespace.
+fn is_sml(res: &ResolveResult<'_>) -> bool {
+    matches!(
+        res,
+        ResolveResult::Bound(ns)
+            if ns.as_ref() == ns::SML.as_bytes()
+                || ns.as_ref() == b"http://purl.oclc.org/ooxml/spreadsheetml/main"
+    )
+}
+
+/// Decode an unqualified attribute value on an opening element.
+fn unqualified_attr(e: &BytesStart<'_>, reader: &NsReader<&[u8]>, name: &[u8]) -> Option<String> {
+    for attr in e.attributes().flatten() {
+        if attr.key.as_ref() == name {
+            let val = attr
+                .decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder())
+                .map(|v| v.into_owned())
+                .unwrap_or_else(|_| String::from_utf8_lossy(&attr.value).into_owned());
+            return Some(val);
+        }
+        let (res, local) = reader.resolver().resolve_attribute(attr.key);
+        if matches!(res, ResolveResult::Unbound) && local.as_ref() == name {
+            let val = attr
+                .decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder())
+                .map(|v| v.into_owned())
+                .unwrap_or_else(|_| String::from_utf8_lossy(&attr.value).into_owned());
+            return Some(val);
+        }
+    }
+    None
+}
+
+/// Stream a worksheet part directly rather than building an `Element` DOM:
+/// real spreadsheets routinely carry hundreds of thousands of `<row>`/`<c>`
+/// tags (including dragged space fills down to row 1,048,576), which would
+/// trip the DOM node budget and fragment per-worker heap arenas while needing
+/// only row/cell state at a time.
 fn read_sheet(
-    worksheet: &Element,
+    bytes: &[u8],
     shared: &[String],
     styles: &Styles,
     date1904: bool,
-) -> SheetContent {
+) -> Result<SheetContent, ConvertError> {
+    let utf8 = to_utf8(bytes);
+    let mut reader = NsReader::from_reader(utf8.as_ref());
+
     let mut out = SheetContent::default();
-    for cols in worksheet.find_all(ns::SML, "cols") {
-        for col in cols.find_all(ns::SML, "col") {
-            if !col.attr_unqualified("hidden").is_some_and(bool_attr) {
-                continue;
+    let mut stack: Vec<Tag> = Vec::new();
+    let mut saw_worksheet = false;
+    let mut next_row: u32 = 0;
+    let mut cur_row: u32 = 0;
+    let mut next_col: u32 = 0;
+    let mut cell = ActiveCell::default();
+
+    let finish_cell = |cell: &mut ActiveCell, out: &mut SheetContent| {
+        if !cell.active {
+            return;
+        }
+        cell.active = false;
+        let text = render_cell_value(cell, shared, styles, date1904);
+        if !text.trim().is_empty() {
+            out.cells.insert((cell.row, cell.col), text);
+        }
+    };
+
+    loop {
+        let event = reader
+            .read_event()
+            .map_err(|e| ConvertError::malformed(format!("unparseable xml: {e}")))?;
+        match event {
+            Event::Start(e) => {
+                if stack.len() >= limits::MAX_XML_DEPTH {
+                    return Err(ConvertError::ResourceLimit {
+                        limit: "max_xml_depth",
+                        detail: format!("element nesting exceeds {}", limits::MAX_XML_DEPTH),
+                    });
+                }
+                let tag = open_worksheet_tag(
+                    &e,
+                    &reader,
+                    stack.last().copied(),
+                    &mut saw_worksheet,
+                    &mut next_row,
+                    &mut cur_row,
+                    &mut next_col,
+                    &mut cell,
+                    &mut out,
+                );
+                stack.push(tag);
             }
-            let bound = |name| {
-                col.attr_unqualified(name)
-                    .and_then(|v| v.parse::<u32>().ok())
-                    .and_then(|v| v.checked_sub(1))
-            };
-            if let (Some(min), Some(max)) = (bound("min"), bound("max"))
-                && min <= max
-            {
-                out.hidden_cols.push((min, max.min(MAX_COLS - 1)));
+            Event::Empty(e) => {
+                let tag = open_worksheet_tag(
+                    &e,
+                    &reader,
+                    stack.last().copied(),
+                    &mut saw_worksheet,
+                    &mut next_row,
+                    &mut cur_row,
+                    &mut next_col,
+                    &mut cell,
+                    &mut out,
+                );
+                if tag == Tag::Cell {
+                    finish_cell(&mut cell, &mut out);
+                }
             }
+            Event::End(_) => {
+                if stack.pop() == Some(Tag::Cell) {
+                    finish_cell(&mut cell, &mut out);
+                }
+            }
+            Event::Text(e) => {
+                if let Some(target) = active_text_buf(stack.last().copied(), &mut cell) {
+                    match e.decode() {
+                        Ok(t) => target.push_str(&t),
+                        Err(_) => target.push_str(&String::from_utf8_lossy(e.as_ref())),
+                    }
+                }
+            }
+            Event::GeneralRef(e) => {
+                if let Some(target) = active_text_buf(stack.last().copied(), &mut cell) {
+                    let name = String::from_utf8_lossy(e.as_ref());
+                    match resolve_entity(&name) {
+                        Some(resolved) => target.push_str(&resolved),
+                        None => {
+                            target.push('&');
+                            target.push_str(&name);
+                            target.push(';');
+                        }
+                    }
+                }
+            }
+            Event::CData(e) => {
+                if let Some(target) = active_text_buf(stack.last().copied(), &mut cell) {
+                    target.push_str(&String::from_utf8_lossy(e.as_ref()));
+                }
+            }
+            Event::Eof => break,
+            _ => {}
         }
     }
-    let mut next_row: u32 = 0;
-    for row in worksheet.find_all(ns::SML, "sheetData").flat_map(|sd| sd.find_all(ns::SML, "row")) {
-        let r = row
-            .attr_unqualified("r")
-            .and_then(|v| v.parse::<u32>().ok())
-            .and_then(|v| v.checked_sub(1))
-            .unwrap_or(next_row);
-        if r >= MAX_ROWS {
-            continue;
+    while let Some(tag) = stack.pop() {
+        if tag == Tag::Cell {
+            finish_cell(&mut cell, &mut out);
         }
-        next_row = r + 1;
-        if row.attr_unqualified("hidden").is_some_and(bool_attr) {
-            out.hidden_rows.insert(r);
+    }
+    if !saw_worksheet {
+        return Err(ConvertError::malformed("worksheet part has no worksheet root"));
+    }
+    Ok(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn open_worksheet_tag(
+    e: &BytesStart<'_>,
+    reader: &NsReader<&[u8]>,
+    parent: Option<Tag>,
+    saw_worksheet: &mut bool,
+    next_row: &mut u32,
+    cur_row: &mut u32,
+    next_col: &mut u32,
+    cell: &mut ActiveCell,
+    out: &mut SheetContent,
+) -> Tag {
+    let (res, local) = reader.resolver().resolve_element(e.name());
+    let sml = is_sml(&res);
+    let name = local.as_ref();
+    match parent {
+        None if sml && name == b"worksheet" => {
+            *saw_worksheet = true;
+            Tag::Worksheet
         }
-        let mut next_col: u32 = 0;
-        for c in row.find_all(ns::SML, "c") {
+        Some(Tag::Worksheet) if sml => match name {
+            b"cols" => Tag::Cols,
+            b"sheetData" => Tag::SheetData,
+            b"mergeCells" => Tag::MergeCells,
+            _ => Tag::Other,
+        },
+        Some(Tag::Cols) if sml && name == b"col" => {
+            if unqualified_attr(e, reader, b"hidden").as_deref().is_some_and(bool_attr) {
+                let bound = |attr| {
+                    unqualified_attr(e, reader, attr)
+                        .and_then(|v| v.parse::<u32>().ok())
+                        .and_then(|v| v.checked_sub(1))
+                };
+                if let (Some(min), Some(max)) = (bound(b"min"), bound(b"max"))
+                    && min <= max
+                {
+                    out.hidden_cols.push((min, max.min(MAX_COLS - 1)));
+                }
+            }
+            Tag::Other
+        }
+        Some(Tag::SheetData) if sml && name == b"row" => {
+            let r = unqualified_attr(e, reader, b"r")
+                .and_then(|v| v.parse::<u32>().ok())
+                .and_then(|v| v.checked_sub(1))
+                .unwrap_or(*next_row);
+            if r >= MAX_ROWS {
+                return Tag::Other;
+            }
+            *next_row = r + 1;
+            *cur_row = r;
+            *next_col = 0;
+            if unqualified_attr(e, reader, b"hidden").as_deref().is_some_and(bool_attr) {
+                out.hidden_rows.insert(r);
+            }
+            Tag::Row
+        }
+        Some(Tag::Row) if sml && name == b"c" => {
             // Position comes from the cell's own reference: a row may skip
             // cells entirely, so iteration order says nothing.
-            let (cr, cc) = match c.attr_unqualified("r").map(parse_ref) {
+            let (cr, cc) = match unqualified_attr(e, reader, b"r").as_deref().map(parse_ref) {
                 Some(Some(rc)) => rc,
-                Some(None) => continue,
-                None => (r, next_col),
+                Some(None) => return Tag::Other,
+                None => (*cur_row, *next_col),
             };
-            next_col = cc + 1;
+            *next_col = cc + 1;
             if cr >= MAX_ROWS || cc >= MAX_COLS {
-                continue;
+                return Tag::Other;
             }
-            let text = cell_text(c, shared, styles, date1904);
-            if !text.is_empty() {
-                out.cells.insert((cr, cc), text);
+            let style = unqualified_attr(e, reader, b"s")
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(0);
+            let kind = match unqualified_attr(e, reader, b"t").as_deref().unwrap_or("n") {
+                "s" => CellKind::SharedStr,
+                "str" => CellKind::FormulaStr,
+                "inlineStr" => CellKind::InlineStr,
+                "b" => CellKind::Bool,
+                "e" | "d" => CellKind::Literal,
+                _ => CellKind::Number,
+            };
+            cell.reset(cr, cc, style, kind);
+            Tag::Cell
+        }
+        Some(Tag::Cell) if sml => match name {
+            b"v" if !cell.has_v => {
+                cell.has_v = true;
+                Tag::Value
             }
+            b"is" if !cell.has_is => {
+                cell.has_is = true;
+                Tag::InlineStr
+            }
+            _ => Tag::Other,
+        },
+        Some(Tag::Value) => Tag::Value,
+        Some(Tag::InlineStr) if sml => match name {
+            b"t" => Tag::InlineText,
+            b"r" => {
+                cell.r_has_t = false;
+                Tag::RichRun
+            }
+            _ => Tag::Other,
+        },
+        Some(Tag::RichRun) if sml && name == b"t" && !cell.r_has_t => {
+            cell.r_has_t = true;
+            Tag::InlineText
         }
-    }
-    for merge in
-        worksheet.find_all(ns::SML, "mergeCells").flat_map(|mc| mc.find_all(ns::SML, "mergeCell"))
-    {
-        let Some(region) = merge.attr_unqualified("ref").and_then(parse_region) else {
-            log::debug!("skipping unparseable merge reference");
-            continue;
-        };
-        let (r1, c1, r2, c2) = region;
-        if r1 != r2 || c1 != c2 {
-            out.merges.push(region);
+        Some(Tag::InlineText) => Tag::InlineText,
+        Some(Tag::MergeCells) if sml && name == b"mergeCell" => {
+            match unqualified_attr(e, reader, b"ref").as_deref().and_then(parse_region) {
+                Some((r1, c1, r2, c2)) if r1 != r2 || c1 != c2 => {
+                    out.merges.push((r1, c1, r2, c2));
+                }
+                Some(_) => {}
+                None => log::debug!("skipping unparseable merge reference"),
+            }
+            Tag::Other
         }
+        _ => Tag::Other,
     }
-    out
+}
+
+fn active_text_buf(tag: Option<Tag>, cell: &mut ActiveCell) -> Option<&mut String> {
+    match tag {
+        Some(Tag::Value) => Some(&mut cell.v_buf),
+        Some(Tag::InlineText) => Some(&mut cell.is_buf),
+        _ => None,
+    }
 }
 
 /// A cell's rendered text, per its `t` type and resolved number format.
-fn cell_text(c: &Element, shared: &[String], styles: &Styles, date1904: bool) -> String {
-    let fmt = styles.for_cell(c.attr_unqualified("s"));
-    let value = || c.find(ns::SML, "v").map(|v| v.text()).unwrap_or_default();
-    match c.attr_unqualified("t").unwrap_or("n") {
-        "s" => {
-            let v = value();
-            match v.trim().parse::<usize>().ok().and_then(|i| shared.get(i)) {
-                Some(text) => format_as_text(fmt, text),
-                None => {
-                    log::debug!("shared string index {v:?} out of range");
-                    String::new()
-                }
+fn render_cell_value(
+    cell: &ActiveCell,
+    shared: &[String],
+    styles: &Styles,
+    date1904: bool,
+) -> String {
+    let fmt = styles.for_index(cell.style);
+    let v = cell.v_buf.as_str();
+    match cell.kind {
+        CellKind::SharedStr => match v.trim().parse::<usize>().ok().and_then(|i| shared.get(i)) {
+            Some(text) => format_as_text(fmt, text),
+            None => {
+                log::debug!("shared string index {v:?} out of range");
+                String::new()
             }
+        },
+        CellKind::FormulaStr => format_as_text(fmt, &clean_text(v)),
+        CellKind::InlineStr => {
+            let text = if cell.has_is { clean_text(&cell.is_buf) } else { String::new() };
+            format_as_text(fmt, &text)
         }
-        "str" => format_as_text(fmt, &clean_text(&value())),
-        "inlineStr" => {
-            let text = c.find(ns::SML, "is").map(|is| clean_text(&rich_text(is)));
-            format_as_text(fmt, &text.unwrap_or_default())
-        }
-        "b" => match value().trim() {
+        CellKind::Bool => match v.trim() {
             "1" | "true" => "TRUE".to_string(),
             "0" | "false" => "FALSE".to_string(),
             _ => String::new(),
         },
-        "e" | "d" => clean_text(&value()),
-        _ => {
-            let v = value();
+        CellKind::Literal => clean_text(v),
+        CellKind::Number => {
             let v = v.trim();
             if v.is_empty() {
                 return String::new();
@@ -1077,5 +1363,139 @@ mod tests {
         };
         let doc = parse(&wb.build()).unwrap();
         assert_eq!(texts(first_table(&doc)), vec![vec!["14", "L/R [x] Roof", "[ ]"]]);
+    }
+
+    #[test]
+    fn whitespace_only_cells_do_not_widen_the_grid_extent() {
+        // Issue #156: single-space or NBSP cells outside the real table
+        // render empty and must not inflate the workbook's grid budget,
+        // while padding around real text stays intact.
+        let mut sheet = String::from(
+            r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>id</t></is></c><c r="B1" t="inlineStr"><is><t xml:space="preserve">  padded  </t></is></c></row>"#,
+        );
+        sheet.push_str(
+            r#"<row r="800000"><c r="D800000" t="s"><v>0</v></c><c r="XFD800000" t="inlineStr"><is><t>&#160;</t></is></c></row></sheetData>"#,
+        );
+        let wb = Wb {
+            sheets: vec![("A", "", &sheet), ("B", "", &sheet)],
+            shared: Some(r#"<si><t xml:space="preserve"> </t></si>"#),
+            ..Wb::default()
+        };
+        let doc = parse(&wb.build()).unwrap();
+        assert_eq!(texts(first_table(&doc)), vec![vec!["id", "  padded  "]]);
+    }
+
+    #[test]
+    fn space_fill_dragged_past_the_dom_node_cap_streams_without_error() {
+        // Issue #156 (shape 2): a column of single-space shared-string cells
+        // filled down 550k rows (~2.2M XML nodes) exceeds MAX_XML_NODES when
+        // built into a DOM, yet holds only a two-cell table.
+        let mut sheet = String::with_capacity(28 * 1024 * 1024);
+        sheet.push_str(
+            r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>item</t></is></c><c r="B1" t="inlineStr"><is><t>qty</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>bolt</t></is></c><c r="B2"><v>4</v></c></row>"#,
+        );
+        for r in 3..=550_002u32 {
+            use std::fmt::Write as _;
+            let _ = write!(sheet, r#"<row r="{r}"><c r="C{r}" t="s"><v>0</v></c></row>"#);
+        }
+        sheet.push_str("</sheetData>");
+        let wb = Wb {
+            sheets: vec![("Tracker", "", &sheet)],
+            shared: Some(r#"<si><t xml:space="preserve"> </t></si>"#),
+            ..Wb::default()
+        };
+        let doc = parse(&wb.build()).unwrap();
+        assert_eq!(texts(first_table(&doc)), vec![vec!["item", "qty"], vec!["bolt", "4"]]);
+    }
+
+    #[test]
+    fn deeply_nested_worksheet_xml_still_trips_max_xml_depth() {
+        let depth = limits::MAX_XML_DEPTH + 2;
+        let mut body = String::from(
+            r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>ok</t></is></c></row></sheetData>"#,
+        );
+        for _ in 0..depth {
+            body.push_str("<ext>");
+        }
+        for _ in 0..depth {
+            body.push_str("</ext>");
+        }
+        let err = parse(&one_sheet(&body).build()).unwrap_err();
+        assert!(
+            matches!(err, ConvertError::ResourceLimit { limit: "max_xml_depth", .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn inline_phonetic_runs_are_omitted_and_strict_ooxml_worksheets_stream() {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        let mut add = |name: &str, body: &str| {
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(body.as_bytes()).unwrap();
+        };
+        add(
+            "xl/workbook.xml",
+            r#"<?xml version="1.0"?><workbook xmlns="http://purl.oclc.org/ooxml/spreadsheetml/main" xmlns:r="http://purl.oclc.org/ooxml/officeDocument/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+        );
+        add(
+            "xl/_rels/workbook.xml.rels",
+            &format!(
+                r#"<?xml version="1.0"?><Relationships xmlns="{PKG_RELS}"><Relationship Id="rId1" Type="http://purl.oclc.org/ooxml/officeDocument/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#
+            ),
+        );
+        add(
+            "xl/worksheets/sheet1.xml",
+            r#"<?xml version="1.0"?><worksheet xmlns="http://purl.oclc.org/ooxml/spreadsheetml/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><r><t>東</t></r><r><t>京</t></r><rPh sb="0" eb="2"><t>とうきょう</t></rPh></is></c></row></sheetData></worksheet>"#,
+        );
+        let bytes = zip.finish().unwrap().into_inner();
+        let doc = parse(&bytes).unwrap();
+        assert_eq!(texts(first_table(&doc)), vec![vec!["東京"]]);
+    }
+
+    #[test]
+    fn mismatched_closing_tags_are_rejected_and_shared_sheet_parts_evict_once() {
+        let bad = r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>wrong</c></t></is></row></sheetData>"#;
+        let err = parse(&one_sheet(bad).build()).unwrap_err();
+        assert!(matches!(err, ConvertError::Malformed { .. }), "got {err:?}");
+
+        // Two workbook sheet entries pointing at the same worksheet part must
+        // both succeed before the part is evicted when its reference count hits 0.
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        let mut add = |name: &str, body: &str| {
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(body.as_bytes()).unwrap();
+        };
+        add(
+            "xl/workbook.xml",
+            &format!(
+                r#"<?xml version="1.0"?><workbook xmlns="{SML}" xmlns:r="{R}"><sheets><sheet name="First" sheetId="1" r:id="rId1"/><sheet name="Second" sheetId="2" r:id="rId1"/></sheets></workbook>"#
+            ),
+        );
+        add(
+            "xl/_rels/workbook.xml.rels",
+            &format!(
+                r#"<?xml version="1.0"?><Relationships xmlns="{PKG_RELS}"><Relationship Id="rId1" Type="{WS_REL}" Target="worksheets/sheet1.xml"/></Relationships>"#
+            ),
+        );
+        add(
+            "xl/worksheets/sheet1.xml",
+            &format!(
+                r#"<?xml version="1.0"?><worksheet xmlns="{SML}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>shared</t></is></c></row></sheetData></worksheet>"#
+            ),
+        );
+        let bytes = zip.finish().unwrap().into_inner();
+        let doc = parse(&bytes).unwrap();
+        let tables: Vec<_> = doc
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Table(t) => Some(texts(t)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tables, vec![vec![vec!["shared"]], vec![vec!["shared"]]]);
     }
 }

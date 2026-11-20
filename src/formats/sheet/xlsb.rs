@@ -76,10 +76,20 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
     let mut doc = Document::default();
     let mut failed = 0usize;
     // One budget for the workbook, so sheets cannot multiply the cap.
+    let mut remaining: HashMap<&str, usize> = HashMap::with_capacity(sheets.len());
+    for (_, part) in &sheets {
+        *remaining.entry(part.as_str()).or_insert(0) += 1;
+    }
     let mut slots = 0u64;
     for (name, part) in &sheets {
         let content =
             pkg.optional_part(part)?.map(|bytes| read_sheet(&bytes, &shared, &xfs, date1904));
+        if let Some(left) = remaining.get_mut(part.as_str()) {
+            *left -= 1;
+            if *left == 0 {
+                pkg.evict(part);
+            }
+        }
         let mut content = match content {
             Some(Ok(c)) => c,
             Some(Err(e)) if e.is_fatal() => return Err(e),
@@ -272,7 +282,7 @@ fn read_sheet(
                 }
                 let fmt = xfs.get(style as usize).unwrap_or(&CellFormat::General);
                 let text = cell_text(id, &mut f, fmt, shared, date1904)?;
-                if !text.is_empty() {
+                if !text.trim().is_empty() {
                     out.cells.insert((r, col), text);
                 }
             }

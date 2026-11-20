@@ -279,7 +279,7 @@ pub fn parse_xml(bytes: &[u8]) -> Result<Element, ConvertError> {
 }
 
 /// Transcode an XML part to UTF-8 based on its BOM or encoding declaration.
-fn to_utf8(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+pub(crate) fn to_utf8(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
     use std::borrow::Cow;
     match bytes {
         [0xFF, 0xFE, ..] => {
@@ -437,7 +437,7 @@ fn push_text(stack: &mut [Element], root: &mut Element, text: String) {
 }
 
 /// Resolve entity references quick-xml surfaces as GeneralRef events.
-fn resolve_entity(name: &str) -> Option<String> {
+pub(crate) fn resolve_entity(name: &str) -> Option<String> {
     if let Some(num) = name.strip_prefix('#') {
         let code = if let Some(hex) = num.strip_prefix('x').or_else(|| num.strip_prefix('X')) {
             u32::from_str_radix(hex, 16).ok()?
