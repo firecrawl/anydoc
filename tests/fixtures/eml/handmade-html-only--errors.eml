@@ -1,0 +1,9 @@
+From: sender@example.com
+Subject: HTML only
+Content-Type: multipart/alternative; boundary="b"
+
+--b
+Content-Type: text/html; charset="utf-8"
+
+<p>Only an HTML part exists here.</p>
+--b--

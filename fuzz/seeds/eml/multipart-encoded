@@ -1,0 +1,15 @@
+From: a@b.c
+Subject: =?utf-8?B?aGVsbG8=?=
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="bd"
+
+--bd
+Content-Type: text/plain; charset=iso-8859-1
+Content-Transfer-Encoding: quoted-printable
+
+Caf=E9 r=E9sum=E9.
+--bd
+Content-Type: text/html
+
+<p>ignored</p>
+--bd--

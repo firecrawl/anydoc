@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# With attachment
+
+**From:** sender@example.com
+
+Body inside a nested alternative.

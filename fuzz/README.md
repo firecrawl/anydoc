@@ -5,6 +5,10 @@
 `fuzz/seeds/` holds checked-in starting inputs; `fuzz/corpus/` is the working
 directory libfuzzer writes to and is not checked in.
 
+`eml` takes whole messages, and its seeds cover a flat plaintext body and a
+multipart one, so mutation reaches the boundary walk, the transfer-decoders
+and the encoded-word reader rather than stopping at the header block.
+
 `xls`, `xlsb` and `numfmt` wrap their input in a valid container (an OLE
 compound file, an OPC package, a styles part) so mutation reaches the record
 and format-code parsers rather than dying at the container gate. `xlsx` takes

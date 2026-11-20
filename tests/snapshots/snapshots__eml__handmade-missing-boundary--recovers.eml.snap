@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+# Boundary never appears
+
+**From:** sender@example.com
+
+Text sitting where parts should be.

@@ -4,6 +4,7 @@ mod csv;
 pub mod detect;
 mod doc;
 mod docx;
+mod eml;
 mod epub;
 mod odf;
 pub mod pdf;
@@ -20,6 +21,7 @@ pub fn parse(bytes: &[u8], format: Format) -> Result<Document, ConvertError> {
     match format {
         Format::Excel => sheet::parse(bytes),
         Format::Csv => csv::parse(bytes),
+        Format::Eml => eml::parse(bytes),
         Format::Docx => docx::parse(bytes),
         Format::Odt | Format::Ods | Format::Odp => odf::parse(bytes),
         Format::Pptx => pptx::parse(bytes),

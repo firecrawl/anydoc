@@ -67,7 +67,7 @@ create_exception!(
 /// Format names, as the extension that identifies each format. Container
 /// variants that share a parser (`.docm`, `.xlsm`, `.ppsx`, ...) map onto
 /// these via `format_from_bytes` or `format_from_extension`.
-const FORMATS: [(&str, anydoc::Format); 12] = [
+const FORMATS: [(&str, anydoc::Format); 13] = [
     ("doc", anydoc::Format::Doc),
     ("docx", anydoc::Format::Docx),
     ("odt", anydoc::Format::Odt),
@@ -80,6 +80,7 @@ const FORMATS: [(&str, anydoc::Format); 12] = [
     ("ods", anydoc::Format::Ods),
     ("odp", anydoc::Format::Odp),
     ("csv", anydoc::Format::Csv),
+    ("eml", anydoc::Format::Eml),
 ];
 
 fn parse_format(name: &str) -> PyResult<anydoc::Format> {
