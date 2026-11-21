@@ -16,8 +16,6 @@ mod shared;
 
 pub use error::ConvertError;
 
-use render::markdown::document_to_markdown;
-
 use std::path::Path;
 
 /// Input format. Selects the parser; container variants that share a parser
@@ -108,6 +106,13 @@ pub fn to_markdown(path: impl AsRef<Path>) -> Result<String, ConvertError> {
         )));
     };
     to_markdown_bytes(&bytes, format)
+}
+
+/// Render a document model as GitHub-Flavored Markdown, as
+/// [`to_markdown_bytes`] does after parsing. For a [`model::Document`] from
+/// [`to_document`] that a caller changed, or built itself.
+pub fn document_to_markdown(document: &model::Document) -> String {
+    render::markdown::document_to_markdown(document)
 }
 
 /// Convert an in-memory document to Markdown. Pass a [`Format`] to select the
