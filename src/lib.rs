@@ -5,6 +5,10 @@
 //! its messages are not a stable API.
 
 #![warn(missing_docs)]
+// The crate parses hostile binary formats entirely in safe Rust. Make that
+// property enforced rather than incidental: a parser bug must never be able
+// to become a memory-safety bug.
+#![forbid(unsafe_code)]
 
 pub mod model;
 

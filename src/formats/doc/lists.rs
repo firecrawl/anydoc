@@ -194,7 +194,12 @@ fn parse_plf_lfo(plf: &[u8], by_lsid: &HashMap<u32, [LevelDef; LEVELS]>, lists: 
     let Some(count) = get_u32(plf, 0).map(|v| v as usize) else {
         return;
     };
-    let mut lfos: Vec<(u32, usize)> = Vec::with_capacity(count);
+    // `count` is a raw header field: reserve only what the buffer could
+    // actually hold, or a lie like 0xFFFFFFFF asks the allocator for tens of
+    // gigabytes and aborts the process. The loop below still bounds the real
+    // count, since it stops as soon as a record runs past the end.
+    let capacity = count.min(plf.len().saturating_sub(4) / LFO_SIZE);
+    let mut lfos: Vec<(u32, usize)> = Vec::with_capacity(capacity);
     let mut pos = 4;
     for _ in 0..count {
         let Some(record) = plf.get(pos..).and_then(|rest| rest.get(..LFO_SIZE)) else {
