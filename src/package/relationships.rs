@@ -48,10 +48,6 @@ impl Relationships {
         self.0.get(id).filter(|r| r.mode == TargetMode::Internal).map(|r| r.target.as_str())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &Relationship)> {
-        self.0.iter().map(|(k, v)| (k.as_str(), v))
-    }
-
     /// The internal-mode relationship of a given type, lowest id first so
     /// the pick is deterministic when a producer emits duplicates.
     pub fn first_of_type(&self, rel_type: &str) -> Option<&Relationship> {
