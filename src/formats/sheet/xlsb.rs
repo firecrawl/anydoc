@@ -59,15 +59,17 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
     )?;
 
     // Visible sheets in workbook order, resolved to their parts exactly as
-    // in xlsx: by relationship id, never by conventional part name.
-    let mut sheets: Vec<(String, String)> = Vec::new();
-    for (name, rid) in bundles {
+    // in xlsx: by relationship id, never by conventional part name. Each
+    // tuple retains the original workbook-order index before hidden sheets
+    // are omitted.
+    let mut sheets: Vec<(u32, String, String)> = Vec::new();
+    for (sheet_index, name, rid) in bundles {
         let Some(target) = wb_rels.internal_target(&rid) else {
             log::warn!("skipping sheet {name:?} with no worksheet relationship");
             continue;
         };
         match path::resolve(wb_part, target) {
-            Ok(t) => sheets.push((name, t.path)),
+            Ok(t) => sheets.push((sheet_index, name, t.path)),
             Err(e) => log::warn!("skipping sheet {name:?} with unresolvable target: {e}"),
         }
     }
@@ -77,7 +79,7 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
     let mut failed = 0usize;
     // One budget for the workbook, so sheets cannot multiply the cap.
     let mut slots = 0u64;
-    for (name, part) in &sheets {
+    for (sheet_index, name, part) in &sheets {
         let content =
             pkg.optional_part(part)?.map(|bytes| read_sheet(&bytes, &shared, &xfs, date1904));
         let mut content = match content {
@@ -95,7 +97,7 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
             }
         };
         content.checkboxes = read_vml_checkboxes(pkg, part)?;
-        let Some(table) = build_table(content, &mut slots)? else {
+        let Some(table) = build_table(content, *sheet_index, name, &mut slots)? else {
             continue;
         };
         if multi_sheet {
@@ -130,11 +132,14 @@ fn read_optional<T: Default>(
     }
 }
 
+type SheetInfo = (u32, String, String);
+
 /// `xl/workbook.bin`: the 1904 date flag from BrtWbProp, and each visible
-/// sheet's name and relationship id from its BrtBundleSh.
-fn read_workbook(data: &[u8]) -> Result<(bool, Vec<(String, String)>), ConvertError> {
+/// sheet's source-order index, name, and relationship id from its BrtBundleSh.
+fn read_workbook(data: &[u8]) -> Result<(bool, Vec<SheetInfo>), ConvertError> {
     let mut date1904 = false;
     let mut sheets = Vec::new();
+    let mut sheet_index = 0u32;
     let mut records = Records::new(data);
     while let Some((id, payload)) = records.next()? {
         match id {
@@ -145,13 +150,15 @@ fn read_workbook(data: &[u8]) -> Result<(bool, Vec<(String, String)>), ConvertEr
                 f.u32()?; // iTabID
                 let rid = f.nullable_wide_string()?;
                 let name = clean_text(&f.wide_string()?);
+                let current_index = sheet_index;
+                sheet_index = sheet_index.saturating_add(1);
                 // hsState 1 is hidden, 2 is veryHidden: omitted entirely,
                 // heading included, exactly as in xlsx.
                 if state == 1 || state == 2 {
                     continue;
                 }
                 match rid {
-                    Some(rid) => sheets.push((name, rid)),
+                    Some(rid) => sheets.push((current_index, name, rid)),
                     None => log::warn!("skipping sheet {name:?} with no worksheet relationship"),
                 }
             }
@@ -460,7 +467,7 @@ impl<'a> Fields<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CellSlot, Table, inlines_to_plain_text};
+    use crate::model::{CellSlot, SpreadsheetRange, Table, inlines_to_plain_text};
     use std::io::Write;
 
     const PKG_RELS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
@@ -822,7 +829,71 @@ mod tests {
         };
         let doc = parse(&wb.build()).unwrap();
         assert_eq!(doc.blocks.len(), 1, "hidden sheets must add no heading and no table");
-        assert_eq!(texts(first_table(&doc)), vec![vec!["1", "3"], vec!["5", ""]]);
+        let table = first_table(&doc);
+        assert_eq!(texts(table), vec![vec!["1", "3"], vec!["5", ""]]);
+        let CellSlot::Origin(cell) = &table.grid[0][0] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(0, 0)));
+        let CellSlot::Origin(cell) = &table.grid[0][1] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(0, 2)));
+        let CellSlot::Origin(cell) = &table.grid[1][0] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(2, 0)));
+        let CellSlot::Origin(cell) = &table.grid[1][1] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(2, 2)));
+    }
+
+    #[test]
+    fn source_coordinates_keep_workbook_order_and_sparse_extents() {
+        let mut first = row_hdr(2, false);
+        first.extend(real_cell(2, 0, 7.0));
+        let hidden = {
+            let mut body = row_hdr(0, false);
+            body.extend(real_cell(0, 0, 8.0));
+            body
+        };
+        let mut third = row_hdr(10, false);
+        third.extend(real_cell(3, 0, 1.0));
+        third.extend(row_hdr(11, false));
+        third.extend(real_cell(4, 0, 2.0));
+        let wb = Wb {
+            sheets: vec![("Data Sheet", 0, first), ("Hidden", 1, hidden), ("Report", 0, third)],
+            ..Wb::default()
+        };
+        let doc = parse(&wb.build()).unwrap();
+        let tables: Vec<&Table> = doc
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Table(table) => Some(table),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tables.len(), 2);
+
+        let first_source = tables[0].source.as_ref().expect("spreadsheet source");
+        assert_eq!(first_source.sheet_index, 0);
+        assert_eq!(first_source.sheet_name, "Data Sheet");
+        assert_eq!(first_source.range, SpreadsheetRange::cell(2, 2));
+        let CellSlot::Origin(cell) = &tables[0].grid[0][0] else {
+            panic!("expected C3 origin");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(2, 2)));
+
+        let third_source = tables[1].source.as_ref().expect("spreadsheet source");
+        assert_eq!(third_source.sheet_index, 2, "hidden sheet must not renumber provenance");
+        assert_eq!(third_source.sheet_name, "Report");
+        assert_eq!(third_source.range, SpreadsheetRange::new(10, 3, 11, 4));
+        let CellSlot::Origin(cell) = &tables[1].grid[0][0] else {
+            panic!("expected D11 origin");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(10, 3)));
+        let CellSlot::Origin(cell) = &tables[1].grid[0][1] else {
+            panic!("expected generated E11 padding");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(10, 4)));
+        let CellSlot::Origin(cell) = &tables[1].grid[1][1] else {
+            panic!("expected E12 origin");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(11, 4)));
     }
 
     #[test]
@@ -843,6 +914,7 @@ mod tests {
             panic!("expected the merge origin at (0,0)");
         };
         assert_eq!((cell.col_span, cell.row_span), (10, 3));
+        assert_eq!(cell.source, Some(SpreadsheetRange::new(0, 5, 2, 14)));
     }
 
     #[test]

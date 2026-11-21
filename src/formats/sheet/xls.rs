@@ -59,19 +59,25 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
     let mut records = 0u64;
     let globals = read_globals(&data, &mut records)?;
 
-    let visible: Vec<&BoundSheet> = globals.sheets.iter().filter(|s| s.visible).collect();
+    let visible: Vec<(u32, &BoundSheet)> = globals
+        .sheets
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.visible)
+        .map(|(index, sheet)| (index as u32, sheet))
+        .collect();
     let multi_sheet = visible.len() > 1;
     let mut doc = Document::default();
     let mut failed = 0usize;
     // One budget for the workbook, so sheets cannot multiply the cap.
     let mut slots = 0u64;
-    for sheet in &visible {
+    for (sheet_index, sheet) in &visible {
         let Some(content) = read_sheet(&data, &globals, sheet.offset, &mut records)? else {
             log::warn!("skipping unreadable sheet {:?}", sheet.name);
             failed += 1;
             continue;
         };
-        let Some(table) = build_table(content, &mut slots)? else {
+        let Some(table) = build_table(content, *sheet_index, &sheet.name, &mut slots)? else {
             continue;
         };
         if multi_sheet {
@@ -840,7 +846,7 @@ fn string_reader<'a>(segs: &'a [&'a [u8]], skip: usize) -> Option<SegReader<'a>>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CellSlot, Table, inlines_to_plain_text};
+    use crate::model::{CellSlot, SpreadsheetRange, Table, inlines_to_plain_text};
     use std::io::Write;
 
     fn rec(rec_type: u16, body: &[u8]) -> Vec<u8> {
@@ -1140,7 +1146,65 @@ mod tests {
         };
         let doc = parse(&wb.build()).unwrap();
         assert_eq!(doc.blocks.len(), 1, "hidden sheet must add no heading and no table");
-        assert_eq!(texts(first_table(&doc)), vec![vec!["a", "c"], vec!["d", ""]]);
+        let table = first_table(&doc);
+        assert_eq!(texts(table), vec![vec!["a", "c"], vec!["d", ""]]);
+        let CellSlot::Origin(cell) = &table.grid[0][0] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(0, 0)));
+        let CellSlot::Origin(cell) = &table.grid[0][1] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(0, 2)));
+        let CellSlot::Origin(cell) = &table.grid[1][0] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(2, 0)));
+        let CellSlot::Origin(cell) = &table.grid[1][1] else { panic!() };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(2, 2)));
+    }
+
+    #[test]
+    fn source_coordinates_keep_workbook_order_and_sparse_extents() {
+        let first = label(2, 2, 0, "value");
+        let hidden = label(0, 0, 0, "hidden");
+        let mut third = label(10, 3, 0, "d");
+        third.extend(label(11, 4, 0, "e"));
+        let wb = Wb {
+            xfs: vec![0],
+            sheets: vec![("Data Sheet", 0, first), ("Hidden", 1, hidden), ("Report", 0, third)],
+            ..Wb::default()
+        };
+        let doc = parse(&wb.build()).unwrap();
+        let tables: Vec<&Table> = doc
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Table(table) => Some(table),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tables.len(), 2);
+
+        let first_source = tables[0].source.as_ref().expect("spreadsheet source");
+        assert_eq!(first_source.sheet_index, 0);
+        assert_eq!(first_source.sheet_name, "Data Sheet");
+        assert_eq!(first_source.range, SpreadsheetRange::cell(2, 2));
+        let CellSlot::Origin(cell) = &tables[0].grid[0][0] else {
+            panic!("expected C3 origin");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(2, 2)));
+
+        let third_source = tables[1].source.as_ref().expect("spreadsheet source");
+        assert_eq!(third_source.sheet_index, 2, "hidden sheet must not renumber provenance");
+        assert_eq!(third_source.sheet_name, "Report");
+        assert_eq!(third_source.range, SpreadsheetRange::new(10, 3, 11, 4));
+        let CellSlot::Origin(cell) = &tables[1].grid[0][0] else {
+            panic!("expected D11 origin");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(10, 3)));
+        let CellSlot::Origin(cell) = &tables[1].grid[0][1] else {
+            panic!("expected generated E11 padding");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(10, 4)));
+        let CellSlot::Origin(cell) = &tables[1].grid[1][1] else {
+            panic!("expected E12 origin");
+        };
+        assert_eq!(cell.source, Some(SpreadsheetRange::cell(11, 4)));
     }
 
     #[test]
@@ -1161,6 +1225,7 @@ mod tests {
             panic!("expected the merge origin at (0,0)");
         };
         assert_eq!((cell.col_span, cell.row_span), (10, 3));
+        assert_eq!(cell.source, Some(SpreadsheetRange::new(0, 5, 2, 14)));
     }
 
     #[test]

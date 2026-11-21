@@ -177,6 +177,7 @@ fn push_title_heading(inner: Vec<Block>, blocks: &mut Vec<Block>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{CellSlot, SpreadsheetRange, Table};
     use std::io::{Cursor, Write};
 
     const CONTENT: &[u8] = br#"<office:document-content
@@ -215,6 +216,17 @@ mod tests {
             xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
             xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0">
             <office:body><office:text><table:table>{rows}</table:table></office:text></office:body>
+            </office:document-content>"#
+        )
+    }
+
+    fn spreadsheet_doc(tables: &str) -> String {
+        format!(
+            r#"<office:document-content
+            xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+            xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+            xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0">
+            <office:body><office:spreadsheet>{tables}</office:spreadsheet></office:body>
             </office:document-content>"#
         )
     }
@@ -281,6 +293,105 @@ mod tests {
             panic!("unexpected cell blocks: {:?}", cell.blocks)
         };
         assert_eq!(inside, "inside cell");
+        assert!(table.source.is_none(), "ODT tables do not have worksheet provenance");
+    }
+
+    #[test]
+    fn spreadsheet_sources_follow_repeat_and_span_cursors() {
+        let content = spreadsheet_doc(
+            r#"<table:table table:name="Data Sheet">
+                <table:table-row>
+                  <table:table-cell table:number-columns-repeated="2"/>
+                  <table:table-cell office:value-type="string" office:string-value="value"/>
+                  <table:table-cell office:value-type="string" office:string-value="copy" table:number-columns-repeated="2"/>
+                </table:table-row>
+                <table:table-row table:number-rows-repeated="2">
+                  <table:table-cell office:value-type="string" office:string-value="repeat"/>
+                </table:table-row>
+              </table:table>
+              <table:table table:name="Merged">
+                <table:table-row>
+                  <table:table-cell office:value-type="string" office:string-value="span" table:number-columns-spanned="2" table:number-rows-spanned="2"/>
+                  <table:covered-table-cell/>
+                </table:table-row>
+                <table:table-row>
+                  <table:covered-table-cell table:number-columns-repeated="2"/>
+                  <table:table-cell office:value-type="string" office:string-value="tail"/>
+                </table:table-row>
+              </table:table>"#,
+        );
+        let doc = parse(&odt_with_content(&content)).unwrap();
+        let tables: Vec<&Table> = doc
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Table(table) => Some(table),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tables.len(), 2);
+
+        let first_source = tables[0].source.as_ref().expect("spreadsheet source");
+        assert_eq!(first_source.sheet_index, 0);
+        assert_eq!(first_source.sheet_name, "Data Sheet");
+        assert_eq!(first_source.range, SpreadsheetRange::new(0, 0, 2, 4));
+        let CellSlot::Origin(value) = &tables[0].grid[0][2] else {
+            panic!("expected the value origin at C1");
+        };
+        assert_eq!(value.source, Some(SpreadsheetRange::cell(0, 2)));
+        let CellSlot::Origin(repeated_one) = &tables[0].grid[1][0] else {
+            panic!("expected the first repeated row");
+        };
+        let CellSlot::Origin(repeated_two) = &tables[0].grid[2][0] else {
+            panic!("expected the second repeated row");
+        };
+        assert_eq!(repeated_one.source, Some(SpreadsheetRange::cell(1, 0)));
+        assert_eq!(repeated_two.source, Some(SpreadsheetRange::cell(2, 0)));
+
+        let second_source = tables[1].source.as_ref().expect("spreadsheet source");
+        assert_eq!(second_source.sheet_index, 1);
+        assert_eq!(second_source.sheet_name, "Merged");
+        assert_eq!(second_source.range, SpreadsheetRange::new(0, 0, 1, 2));
+        let CellSlot::Origin(span) = &tables[1].grid[0][0] else {
+            panic!("expected the merged origin");
+        };
+        assert_eq!((span.col_span, span.row_span), (2, 2));
+        assert_eq!(span.source, Some(SpreadsheetRange::new(0, 0, 1, 1)));
+        assert!(matches!(tables[1].grid[0][1], CellSlot::Covered { .. }));
+        assert!(matches!(tables[1].grid[1][0], CellSlot::Covered { .. }));
+        assert!(matches!(tables[1].grid[1][1], CellSlot::Covered { .. }));
+        let CellSlot::Origin(tail) = &tables[1].grid[1][2] else {
+            panic!("expected the tail origin");
+        };
+        assert_eq!(tail.source, Some(SpreadsheetRange::cell(1, 2)));
+    }
+
+    #[test]
+    fn spreadsheet_merge_source_survives_a_covered_tail() {
+        let content = spreadsheet_doc(
+            r#"<table:table table:name="Trailing Merge">
+                <table:table-row>
+                  <table:table-cell office:value-type="string" office:string-value="origin" table:number-rows-spanned="3"/>
+                </table:table-row>
+                <table:table-row><table:covered-table-cell/></table:table-row>
+                <table:table-row><table:covered-table-cell/></table:table-row>
+              </table:table>"#,
+        );
+        let doc = parse(&odt_with_content(&content)).unwrap();
+        let Block::Table(table) = &doc.blocks[0] else {
+            panic!("expected one spreadsheet table");
+        };
+        let source = table.source.as_ref().expect("spreadsheet source");
+        assert_eq!(source.sheet_name, "Trailing Merge");
+        assert_eq!(source.range, SpreadsheetRange::new(0, 0, 2, 0));
+        assert_eq!(table.grid.len(), 3);
+        let CellSlot::Origin(origin) = &table.grid[0][0] else {
+            panic!("expected the merged origin");
+        };
+        assert_eq!(origin.row_span, 3);
+        assert_eq!(origin.source, Some(SpreadsheetRange::new(0, 0, 2, 0)));
+        assert!(matches!(table.grid[1][0], CellSlot::Covered { .. }));
+        assert!(matches!(table.grid[2][0], CellSlot::Covered { .. }));
     }
 
     #[test]

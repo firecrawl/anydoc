@@ -1,5 +1,5 @@
 use crate::error::ConvertError;
-use crate::model::{Block, Inline, inlines_are_empty};
+use crate::model::{Block, Inline, SpreadsheetRange, SpreadsheetSource, inlines_are_empty};
 use crate::package::limits;
 use std::collections::HashMap;
 
@@ -16,6 +16,10 @@ pub struct Table {
     pub header_rows: usize,
     /// Whether the source used this table for data or for layout.
     pub kind: TableKind,
+    /// Worksheet identity and source extent for a spreadsheet table.
+    ///
+    /// This is `None` for tables from formats without worksheet coordinates.
+    pub source: Option<SpreadsheetSource>,
 }
 
 /// What a table is for.
@@ -53,12 +57,17 @@ pub struct Cell {
     pub col_span: u32,
     /// Rows covered, at least 1.
     pub row_span: u32,
+    /// Inclusive source range for a spreadsheet origin cell.
+    ///
+    /// A normal cell has a one-cell range; a merged origin has the complete
+    /// source merge range. This is `None` for cells from other formats.
+    pub source: Option<SpreadsheetRange>,
 }
 
 impl Cell {
     /// A cell spanning one position.
     pub fn new(blocks: Vec<Block>) -> Self {
-        Cell { blocks, col_span: 1, row_span: 1 }
+        Cell { blocks, col_span: 1, row_span: 1, source: None }
     }
 
     /// A one-paragraph cell spanning one position.
@@ -69,7 +78,7 @@ impl Cell {
     /// A cell covering `col_span` by `row_span` positions; either span given
     /// as 0 is raised to 1.
     pub fn spanning(blocks: Vec<Block>, col_span: u32, row_span: u32) -> Self {
-        Cell { blocks, col_span: col_span.max(1), row_span: row_span.max(1) }
+        Cell { blocks, col_span: col_span.max(1), row_span: row_span.max(1), source: None }
     }
 
     /// True when the cell holds nothing that would render: only paragraphs
@@ -217,6 +226,12 @@ impl GridBuilder {
     /// `covered-table-cell`). Returns `false` when no span accounts for the
     /// position - the stray marker then becomes an empty cell.
     pub fn covered(&mut self) -> bool {
+        self.covered_with(Cell::default())
+    }
+
+    /// Consume one explicitly-written covered position, using `fallback` when
+    /// no span accounts for the position.
+    pub fn covered_with(&mut self, fallback: Cell) -> bool {
         let row = self.row_index();
         let col = self.grid[row].len();
         match self.pending.remove(&(row, col)) {
@@ -225,7 +240,7 @@ impl GridBuilder {
                 true
             }
             None => {
-                self.grid[row].push(CellSlot::Origin(Cell::default()));
+                self.grid[row].push(CellSlot::Origin(fallback));
                 false
             }
         }
@@ -276,7 +291,7 @@ impl GridBuilder {
                 }
             }
         }
-        Table { grid: self.grid, header_rows: 0, kind }
+        Table { grid: self.grid, header_rows: 0, kind, source: None }
     }
 }
 
