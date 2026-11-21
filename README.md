@@ -245,7 +245,7 @@ match anydoc::to_markdown(path) {
 | `NeedsOcr`      | Scanned or image-only pages of a PDF, listed in `pages`             |
 | `Malformed`     | Structurally unusable: no meaningful content could be extracted     |
 | `Encrypted`     | Encrypted or password-protected                                     |
-| `ResourceLimit` | Crossed a fixed safety limit (decompression, nesting, node count)   |
+| `ResourceLimit` | Crossed a fixed safety limit or encountered a recoverable allocation failure   |
 | `MissingPart`   | A part required for any meaningful output is absent                 |
 | `Io`            | The file could not be read, from `to_markdown` only                 |
 

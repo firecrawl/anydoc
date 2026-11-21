@@ -37,10 +37,11 @@ class EncryptedError(ConvertError):
 
 class ResourceLimitError(ConvertError):
     """A fixed safety limit was crossed: decompression, nesting depth, node
-    count, repeat expansion, or retained asset bytes."""
+    count, repeat expansion, or retained asset bytes; or an allocation failed
+    recoverably."""
 
     limit: str
-    """The limit that was crossed, e.g. `max_entry_bytes`."""
+    """The limit that was crossed, e.g. `max_entry_bytes`, or `memory_allocation`."""
 
 class MissingPartError(ConvertError):
     """A part required for any meaningful output is absent."""
