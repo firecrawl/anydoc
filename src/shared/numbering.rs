@@ -54,8 +54,8 @@ pub fn parse_percent_pattern(text: &str) -> Vec<NumberText> {
 /// Render a pattern against the current sequence values. `level_marker` and
 /// `level_value` supply each referenced level's marker kind and current
 /// ordinal (the level's start value when it has not begun counting).
-/// `None` when the result matches the default label produced from the own
-/// level's marker and value.
+/// `None` when the result can use the level's native Markdown marker: either
+/// the default label, or the bare ordinal produced by `lvlText="%n"`.
 pub fn composite_label(
     pattern: &NumberPattern,
     own_marker: MarkerKind,
@@ -77,7 +77,11 @@ pub fn composite_label(
             }
         }
     }
-    if out == own_marker.label(own_value) { None } else { Some(out) }
+    if out == own_marker.label(own_value) || out == own_marker.ordinal(own_value) {
+        None
+    } else {
+        Some(out)
+    }
 }
 
 #[cfg(test)]
@@ -110,6 +114,14 @@ mod tests {
     #[test]
     fn default_pattern_yields_no_label() {
         let pattern = NumberPattern { text: parse_percent_pattern("%1."), legal: false };
+        let label =
+            composite_label(&pattern, MarkerKind::Decimal, 3, |_| MarkerKind::Decimal, |_| 3);
+        assert_eq!(label, None);
+    }
+
+    #[test]
+    fn bare_level_reference_uses_native_marker() {
+        let pattern = NumberPattern { text: parse_percent_pattern("%1"), legal: false };
         let label =
             composite_label(&pattern, MarkerKind::Decimal, 3, |_| MarkerKind::Decimal, |_| 3);
         assert_eq!(label, None);
