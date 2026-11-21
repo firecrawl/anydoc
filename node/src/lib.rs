@@ -66,6 +66,9 @@ impl From<anydoc::Format> for Format {
             anydoc::Format::Ods => Format::ods,
             anydoc::Format::Odp => Format::odp,
             anydoc::Format::Csv => Format::csv,
+            other => unreachable!(
+                "anydoc added format {other:?}; the node bindings ship in lockstep with the core crate"
+            ),
         }
     }
 }
