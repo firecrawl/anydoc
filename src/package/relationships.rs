@@ -3,7 +3,6 @@
 use crate::error::ConvertError;
 use crate::package::archive::Package;
 use crate::package::xml::{normalize_ooxml_uri, ns};
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -95,7 +94,7 @@ pub type RelTarget = (String, Rc<[u8]>);
 /// unresolvable or unreadable targets degrade (log + `None`) per the unified
 /// policy; fatal resource-limit errors always propagate.
 pub fn rel_target_bytes(
-    pkg: &RefCell<Package>,
+    pkg: &mut Package,
     rels: &Relationships,
     base_part: &str,
     rel_id: &str,
@@ -113,7 +112,7 @@ pub fn rel_target_bytes(
             return Ok(None);
         }
     };
-    match pkg.borrow_mut().optional_part(&target.path)? {
+    match pkg.optional_part(&target.path)? {
         Some(bytes) => Ok(Some((target.path, bytes))),
         None => {
             log::warn!("relationship target {} is missing", target.path);

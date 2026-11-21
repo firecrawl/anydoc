@@ -1,7 +1,8 @@
 //! In-house SpreadsheetML reader (.xlsx / .xlsm): the workbook's visible
-//! sheets, shared strings, cell number formats from `xl/styles.xml`, and
-//! merge regions. Rows, columns, and sheets the source hides are omitted,
-//! and merge regions are remapped onto the surviving grid.
+//! sheets, shared strings, cell number formats from `xl/styles.xml`, merge
+//! regions, and embedded worksheet assets. Rows, columns, and sheets the
+//! source hides are omitted, and merge regions are remapped onto the surviving
+//! grid.
 
 use super::controls::{Checkboxes, cell_inlines, read_vml_checkboxes};
 use super::numfmt::{DateParts, NumberFormat, Rendered, builtin_code};
@@ -9,9 +10,12 @@ use super::{format_duration_days, format_float, format_time_of_day};
 use crate::error::ConvertError;
 use crate::model::{Block, Cell, Document, GridBuilder, Inline, Table, TableKind};
 use crate::package::limits;
-use crate::package::relationships::{Relationships, read_rels, rel_type, rels_part_for};
+use crate::package::relationships::{
+    Relationships, TargetMode, read_rels, rel_target_bytes, rel_type, rels_part_for,
+};
 use crate::package::xml::{Element, ns};
 use crate::package::{Package, path};
+use crate::shared::assets::{AssetSink, rel_image_source};
 use crate::shared::header::resolve_header_rows;
 use crate::shared::text::clean_text;
 use std::collections::{HashMap, HashSet};
@@ -19,6 +23,9 @@ use std::rc::Rc;
 
 pub(super) const SHARED_STRINGS_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+const DRAWING_REL: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
+const IMAGE_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
 /// The grid bounds the format defines; a reference outside them is not a
 /// real cell.
@@ -72,6 +79,7 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
 
     let multi_sheet = sheets.len() > 1;
     let mut doc = Document::default();
+    let mut assets = AssetSink::new();
     let mut failed = 0usize;
     // One budget for the workbook, so sheets cannot multiply the cap.
     let mut slots = 0u64;
@@ -82,6 +90,7 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
             failed += 1;
             continue;
         };
+        collect_sheet_assets(pkg, worksheet, part, &mut assets)?;
         let mut content = read_sheet(worksheet, &shared, &styles, date1904);
         content.checkboxes = read_vml_checkboxes(pkg, part)?;
         let Some(table) = build_table(content, &mut slots)? else {
@@ -95,7 +104,58 @@ pub(super) fn parse(pkg: &mut Package, wb_part: &str) -> Result<Document, Conver
     if !sheets.is_empty() && failed == sheets.len() {
         return Err(ConvertError::malformed("no sheet in the workbook could be read"));
     }
+    doc.assets = assets.assets;
     Ok(doc)
+}
+
+/// Retain embedded worksheet images in the document model. SpreadsheetML
+/// stores the image relationship on the drawing part, not on the worksheet
+/// itself: worksheet -> drawing -> image.
+fn collect_sheet_assets(
+    pkg: &mut Package,
+    worksheet: &Element,
+    sheet_part: &str,
+    assets: &mut AssetSink,
+) -> Result<(), ConvertError> {
+    let sheet_rels = read_rels(pkg, &rels_part_for(sheet_part))?;
+    for drawing in worksheet.find_all(ns::SML, "drawing") {
+        let Some(drawing_rel_id) = drawing.attr_qualified(ns::R, "id") else {
+            continue;
+        };
+        let Some(drawing_rel) = sheet_rels.get(drawing_rel_id) else {
+            continue;
+        };
+        if drawing_rel.mode != TargetMode::Internal || drawing_rel.rel_type != DRAWING_REL {
+            continue;
+        }
+        let Some((drawing_part, drawing_bytes)) =
+            rel_target_bytes(pkg, &sheet_rels, sheet_part, drawing_rel_id)?
+        else {
+            continue;
+        };
+        let drawing = match crate::package::xml::parse_xml(&drawing_bytes) {
+            Ok(drawing) => drawing,
+            Err(e) if e.is_fatal() => return Err(e),
+            Err(e) => {
+                log::warn!("skipping corrupt drawing part {drawing_part}: {e}");
+                continue;
+            }
+        };
+        let drawing_rels = read_rels(pkg, &rels_part_for(&drawing_part))?;
+        for blip in drawing.descendants(ns::A, "blip") {
+            let Some(image_rel_id) = blip.attr_qualified(ns::R, "embed") else {
+                continue;
+            };
+            let Some(image_rel) = drawing_rels.get(image_rel_id) else {
+                continue;
+            };
+            if image_rel.mode != TargetMode::Internal || image_rel.rel_type != IMAGE_REL {
+                continue;
+            }
+            let _ = rel_image_source(pkg, &drawing_rels, &drawing_part, assets, image_rel_id)?;
+        }
+    }
+    Ok(())
 }
 
 /// Part name for a workbook-level sibling: the relationship of the given
@@ -699,7 +759,6 @@ mod tests {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
     const STYLES_REL: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
-
     /// Route through the shared container dispatch, the only entry a caller
     /// has.
     fn parse(bytes: &[u8]) -> Result<Document, ConvertError> {
@@ -881,6 +940,35 @@ mod tests {
         };
         let doc = parse(&wb.build()).unwrap();
         assert_eq!(texts(first_table(&doc)), vec![vec!["plain", "rich"]]);
+    }
+
+    #[test]
+    fn embedded_xlsx_images_are_retained_as_assets() {
+        let sheet_rels = format!(
+            r#"<?xml version="1.0"?><Relationships xmlns="{PKG_RELS}"><Relationship Id="rId2" Type="{DRAWING_REL}" Target="../drawings/drawing1.xml"/></Relationships>"#
+        );
+        let drawing_rels = format!(
+            r#"<?xml version="1.0"?><Relationships xmlns="{PKG_RELS}"><Relationship Id="rId1" Type="{IMAGE_REL}" Target="../media/image1.png"/></Relationships>"#
+        );
+        let sheet = r#"<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>visual evidence</t></is></c></row></sheetData><drawing xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId2"/>"#;
+        let drawing = r#"<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><xdr:pic><xdr:blipFill><a:blip r:embed="rId1"/></xdr:blipFill></xdr:pic></xdr:wsDr>"#;
+        let wb = Wb {
+            sheets: vec![("S", "", sheet)],
+            extra: vec![
+                ("xl/worksheets/_rels/sheet1.xml.rels", &sheet_rels),
+                ("xl/drawings/drawing1.xml", drawing),
+                ("xl/drawings/_rels/drawing1.xml.rels", &drawing_rels),
+                ("xl/media/image1.png", "embedded-image"),
+            ],
+            ..Wb::default()
+        };
+
+        let doc = parse(&wb.build()).unwrap();
+
+        assert_eq!(doc.assets.len(), 1);
+        assert_eq!(doc.assets[0].media_type, "image/png");
+        assert_eq!(doc.assets[0].origin_part, "xl/media/image1.png");
+        assert_eq!(doc.assets[0].bytes, b"embedded-image");
     }
 
     #[test]
