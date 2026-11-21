@@ -743,6 +743,24 @@ fn heading_coincident_anchor_uses_slug() {
 }
 
 #[test]
+fn heading_line_break_slugs_as_the_space_it_renders() {
+    // A heading renders a line break as a space, so the slug a link to it
+    // uses must separate the words the same way.
+    let md = doc(vec![
+        Block::Paragraph(vec![Inline::Link {
+            content: vec![Inline::plain("go")],
+            target: LinkTarget::Anchor("toc1".into()),
+        }]),
+        Block::Heading {
+            level: 1,
+            anchor: Some("toc1".into()),
+            content: vec![Inline::plain("Part One"), Inline::LineBreak, Inline::plain("Overview")],
+        },
+    ]);
+    assert_eq!(md, "[go](#part-one-overview)\n\n# Part One Overview\n");
+}
+
+#[test]
 fn duplicate_heading_slugs_deduped() {
     let md = doc(vec![
         heading(1, "Same"),
