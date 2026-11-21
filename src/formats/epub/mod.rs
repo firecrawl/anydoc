@@ -217,6 +217,50 @@ mod tests {
     use std::io::{Cursor, Write};
 
     #[test]
+    fn url_destinations_survive_epub_conversion() {
+        let parts = [
+            ("mimetype", "application/epub+zip"),
+            (
+                "META-INF/container.xml",
+                r#"<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                <rootfiles><rootfile full-path="c.opf"
+                media-type="application/oebps-package+xml"/></rootfiles></container>"#,
+            ),
+            (
+                "c.opf",
+                r#"<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/>
+                <manifest><item id="ch" href="ch.xhtml" media-type="application/xhtml+xml"/>
+                </manifest><spine><itemref idref="ch"/></spine></package>"#,
+            ),
+            (
+                "ch.xhtml",
+                r#"<html xmlns="http://www.w3.org/1999/xhtml"><body>
+                <p><a href="https://e.test/?q=&amp;copy;">Search</a></p>
+                <p><img src="https://e.test/?q=&amp;copy;" alt="Preview"/></p>
+                </body></html>"#,
+            ),
+        ];
+        let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, body) in parts {
+            w.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(body.as_bytes()).unwrap();
+        }
+        let bytes = w.finish().unwrap().into_inner();
+        let doc = crate::to_document(&bytes, crate::Format::Epub).unwrap();
+        let Block::Paragraph(link) = &doc.blocks[1] else { panic!("expected a link") };
+        assert!(matches!(&link[..], [Inline::Link { target: LinkTarget::External(url), .. }]
+            if url == "https://e.test/?q=&copy;"));
+        let Block::Paragraph(image) = &doc.blocks[2] else { panic!("expected an image") };
+        assert!(matches!(&image[..], [Inline::Image { source: ImageSource::External(url), .. }]
+            if url == "https://e.test/?q=&copy;"));
+        assert_eq!(
+            crate::to_markdown_bytes(&bytes, crate::Format::Epub).unwrap(),
+            "[Search](https://e.test/?q=&amp;copy;)\n\n\
+             ![Preview](https://e.test/?q=&amp;copy;)\n"
+        );
+    }
+
+    #[test]
     fn a_part_repeated_across_the_spine_is_read_once() {
         let items: String = (0..64)
             .map(|i| {

@@ -201,7 +201,7 @@ pub(crate) fn escape_text(text: &str, ctx: InlineContext, opts: EscapeOpts) -> S
             '<' => next.is_some_and(|n| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?')),
             '!' => next.is_none() && trailing_active,
             '|' if ctx == InlineContext::TableCell => true,
-            '&' if entity_ahead(&chars[i..]) => {
+            '&' if entity_ahead(chars[i..].iter().copied()) => {
                 out.push_str("&amp;");
                 i += 1;
                 continue;
@@ -248,25 +248,29 @@ fn line_is_only(chars: &[char], c: char) -> bool {
     chars.iter().take_while(|&&ch| ch != '\n').all(|&ch| ch == c || ch == ' ' || ch == '\t')
 }
 
-fn entity_ahead(chars: &[char]) -> bool {
-    let mut i = 1;
-    if i < chars.len() && chars[i] == '#' {
-        return true;
+/// The iterator starts at the ampersand, in either text or a destination.
+fn entity_ahead(chars: impl Iterator<Item = char>) -> bool {
+    let mut seen = false;
+    for c in chars.skip(1) {
+        match c {
+            '#' if !seen => return true,
+            c if c.is_ascii_alphanumeric() => seen = true,
+            c => return seen && c == ';',
+        }
     }
-    let mut seen = 0;
-    while i < chars.len() && chars[i].is_ascii_alphanumeric() {
-        i += 1;
-        seen += 1;
-    }
-    seen > 0 && i < chars.len() && chars[i] == ';'
+    false
 }
 
 /// Format a link destination, angle-bracketing when needed.
 pub(crate) fn format_url(url: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut escaped = String::with_capacity(url.len());
-    for c in url.chars() {
+    for (i, c) in url.char_indices() {
         match c {
+            // GFM resolves entities and backslash escapes in destinations,
+            // even inside angle brackets. Keep the source URL literal.
+            '&' if entity_ahead(url[i..].chars()) => escaped.push_str("&amp;"),
+            '\\' => escaped.push_str("%5C"),
             '<' => escaped.push_str("%3C"),
             '>' => escaped.push_str("%3E"),
             // Raw pipes split GFM table cells.
