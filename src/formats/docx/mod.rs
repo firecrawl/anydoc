@@ -288,6 +288,25 @@ mod tests {
     }
 
     #[test]
+    fn ruby_phonetic_guide_keeps_its_base_text() {
+        // A w:ruby keeps its base text and drops the pronunciation (w:rt);
+        // without a ruby branch the whole guide was silently discarded.
+        let body = r#"<w:p>
+            <w:r><w:t xml:space="preserve">Before </w:t></w:r>
+            <w:r><w:ruby>
+                <w:rubyPr><w:rubyAlign w:val="center"/></w:rubyPr>
+                <w:rt><w:r><w:t>t&#333;</w:t></w:r></w:rt>
+                <w:rubyBase><w:r><w:t>&#26481;</w:t></w:r></w:rubyBase>
+            </w:ruby></w:r>
+            <w:r><w:t xml:space="preserve"> after</w:t></w:r>
+        </w:p>"#;
+        let document = format!(r#"<w:document {W}><w:body>{body}</w:body></w:document>"#);
+        let bytes = docx_parts(&[("word/document.xml", &document)]);
+        let markdown = crate::to_markdown_bytes(&bytes, crate::Format::Docx).unwrap();
+        assert_eq!(markdown, "Before 東 after\n");
+    }
+
+    #[test]
     fn numbered_heading_keeps_its_number() {
         // H1: a heading style with numbering shows its label and advances
         // the sequence.

@@ -538,6 +538,18 @@ impl<'a, 'b, 'e> InlineWalker<'a, 'b, 'e> {
                         f.instr.push_str(&child.text());
                     }
                 }
+                "ruby" => {
+                    // Phonetic guide: keep the base text (w:rubyBase) and
+                    // drop the pronunciation (w:rt) and properties
+                    // (w:rubyPr), matching the xlsx rPh handling.
+                    if let Some(base) = child.find(ns::W, "rubyBase") {
+                        for run in base.child_elems() {
+                            if run.is(ns::W, "r") {
+                                self.walk_run(run)?;
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
