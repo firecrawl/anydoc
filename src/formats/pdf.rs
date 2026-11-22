@@ -17,25 +17,22 @@ pub fn to_markdown(bytes: &[u8]) -> Result<String, ConvertError> {
     if !result.pages_needing_ocr.is_empty() {
         // Detection samples content streams and over-reports short or
         // image-heavy text pages; extraction knows which of them yielded none.
+        // When process_pdf_mem omitted markdown (e.g. Scanned/ImageBased),
+        // extract all pages in one pass so we both verify OCR needs and keep text.
+        let needs_full_markdown = markdown.as_deref().is_none_or(|s| s.trim().is_empty());
         let flagged: Vec<u32> = result.pages_needing_ocr.iter().map(|page| page - 1).collect();
+        let page_filter = (!needs_full_markdown).then_some(flagged.as_slice());
         let extracted =
-            pdf_inspector::extract_pages_markdown_mem(bytes, Some(&flagged)).map_err(map_error)?;
+            pdf_inspector::extract_pages_markdown_mem(bytes, page_filter).map_err(map_error)?;
         if !extracted.pages_needing_ocr.is_empty() {
             return Err(ConvertError::NeedsOcr {
                 pages: extracted.pages_needing_ocr,
                 page_count: result.page_count,
             });
         }
-        // When process_pdf_mem classified the document as Scanned/ImageBased it
-        // omits markdown (None), even when flagged pages actually yielded text
-        // (for example, an image with a short caption).
-        if markdown.as_deref().is_none_or(|s| s.trim().is_empty()) {
-            let pages = if flagged.len() == result.page_count as usize {
-                extracted.pages
-            } else {
-                pdf_inspector::extract_pages_markdown_mem(bytes, None).map_err(map_error)?.pages
-            };
-            let joined = pages
+        if needs_full_markdown {
+            let joined = extracted
+                .pages
                 .into_iter()
                 .map(|p| p.markdown)
                 .filter(|s| !s.trim().is_empty())
