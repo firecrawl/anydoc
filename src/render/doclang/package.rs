@@ -14,29 +14,48 @@ pub(crate) struct Part {
     pub bytes: Vec<u8>,
 }
 
+/// The original document an archive was produced from, stored unmodified
+/// as the `/source` part (Annex B of the DocLang spec).
+pub(crate) struct SourcePart<'a> {
+    /// The source bytes, exactly as they went in.
+    pub bytes: &'a [u8],
+    /// MIME type declared by the `/source` `<Override>`.
+    pub content_type: &'static str,
+}
+
 const CONTENT_TYPES: &str = "http://schemas.openxmlformats.org/package/2006/content-types";
 const RELS_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 const DOCREL: &str = "http://doclang.ai/ns/package/2026/relationships/document";
+const SOURCEREL: &str = "http://doclang.ai/ns/package/2026/relationships/source";
 
 /// Build the `.dclx` ZIP. `source` carries the original document bytes for
-/// the optional `/source` part.
+/// the optional `/source` part, identified by a `source` relationship.
 pub(crate) fn pack(
     document_xml: &[u8],
     parts: &[Part],
-    source: Option<&[u8]>,
+    source: Option<SourcePart<'_>>,
 ) -> Result<Vec<u8>, ConvertError> {
-    check_limits(document_xml, parts, source)?;
+    check_limits(document_xml, parts, source.as_ref().map(|s| s.bytes))?;
     let opts = zip::write::SimpleFileOptions::default();
     let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
 
     w.start_file("[Content_Types].xml", opts).map_err(zip_err)?;
-    w.write_all(content_types(parts, source.is_some()).as_bytes()).map_err(ConvertError::Io)?;
+    w.write_all(
+        content_types(parts, source.as_ref().map(|s| s.content_type)).as_bytes(),
+    )
+    .map_err(ConvertError::Io)?;
+    let source_rel = if source.is_some() {
+        format!("<Relationship Id=\"rId2\" Type=\"{SOURCEREL}\" Target=\"source\"/>")
+    } else {
+        String::new()
+    };
     w.start_file("_rels/.rels", opts).map_err(zip_err)?;
     w.write_all(
         format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
              <Relationships xmlns=\"{RELS_NS}\">\
              <Relationship Id=\"rId1\" Type=\"{DOCREL}\" Target=\"document.xml\"/>\
+             {source_rel}\
              </Relationships>"
         )
         .as_bytes(),
@@ -48,9 +67,9 @@ pub(crate) fn pack(
         w.start_file(&part.path, opts).map_err(zip_err)?;
         w.write_all(&part.bytes).map_err(ConvertError::Io)?;
     }
-    if let Some(bytes) = source {
+    if let Some(source) = source {
         w.start_file("source", opts).map_err(zip_err)?;
-        w.write_all(bytes).map_err(ConvertError::Io)?;
+        w.write_all(source.bytes).map_err(ConvertError::Io)?;
     }
     Ok(w.finish().map_err(zip_err)?.into_inner())
 }
@@ -108,7 +127,7 @@ fn zip_err(e: zip::result::ZipError) -> ConvertError {
 
 /// `[Content_Types].xml`: a `<Default>` for every extension present plus
 /// `<Override>`s for `/document.xml` and, when present, `/source`.
-fn content_types(parts: &[Part], has_source: bool) -> String {
+fn content_types(parts: &[Part], source_content_type: Option<&'static str>) -> String {
     let mut defaults = BTreeSet::from(["rels".to_string()]);
     for part in parts {
         if let Some(ext) = part.path.rsplit('.').next().filter(|e| *e != part.path) {
@@ -124,8 +143,10 @@ fn content_types(parts: &[Part], has_source: bool) -> String {
         "<Override PartName=\"/document.xml\" \
          ContentType=\"application/vnd.doclang.document+xml\"/>",
     );
-    if has_source {
-        out.push_str("<Override PartName=\"/source\" ContentType=\"application/pdf\"/>");
+    if let Some(content_type) = source_content_type {
+        out.push_str(&format!(
+            "<Override PartName=\"/source\" ContentType=\"{content_type}\"/>"
+        ));
     }
     out.push_str("</Types>");
     out
@@ -142,6 +163,9 @@ fn mime(ext: &str) -> &'static str {
         "tif" | "tiff" => "image/tiff",
         "webp" => "image/webp",
         "svg" => "image/svg+xml",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "avif" => "image/avif",
         _ => "application/octet-stream",
     }
 }
@@ -153,7 +177,12 @@ mod tests {
     #[test]
     fn archive_has_required_parts() {
         let parts = vec![Part { path: "assets/a.png".into(), bytes: vec![1, 2, 3] }];
-        let zip_bytes = pack(b"<doclang/>", &parts, Some(b"%PDF")).unwrap();
+        let zip_bytes = pack(
+            b"<doclang/>",
+            &parts,
+            Some(SourcePart { bytes: b"%PDF", content_type: "application/pdf" }),
+        )
+        .unwrap();
         let mut zip = zip::ZipArchive::new(Cursor::new(&zip_bytes[..])).unwrap();
         let names: Vec<String> = (0..zip.len())
             .filter_map(|i| zip.name_for_index(i))
@@ -171,5 +200,9 @@ mod tests {
         assert!(ct.contains("application/vnd.doclang.document+xml"));
         assert!(ct.contains("Extension=\"png\" ContentType=\"image/png\""));
         assert!(ct.contains("PartName=\"/source\" ContentType=\"application/pdf\""));
+        let mut rels = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("_rels/.rels").unwrap(), &mut rels)
+            .unwrap();
+        assert!(rels.contains("relationships/source\" Target=\"source\""));
     }
 }

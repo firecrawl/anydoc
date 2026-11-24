@@ -262,10 +262,14 @@ fn pages_with_tables_scopes_ruled_detection() {
 }
 
 #[test]
-fn non_pdf_formats_reject_doclang_export() {
-    let bytes = b"{\\rtf1 plain}".to_vec();
-    assert!(matches!(
-        anydoc::to_doclang_bytes(&bytes, anydoc::Format::Rtf, None),
-        Err(anydoc::ConvertError::Unsupported(_))
-    ));
+fn hints_do_not_apply_to_document_model_formats() {
+    // `lists`/`tables` gate the PDF detectors only; a DOCX's structure is
+    // already resolved in the document model, so the hints change nothing.
+    let bytes = std::fs::read(fixture_root().join("docx/text.docx")).unwrap();
+    let hints = anydoc::DoclangHints { lists: false, tables: false, pages_with_tables: None };
+    let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Docx, Some(hints)).unwrap();
+    let xml = document_xml(&unzip(&dclx));
+    assert_well_formed(&xml);
+    assert!(xml.contains("<list"), "model lists ignored hints: {xml}");
+    assert!(xml.contains("<table"), "model tables ignored hints: {xml}");
 }

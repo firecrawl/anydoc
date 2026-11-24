@@ -109,9 +109,12 @@ class AnydocTest(unittest.TestCase):
             xml = archive.read("document.xml").decode()
         self.assertNotIn("<list", xml)
 
-    def test_to_doclang_rejects_non_pdf_formats(self):
-        with self.assertRaises(anydoc.UnsupportedError):
-            anydoc.to_doclang_bytes(RICH.read_bytes(), "docx")
+    def test_to_doclang_exports_document_model_formats(self):
+        dclx = anydoc.to_doclang_bytes(RICH.read_bytes(), "docx")
+        with zipfile.ZipFile(io.BytesIO(dclx)) as archive:
+            xml = archive.read("document.xml").decode()
+        self.assertIn("<doclang", xml)
+        self.assertIn("<table", xml)
 
     def test_to_document_exposes_the_document_model(self):
         document = anydoc.to_document(OUTLINE.read_bytes(), "docx")

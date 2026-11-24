@@ -131,7 +131,7 @@ let markdown = anydoc::to_markdown_bytes(&bytes, anydoc::Format::Csv)?;
 // Or stop at the document model, which also carries embedded assets:
 let document = anydoc::to_document(&bytes, None)?;
 
-// PDFs (including scanned pages) also export to DocLang `.dclx` archives:
+// Every supported format, PDFs included, also exports to DocLang `.dclx`:
 let dclx = anydoc::to_doclang_bytes(&bytes, anydoc::Format::Pdf, None)?;
 ```
 
@@ -149,7 +149,7 @@ Only documents that need OCR leave the machine, and the whole document goes, sin
 
 ## DocLang export
 
-The Rust crate can also export PDFs to [DocLang](https://github.com/doclang-project/doclang) `.dclx` archives (DocLang 0.9, OPC ZIP): `to_doclang(path, hints)` and `to_doclang_bytes(bytes, format, hints)` return the archive bytes. Text pages become positioned `<text>`/`<heading>` runs with inline formatting, links, and AcroForm fields; list markers (`•`, `1.`, `a)`, `iv.`) become `<list>`/`<ldiv>`/`<marker>` structure; tables become OTSL `<table>` grids — from `Table`/`TR`/`TD` elements when the PDF is tagged, and from drawn rules (stroked lines and thin `re` rects, including inside Form XObjects) otherwise, with missing interior rules resolving to `lcel`/`ucel`/`xcel` spans. Scanned or image-only pages export as `<picture>` elements backed by extracted raster parts under `pages/` or `assets/` for the supported encodings (JPEG, JPEG 2000, CCITT fax, and Flate/LZW/ASCII85 samples repackaged as PNG) — no OCR required; unsupported encodings still emit a positioned `<picture>` without a raster. The original PDF travels inside the archive as the `/source` part. `DoclangHints` toggles structure detection: `lists`, `tables`, and `pages_with_tables` (restrict the ruled-table detector to 1-indexed pages you know contain tables) — pass `None` for the defaults.
+The Rust crate can also export every supported format to [DocLang](https://github.com/doclang-project/doclang) `.dclx` archives (DocLang 0.9, OPC ZIP): `to_doclang(path, hints)` and `to_doclang_bytes(bytes, format, hints)` return the archive bytes. PDFs go through positioned extraction: text pages become positioned `<text>`/`<heading>` runs with inline formatting, links, and AcroForm fields; list markers (`•`, `1.`, `a)`, `iv.`) become `<list>`/`<ldiv>`/`<marker>` structure; tables become OTSL `<table>` grids — from `Table`/`TR`/`TD` elements when the PDF is tagged, and from drawn rules (stroked lines and thin `re` rects, including inside Form XObjects) otherwise, with missing interior rules resolving to `lcel`/`ucel`/`xcel` spans. Scanned or image-only pages export as `<picture>` elements backed by extracted raster parts under `pages/` or `assets/` for the supported encodings (JPEG, JPEG 2000, CCITT fax, and Flate/LZW/ASCII85 samples repackaged as PNG) — no OCR required; unsupported encodings still emit a positioned `<picture>` without a raster. Every other format exports through the document model as flow markup: headings, lists with `<marker>`s, OTSL tables, footnotes/endnotes, `<formula>` math, `<picture>` images under `assets/`, and `<href>`/`<xref>` links. The original file travels inside the archive as the `/source` part. `DoclangHints` toggles PDF structure detection: `lists`, `tables`, and `pages_with_tables` (restrict the ruled-table detector to 1-indexed pages you know contain tables) — pass `None` for the defaults; hints do not apply to document-model formats.
 
 ```bash
 cargo run --example convert -- scan.pdf --doclang -o scan.dclx

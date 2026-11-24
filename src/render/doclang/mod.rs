@@ -10,6 +10,7 @@
 mod images;
 mod layout;
 mod markup;
+pub(crate) mod model;
 mod package;
 mod streams;
 mod tables;
@@ -149,7 +150,11 @@ pub(crate) fn to_doclang(
         page_sizes,
     };
     let document_xml = markup::emit_document(&meta, &bodies);
-    package::pack(document_xml.as_bytes(), &rasters.parts, Some(bytes))
+    package::pack(
+        document_xml.as_bytes(),
+        &rasters.parts,
+        Some(package::SourcePart { bytes, content_type: "application/pdf" }),
+    )
 }
 
 /// Raster allocation for the archive: deduplicates XObjects into parts and

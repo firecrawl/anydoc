@@ -60,15 +60,16 @@ markdown = anydoc.to_markdown("scan.pdf", ocr="hosted", parse_mode="ocr")
 
 ## DocLang export
 
-`to_doclang` and `to_doclang_bytes` export a PDF to DocLang, returned as the `.dclx` OPC ZIP archive: `document.xml` plus the extracted raster parts and the original PDF as the `source` part. Scanned pages export as `<picture>` elements with extracted rasters, so no OCR is needed. Non-PDF formats raise `UnsupportedError`.
+`to_doclang` and `to_doclang_bytes` export any supported format to DocLang, returned as the `.dclx` OPC ZIP archive: `document.xml`, the raster parts for images, and the original file as the `source` part. PDFs export through positioned extraction — scanned pages become `<picture>` elements with extracted rasters, so no OCR is needed. Office formats export through the document model: headings, lists, tables, footnotes, math as `<formula>`, images, and links. The format is detected from the file content; pass the format name explicitly for signature-less content.
 
 ```python
 # From a file path, or from bytes with the format detected:
 dclx = anydoc.to_doclang("report.pdf")
 dclx = anydoc.to_doclang_bytes(pdf_bytes)
+dclx = anydoc.to_doclang_bytes(docx_bytes, "docx")
 ```
 
-`lists` and `tables` steer structure detection (both on by default); `pages_with_tables` restricts the ruled-table detector to those 1-indexed pages.
+`lists` and `tables` steer PDF structure detection (both on by default); `pages_with_tables` restricts the ruled-table detector to those 1-indexed pages. The hints apply to PDFs only.
 
 ```python
 dclx = anydoc.to_doclang("report.pdf", lists=False, pages_with_tables=[1, 3])

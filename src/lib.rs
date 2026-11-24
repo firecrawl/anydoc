@@ -155,10 +155,12 @@ impl Default for DoclangHints {
 /// Convert a document file to a DocLang archive (`.dclx`, OPC ZIP per
 /// DocLang 0.9 Annex B). The format is detected from the file content.
 ///
-/// Currently supported for [`Format::Pdf`], including scanned or image-only
-/// pages, which export as `<picture>` elements with extracted raster parts
-/// instead of requiring OCR. `hints` steer structure detection; `None` uses
-/// the defaults.
+/// Every supported format exports: PDFs through positioned extraction
+/// (scanned or image-only pages become `<picture>` elements with extracted
+/// raster parts instead of requiring OCR), and all other formats through
+/// the document model. `hints` steer PDF structure detection; they do not
+/// apply to document-model formats, whose structure is already resolved.
+/// `None` uses the defaults.
 pub fn to_doclang(
     path: impl AsRef<Path>,
     hints: impl Into<Option<DoclangHints>>,
@@ -176,10 +178,8 @@ pub fn to_doclang(
 
 /// Convert an in-memory document to a DocLang archive. Pass a [`Format`] to
 /// select the exporter, or `None` to detect it from the content; `hints`
-/// steer structure detection (see [`DoclangHints`]).
-///
-/// Currently only [`Format::Pdf`] has a DocLang exporter; other formats
-/// return [`ConvertError::Unsupported`].
+/// steer PDF structure detection (see [`DoclangHints`]) and do not apply
+/// to document-model formats.
 pub fn to_doclang_bytes(
     bytes: &[u8],
     format: impl Into<Option<Format>>,
@@ -187,9 +187,34 @@ pub fn to_doclang_bytes(
 ) -> Result<Vec<u8>, ConvertError> {
     match resolve_format(bytes, format.into())? {
         Format::Pdf => render::doclang::to_doclang(bytes, hints.into().unwrap_or_default()),
-        other => Err(ConvertError::Unsupported(format!(
-            "DocLang export is not supported for {other:?}; use to_markdown or to_markdown_bytes"
-        ))),
+        other => {
+            let doc = to_document(bytes, other)?;
+            render::doclang::model::to_doclang(&doc, bytes, source_content_type(other))
+        }
+    }
+}
+
+/// MIME type declared for the `/source` part of a DocLang archive.
+fn source_content_type(format: Format) -> &'static str {
+    match format {
+        Format::Doc => "application/msword",
+        Format::Docx => {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        }
+        Format::Odt => "application/vnd.oasis.opendocument.text",
+        Format::Pdf => "application/pdf",
+        Format::Ppt => "application/vnd.ms-powerpoint",
+        Format::Pptx => {
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        }
+        Format::Rtf => "application/rtf",
+        Format::Epub => "application/epub+zip",
+        Format::Excel => {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        }
+        Format::Ods => "application/vnd.oasis.opendocument.spreadsheet",
+        Format::Odp => "application/vnd.oasis.opendocument.presentation",
+        Format::Csv => "text/csv",
     }
 }
 
