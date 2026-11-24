@@ -42,7 +42,8 @@ pub(crate) fn to_doclang(
         out_footnote(&mut body, note, thread, &mut ctx);
     }
 
-    let meta = DocMeta { title: None, sha256: hex(&Sha256::digest(source)), page_sizes: Vec::new() };
+    let meta =
+        DocMeta { title: None, sha256: hex(&Sha256::digest(source)), page_sizes: Vec::new() };
     let document_xml = markup::emit_document(&meta, &[body]);
     package::pack(
         document_xml.as_bytes(),
@@ -284,10 +285,7 @@ fn inlines_render(inlines: &[Inline]) -> bool {
     inlines.iter().any(|i| match i {
         Inline::Text { text, .. } => !text.trim().is_empty(),
         Inline::Link { content, target } => !target.is_empty() || inlines_render(content),
-        Inline::Image { .. }
-        | Inline::NoteRef(_)
-        | Inline::Checkbox(_)
-        | Inline::Anchor(_) => true,
+        Inline::Image { .. } | Inline::NoteRef(_) | Inline::Checkbox(_) | Inline::Anchor(_) => true,
         Inline::Math(tex) => !tex.trim().is_empty(),
         Inline::LineBreak => false,
     })

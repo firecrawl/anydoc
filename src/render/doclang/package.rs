@@ -40,10 +40,8 @@ pub(crate) fn pack(
     let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
 
     w.start_file("[Content_Types].xml", opts).map_err(zip_err)?;
-    w.write_all(
-        content_types(parts, source.as_ref().map(|s| s.content_type)).as_bytes(),
-    )
-    .map_err(ConvertError::Io)?;
+    w.write_all(content_types(parts, source.as_ref().map(|s| s.content_type)).as_bytes())
+        .map_err(ConvertError::Io)?;
     let source_rel = if source.is_some() {
         format!("<Relationship Id=\"rId2\" Type=\"{SOURCEREL}\" Target=\"source\"/>")
     } else {
@@ -144,9 +142,7 @@ fn content_types(parts: &[Part], source_content_type: Option<&'static str>) -> S
          ContentType=\"application/vnd.doclang.document+xml\"/>",
     );
     if let Some(content_type) = source_content_type {
-        out.push_str(&format!(
-            "<Override PartName=\"/source\" ContentType=\"{content_type}\"/>"
-        ));
+        out.push_str(&format!("<Override PartName=\"/source\" ContentType=\"{content_type}\"/>"));
     }
     out.push_str("</Types>");
     out
@@ -201,8 +197,7 @@ mod tests {
         assert!(ct.contains("Extension=\"png\" ContentType=\"image/png\""));
         assert!(ct.contains("PartName=\"/source\" ContentType=\"application/pdf\""));
         let mut rels = String::new();
-        std::io::Read::read_to_string(&mut zip.by_name("_rels/.rels").unwrap(), &mut rels)
-            .unwrap();
+        std::io::Read::read_to_string(&mut zip.by_name("_rels/.rels").unwrap(), &mut rels).unwrap();
         assert!(rels.contains("relationships/source\" Target=\"source\""));
     }
 }

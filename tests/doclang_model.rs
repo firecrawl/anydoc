@@ -94,8 +94,7 @@ fn docx_assets_deduplicate_into_parts() {
     let xml = document_xml(&parts);
     assert_well_formed(&xml);
     // Seventy references to one image → one assets/ part.
-    let asset_parts: Vec<_> =
-        parts.keys().filter(|k| k.starts_with("assets/")).collect();
+    let asset_parts: Vec<_> = parts.keys().filter(|k| k.starts_with("assets/")).collect();
     assert_eq!(asset_parts.len(), 1, "{asset_parts:?}");
     assert!(xml.matches("<picture>").count() >= 70);
 }
@@ -168,8 +167,10 @@ fn all_model_formats_export_valid_archives() {
         assert_opc(&parts);
         let xml = document_xml(&parts);
         assert_well_formed(&xml);
-        assert!(xml.contains("<text>") || xml.contains("<heading") || xml.contains("<table"),
-            "{path} produced an empty body: {xml}");
+        assert!(
+            xml.contains("<text>") || xml.contains("<heading") || xml.contains("<table"),
+            "{path} produced an empty body: {xml}"
+        );
         assert_srcs_resolve(&parts, &xml);
     }
 }

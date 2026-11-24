@@ -198,20 +198,14 @@ pub fn to_doclang_bytes(
 fn source_content_type(format: Format) -> &'static str {
     match format {
         Format::Doc => "application/msword",
-        Format::Docx => {
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        }
+        Format::Docx => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         Format::Odt => "application/vnd.oasis.opendocument.text",
         Format::Pdf => "application/pdf",
         Format::Ppt => "application/vnd.ms-powerpoint",
-        Format::Pptx => {
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        }
+        Format::Pptx => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         Format::Rtf => "application/rtf",
         Format::Epub => "application/epub+zip",
-        Format::Excel => {
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        }
+        Format::Excel => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         Format::Ods => "application/vnd.oasis.opendocument.spreadsheet",
         Format::Odp => "application/vnd.oasis.opendocument.presentation",
         Format::Csv => "text/csv",
