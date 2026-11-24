@@ -26,7 +26,10 @@ csv = "1.4.0"
 flate2 = "1"
 encoding_rs = "0.8.35"
 log = "0.4"
+lopdf = "0.45"
 pdf-inspector = "1.16.0"
+sha2 = "0.11"
+weezl = "0.2"
 quick-xml = "0.41.0"
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
 
