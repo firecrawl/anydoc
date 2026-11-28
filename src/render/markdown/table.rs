@@ -19,6 +19,9 @@ pub(crate) fn render_table(table: &Table, rc: &Ctx) -> Option<String> {
         return None;
     }
     let width = table.grid.iter().map(|r| r.len()).max().unwrap_or(0);
+    if width == 0 {
+        return None;
+    }
     let mut rendered: Vec<Vec<RenderedCell>> = table
         .grid
         .iter()
@@ -43,16 +46,10 @@ pub(crate) fn render_table(table: &Table, rc: &Ctx) -> Option<String> {
     {
         rendered.pop();
     }
-    let width = rendered
-        .iter()
-        .map(|r| r.iter().rposition(|c| !c.text.is_empty() || c.covered_span).map_or(0, |i| i + 1))
-        .max()
-        .unwrap_or(0);
-    if width == 0 {
+    // Keep trailing empty columns that the grid already declared (issue #224).
+    // Trailing empty rows were popped above. Do not shrink width here.
+    if rendered.iter().all(|r| r.iter().all(|c| c.text.is_empty() && !c.covered_span)) {
         return None;
-    }
-    for row in &mut rendered {
-        row.truncate(width);
     }
 
     let mut out = String::new();
