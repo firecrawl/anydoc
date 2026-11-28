@@ -344,6 +344,12 @@ fn trailing_empty_rows_trimmed_empty_columns_kept() {
 }
 
 #[test]
+fn entirely_empty_table_omitted() {
+    let md = doc(vec![table_from(vec![vec![Cell::default(), Cell::default()]], 1)]);
+    assert!(md.trim().is_empty(), "empty table produced markdown: {md:?}");
+}
+
+#[test]
 fn trailing_empty_column_preserved() {
     let empty = Cell::default;
     let filled = |s: &str| Cell::from_inlines(vec![Inline::plain(s)]);
